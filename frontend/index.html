@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>UTBK Content Desk</title>
+    <link rel="stylesheet" href="/assets/styles.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">UTBK Content Desk</p>
+        <h1>Manual Generator</h1>
+      </div>
+      <div class="status-pill" id="sourceStatus">Siap</div>
+    </header>
+
+    <main class="workspace">
+      <aside class="control-panel">
+        <form id="generateForm">
+          <label>
+            Mata pelajaran
+            <select name="mapel" id="mapel"></select>
+          </label>
+
+          <label>
+            Topik
+            <select name="topik" id="topik"></select>
+          </label>
+
+          <label>
+            Level
+            <select name="level">
+              <option value="mudah">Mudah</option>
+              <option value="sedang" selected>Sedang</option>
+              <option value="sulit">Sulit</option>
+            </select>
+          </label>
+
+          <label>
+            Mode
+            <select name="mode">
+              <option value="auto" selected>Auto</option>
+              <option value="draft">Draft lokal</option>
+            </select>
+          </label>
+
+          <label>
+            Akun
+            <input name="account" value="@namaakun" autocomplete="off">
+          </label>
+
+          <button class="primary" type="submit" id="generateButton">Generate</button>
+        </form>
+      </aside>
+
+      <section class="review">
+        <div class="review-header">
+          <div>
+            <p class="eyebrow">Preview</p>
+            <h2 id="previewTitle">Belum ada output</h2>
+          </div>
+          <a id="metadataLink" class="ghost-link" href="#" hidden>Metadata</a>
+        </div>
+
+        <div class="preview-grid">
+          <figure class="post-frame">
+            <img id="questionImage" alt="Preview gambar soal">
+            <figcaption>Soal</figcaption>
+          </figure>
+          <figure class="post-frame">
+            <img id="solutionImage" alt="Preview gambar pembahasan">
+            <figcaption>Pembahasan</figcaption>
+          </figure>
+        </div>
+
+        <div class="detail-grid">
+          <section class="detail-block">
+            <div class="block-title">
+              <h3>Soal</h3>
+              <span id="validationScore">Skor belum tersedia</span>
+            </div>
+            <p id="questionText" class="body-copy">Generate konten untuk melihat soal.</p>
+            <ol id="choicesList" class="choices"></ol>
+          </section>
+
+          <section class="detail-block">
+            <div class="block-title">
+              <h3>Caption</h3>
+              <span id="sourceLabel">Manual</span>
+            </div>
+            <p id="captionText" class="body-copy">Caption akan muncul di sini.</p>
+            <p id="hashtagText" class="hashtags"></p>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <script src="/assets/app.js"></script>
+  </body>
+</html>

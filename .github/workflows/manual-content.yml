@@ -1,0 +1,60 @@
+name: Manual UTBK Content
+
+on:
+  workflow_dispatch:
+    inputs:
+      mapel:
+        description: Mata pelajaran
+        required: true
+        default: Matematika
+        type: choice
+        options:
+          - Matematika
+          - Fisika
+          - Kimia
+          - Biologi
+          - TPS
+          - Bahasa Indonesia
+      topik:
+        description: Topik
+        required: true
+        default: Statistika
+      level:
+        description: Level
+        required: true
+        default: sedang
+        type: choice
+        options:
+          - mudah
+          - sedang
+          - sulit
+      mode:
+        description: Mode generator
+        required: true
+        default: auto
+        type: choice
+        options:
+          - auto
+          - draft
+
+jobs:
+  generate:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate content
+        shell: powershell
+        run: |
+          python content_generator.py `
+            --mapel "${{ inputs.mapel }}" `
+            --topik "${{ inputs.topik }}" `
+            --level "${{ inputs.level }}" `
+            --mode "${{ inputs.mode }}"
+
+      - name: Upload output
+        uses: actions/upload-artifact@v4
+        with:
+          name: utbk-content-output
+          path: outputs/
+          retention-days: 7
