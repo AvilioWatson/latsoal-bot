@@ -18,8 +18,7 @@ const runNote = document.querySelector("#runNote");
 const debugPanel = document.querySelector("#debugPanel");
 const debugSource = document.querySelector("#debugSource");
 const debugText = document.querySelector("#debugText");
-const refreshSavedButton = document.querySelector("#refreshSavedButton");
-const savedList = document.querySelector("#savedList");
+const copyCaptionButton = document.querySelector("#copyCaptionButton");
 
 let topicsByMapel = {};
 let currentRunId = "";
@@ -43,6 +42,9 @@ function sourceText(data) {
 }
 
 function reviewNote(data) {
+  if (data.dedup && data.dedup.is_duplicate) {
+    return `Kemungkinan duplikat: similarity ${data.dedup.similarity} dengan ${data.dedup.matched_run_id}. Review sebelum dipakai.`;
+  }
   if (data.review_status === "ready") {
     return "Konten dari Gemini berhasil dibuat. Tetap lakukan review manual sebelum upload.";
   }
@@ -58,7 +60,8 @@ function reviewNote(data) {
 function renderDebug(data) {
   const errors = data.errors || {};
   const fallbacks = data.fallbacks || [];
-  const hasDebug = Object.keys(errors).length > 0 || fallbacks.length > 0 || data.source === "fallback";
+  const hasDuplicate = data.dedup && data.dedup.is_duplicate;
+  const hasDebug = Object.keys(errors).length > 0 || fallbacks.length > 0 || data.source === "fallback" || hasDuplicate;
   debugPanel.hidden = !hasDebug;
   if (!hasDebug) {
     debugText.textContent = "";
@@ -72,6 +75,8 @@ function renderDebug(data) {
     review_status: data.review_status,
     fallbacks,
     errors,
+    dedup: data.dedup,
+    ai_usage: data.ai_usage,
     model: data.model,
   }, null, 2);
 }
@@ -123,83 +128,13 @@ function renderResult(data) {
 
   captionText.textContent = caption.caption || "";
   hashtagText.textContent = (caption.hashtag || []).join(" ");
+  copyCaptionButton.disabled = false;
   questionImage.src = `${data.web_files.post_soal}?v=${Date.now()}`;
   solutionImage.src = `${data.web_files.post_pembahasan}?v=${Date.now()}`;
   metadataLink.href = data.web_files.metadata;
   metadataLink.hidden = false;
   saveButton.disabled = false;
   saveButton.textContent = "Simpan";
-}
-
-function statusLabel(status) {
-  if (status === "approved") return "Approved";
-  if (status === "rejected") return "Rejected";
-  return "Saved";
-}
-
-function renderSavedList(items) {
-  savedList.innerHTML = "";
-  if (!items || items.length === 0) {
-    const empty = document.createElement("p");
-    empty.className = "empty-copy";
-    empty.textContent = "Belum ada soal disimpan.";
-    savedList.append(empty);
-    return;
-  }
-
-  for (const item of items) {
-    const row = document.createElement("article");
-    row.className = "saved-item";
-    row.dataset.status = item.status || "saved";
-    row.innerHTML = `
-      <div>
-        <strong></strong>
-        <p></p>
-      </div>
-      <span></span>
-      <div class="saved-actions">
-        <a target="_blank" rel="noreferrer">Buka</a>
-        <button type="button" data-action="approved">Approve</button>
-        <button type="button" data-action="rejected">Reject</button>
-      </div>
-    `;
-    row.querySelector("strong").textContent = item.mapel ? `${item.mapel}: ${item.topik}` : item.run_id;
-    row.querySelector("p").textContent = `${item.run_id} / ${item.source || "-"} / ${item.level || "-"}`;
-    row.querySelector("span").textContent = statusLabel(item.status);
-    row.querySelector("a").href = item.web_files.metadata;
-    row.querySelectorAll("button").forEach((button) => {
-      button.addEventListener("click", () => updateSavedStatus(item.run_id, button.dataset.action));
-    });
-    savedList.append(row);
-  }
-}
-
-async function loadSavedList() {
-  const response = await fetch("/api/saved");
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(data.error || "Gagal memuat saved.");
-  }
-  renderSavedList(data.items || []);
-}
-
-async function updateSavedStatus(runId, status) {
-  setStatus("Updating");
-  const response = await fetch("/api/saved/status", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({run_id: runId, status}),
-  });
-  const data = await response.json();
-  if (!response.ok) {
-    setStatus("Error");
-    debugPanel.hidden = false;
-    debugSource.textContent = "saved/status";
-    debugText.textContent = data.error || "Update status gagal.";
-    return;
-  }
-  setStatus(status === "approved" ? "Approved" : "Rejected");
-  await loadSavedList();
 }
 
 mapelSelect.addEventListener("change", fillTopics);
@@ -250,7 +185,6 @@ saveButton.addEventListener("click", async () => {
     saveButton.textContent = "Tersimpan";
     setStatus("Saved");
     metadataLink.href = data.web_files.metadata;
-    await loadSavedList();
   } catch (error) {
     saveButton.disabled = false;
     saveButton.textContent = "Simpan";
@@ -262,13 +196,17 @@ saveButton.addEventListener("click", async () => {
   }
 });
 
-refreshSavedButton.addEventListener("click", () => {
-  loadSavedList().catch((error) => {
+copyCaptionButton.addEventListener("click", async () => {
+  const text = `${captionText.textContent}\n\n${hashtagText.textContent}`.trim();
+  try {
+    await navigator.clipboard.writeText(text);
+    setStatus("Copied");
+  } catch {
     setStatus("Error");
     debugPanel.hidden = false;
-    debugSource.textContent = "saved";
-    debugText.textContent = error.stack || error.message;
-  });
+    debugSource.textContent = "clipboard";
+    debugText.textContent = "Browser tidak mengizinkan clipboard. Salin caption secara manual.";
+  }
 });
 
 loadConfig().catch((error) => {
@@ -278,5 +216,3 @@ loadConfig().catch((error) => {
   debugSource.textContent = "config";
   debugText.textContent = error.stack || error.message;
 });
-
-loadSavedList().catch(() => {});

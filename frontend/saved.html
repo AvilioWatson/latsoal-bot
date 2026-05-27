@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Bank Review / UTBK Content Desk</title>
+    <link rel="stylesheet" href="/assets/styles.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">UTBK Content Desk</p>
+        <h1>Bank Review</h1>
+      </div>
+      <div class="top-actions">
+        <a class="nav-link" href="/">Generator</a>
+        <div class="status-pill" id="sourceStatus">Siap</div>
+      </div>
+    </header>
+
+    <main class="saved-page">
+      <section class="saved-browser">
+        <div class="saved-toolbar">
+          <input id="savedSearch" type="search" placeholder="Cari subtes, topik, run id">
+          <select id="savedStatusFilter">
+            <option value="all">Semua status</option>
+            <option value="saved">Saved</option>
+            <option value="approved">Approved</option>
+            <option value="rejected">Rejected</option>
+          </select>
+          <button id="refreshSavedButton" class="secondary" type="button">Refresh</button>
+          <button id="exportApprovedButton" class="primary" type="button">Export approved</button>
+        </div>
+
+        <div class="saved-layout">
+          <section>
+            <div id="savedList" class="saved-list saved-list-large">
+              <p class="empty-copy">Belum ada soal disimpan.</p>
+            </div>
+          </section>
+
+          <section class="saved-preview">
+            <div class="review-header">
+              <div>
+                <p class="eyebrow">Preview</p>
+                <h2 id="previewTitle">Pilih item saved</h2>
+                <p id="runNote" class="run-note">Preview saved akan muncul di sini.</p>
+              </div>
+              <div class="review-actions">
+                <button id="copyCaptionButton" class="secondary" type="button" disabled>Copy caption</button>
+                <a id="metadataLink" class="ghost-link" href="#" hidden>Metadata</a>
+              </div>
+            </div>
+
+            <div class="preview-grid">
+              <figure class="post-frame">
+                <img id="questionImage" alt="Preview gambar soal">
+                <figcaption>Soal</figcaption>
+              </figure>
+              <figure class="post-frame">
+                <img id="solutionImage" alt="Preview gambar pembahasan">
+                <figcaption>Pembahasan</figcaption>
+              </figure>
+            </div>
+
+            <div class="detail-grid">
+              <section class="detail-block">
+                <div class="block-title">
+                  <h3>Soal</h3>
+                  <span id="validationScore">Skor belum tersedia</span>
+                </div>
+                <p id="questionText" class="body-copy">Pilih item saved untuk melihat soal.</p>
+                <ol id="choicesList" class="choices"></ol>
+              </section>
+
+              <section class="detail-block">
+                <div class="block-title">
+                  <h3>Caption</h3>
+                  <span id="sourceLabel">-</span>
+                </div>
+                <p id="captionText" class="body-copy">Caption akan muncul di sini.</p>
+                <p id="hashtagText" class="hashtags"></p>
+              </section>
+            </div>
+
+            <section class="debug-panel" id="debugPanel" hidden>
+              <div class="block-title">
+                <h3>Error / Fallback</h3>
+                <span id="debugSource">Tidak ada</span>
+              </div>
+              <pre id="debugText"></pre>
+            </section>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <script src="/assets/saved.js"></script>
+  </body>
+</html>

@@ -3,6 +3,7 @@ import datetime as dt
 import html
 import json
 import os
+import random
 import re
 import sys
 import textwrap
@@ -14,6 +15,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 OUTPUT_DIR = ROOT / "outputs"
 BANK_DIR = ROOT / "bank_soal" / "patterns"
+SAVED_DIR = ROOT / "saved"
+DEDUP_THRESHOLD = float(os.getenv("DEDUP_THRESHOLD", "0.82"))
 
 
 def load_env_file():
@@ -202,6 +205,82 @@ def clean_error_message(exc):
     if "Gagal parse JSON Gemini" in text:
         return "Gemini mengembalikan JSON yang tidak valid."
     return text[:240]
+
+
+STOPWORDS = {
+    "yang", "dan", "di", "ke", "dari", "dengan", "untuk", "pada", "adalah",
+    "atau", "dalam", "ini", "itu", "sebagai", "maka", "jika", "akan",
+    "antara", "berikut", "teks", "kalimat", "soal", "pilihan", "jawaban",
+}
+
+
+def normalize_terms(text):
+    words = re.findall(r"[a-zA-Z0-9]+", str(text).lower())
+    return {word for word in words if len(word) > 2 and word not in STOPWORDS}
+
+
+def jaccard_similarity(left, right):
+    left_terms = normalize_terms(left)
+    right_terms = normalize_terms(right)
+    if not left_terms or not right_terms:
+        return 0.0
+    return len(left_terms & right_terms) / len(left_terms | right_terms)
+
+
+def check_duplicate(question):
+    current_text = " ".join([
+        question.get("mapel", ""),
+        question.get("topik", ""),
+        question.get("soal", ""),
+        " ".join(str(value) for value in question.get("pilihan", {}).values()),
+    ])
+    best = {
+        "is_duplicate": False,
+        "similarity": 0.0,
+        "matched_run_id": None,
+        "matched_status": None,
+        "threshold": DEDUP_THRESHOLD,
+        "reason": "",
+    }
+
+    index_path = SAVED_DIR / "index.json"
+    if not index_path.exists():
+        return best
+    try:
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return best
+
+    for item in index if isinstance(index, list) else []:
+        run_id = item.get("run_id")
+        if not run_id:
+            continue
+        metadata_path = SAVED_DIR / run_id / "metadata.json"
+        if not metadata_path.exists():
+            continue
+        try:
+            saved = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            continue
+        saved_question = saved.get("question", {})
+        saved_text = " ".join([
+            saved_question.get("mapel", ""),
+            saved_question.get("topik", ""),
+            saved_question.get("soal", ""),
+            " ".join(str(value) for value in saved_question.get("pilihan", {}).values()),
+        ])
+        similarity = jaccard_similarity(current_text, saved_text)
+        if similarity > best["similarity"]:
+            best.update({
+                "similarity": round(similarity, 4),
+                "matched_run_id": run_id,
+                "matched_status": item.get("status", "saved"),
+            })
+
+    if best["similarity"] >= DEDUP_THRESHOLD:
+        best["is_duplicate"] = True
+        best["reason"] = "Teks soal terlalu mirip dengan soal yang sudah disimpan."
+    return best
 
 
 def _gemini_json(prompt, label, retries=MAX_GEMINI_RETRIES, schema=None):
@@ -533,7 +612,159 @@ def draft_question(mapel, topic, level):
     }
 
 
-def local_validation(question):
+def make_choices(correct_value, deltas, formatter=str):
+    values = []
+    for delta in deltas:
+        value = correct_value + delta
+        if value > 0 and value not in values:
+            values.append(value)
+    if correct_value not in values:
+        values.append(correct_value)
+    values = values[:5]
+    while len(values) < 5:
+        candidate = correct_value + len(values) + 1
+        if candidate not in values:
+            values.append(candidate)
+    values = sorted(values)
+    labels = ["A", "B", "C", "D", "E"]
+    choices = {label: formatter(value) for label, value in zip(labels, values)}
+    answer = labels[values.index(correct_value)]
+    return choices, answer
+
+
+def deterministic_quant_question(mapel, topic, level, seed):
+    rng = random.Random(seed)
+    kelompok_tes = "TPS" if mapel == "Pengetahuan Kuantitatif" else "Literasi"
+
+    if topic in {"Statistika", "Data dan ketidakpastian"}:
+        n = rng.choice([5, 6, 7])
+        known_count = n - 1
+        known_values = [rng.randrange(62, 91, 2) for _ in range(known_count)]
+        missing = rng.randrange(64, 93, 2)
+        total = sum(known_values) + missing
+        while total % n != 0:
+            missing += 1
+            total = sum(known_values) + missing
+        mean = total // n
+        choices, answer = make_choices(missing, [-6, -3, 0, 3, 6])
+        return {
+            "mapel": mapel,
+            "kelompok_tes": kelompok_tes,
+            "topik": topic,
+            "level": level,
+            "tipe": "mean_missing_value",
+            "params": {"n": n, "mean": mean, "known_values": known_values, "missing_value": missing},
+            "soal": (
+                f"Rata-rata nilai {n} siswa adalah {mean}. "
+                f"{known_count} nilai yang diketahui adalah {', '.join(map(str, known_values[:-1]))}, dan {known_values[-1]}. "
+                "Nilai siswa yang belum diketahui adalah..."
+            ),
+            "pilihan": choices,
+            "jawaban": answer,
+            "pembahasan": (
+                f"Jumlah seluruh nilai adalah {n} x {mean} = {total}. "
+                f"Jumlah nilai yang diketahui adalah {' + '.join(map(str, known_values))} = {sum(known_values)}. "
+                f"Nilai yang belum diketahui adalah {total} - {sum(known_values)} = {missing}."
+            ),
+            "konsep_kunci": "Rata-rata dan jumlah data",
+            "tips_pengerjaan": "Ubah rata-rata menjadi jumlah total terlebih dahulu, lalu kurangi dengan jumlah data yang diketahui.",
+            "butuh_visual": False,
+            "deskripsi_visual": "",
+        }
+
+    if topic in {"Perbandingan", "Bilangan"}:
+        a = rng.randint(2, 5)
+        b = rng.randint(3, 7)
+        multiplier = rng.randint(8, 18)
+        total = (a + b) * multiplier
+        target = b * multiplier
+        choices, answer = make_choices(target, [-2 * multiplier, -multiplier, 0, multiplier, 2 * multiplier])
+        return {
+            "mapel": mapel,
+            "kelompok_tes": kelompok_tes,
+            "topik": topic,
+            "level": level,
+            "tipe": "ratio_total",
+            "params": {"ratio": [a, b], "total": total, "target_value": target},
+            "soal": (
+                f"Perbandingan jumlah buku latihan milik Rani dan Dimas adalah {a}:{b}. "
+                f"Jika jumlah buku mereka seluruhnya {total}, banyak buku milik Dimas adalah..."
+            ),
+            "pilihan": choices,
+            "jawaban": answer,
+            "pembahasan": (
+                f"Total bagian adalah {a} + {b} = {a + b}. "
+                f"Setiap bagian bernilai {total} / {a + b} = {multiplier}. "
+                f"Bagian Dimas adalah {b}, sehingga banyak bukunya {b} x {multiplier} = {target}."
+            ),
+            "konsep_kunci": "Rasio dan total bagian",
+            "tips_pengerjaan": "Jumlahkan bagian rasio, cari nilai satu bagian, lalu kalikan dengan bagian yang ditanya.",
+            "butuh_visual": False,
+            "deskripsi_visual": "",
+        }
+
+    start = rng.randrange(12, 31, 2)
+    step = rng.choice([3, 4, 5, 6, 8])
+    values = [start + step * i for i in range(3)]
+    next_value = values[-1] + step
+    choices, answer = make_choices(next_value, [-2 * step, -step, 0, step, 2 * step])
+    return {
+        "mapel": mapel,
+        "kelompok_tes": kelompok_tes,
+        "topik": topic,
+        "level": level,
+        "tipe": "arithmetic_sequence_context",
+        "params": {"values": values, "step": step, "next_value": next_value},
+        "soal": (
+            f"Sebuah komunitas mencatat jumlah peserta latihan selama tiga hari: "
+            f"hari pertama {values[0]}, hari kedua {values[1]}, dan hari ketiga {values[2]}. "
+            "Jika pola kenaikannya tetap, jumlah peserta pada hari keempat adalah..."
+        ),
+        "pilihan": choices,
+        "jawaban": answer,
+        "pembahasan": (
+            f"Kenaikan dari hari pertama ke kedua adalah {values[1]} - {values[0]} = {step}. "
+            f"Kenaikan dari hari kedua ke ketiga juga {values[2]} - {values[1]} = {step}. "
+            f"Jadi, hari keempat adalah {values[2]} + {step} = {next_value}."
+        ),
+        "konsep_kunci": "Pola bilangan aritmetika",
+        "tips_pengerjaan": "Cari selisih antar data berurutan, lalu gunakan pola yang sama untuk data berikutnya.",
+        "butuh_visual": False,
+        "deskripsi_visual": "",
+    }
+
+
+def validate_caption(caption, answer):
+    caption_text = caption.get("caption", "")
+    hashtags = caption.get("hashtag", [])
+    required_hashtags = {"#UTBK2026", "#LatsoalUTBK", "#BelajarUTBK", "#SoalUTBK"}
+    hashtag_set = set(hashtags)
+    issues = []
+    score_penalty = 0
+
+    if any(year in caption_text or year in " ".join(hashtags) for year in ["UTBK2024", "UTBK2025", "SNBT2024", "SNBT2025"]):
+        issues.append("Caption/hashtag memakai tahun lama.")
+        score_penalty += 20
+    if not required_hashtags.issubset(hashtag_set):
+        issues.append("Hashtag wajib belum lengkap.")
+        score_penalty += 15
+    if answer and re.search(rf"\b(?:jawaban|kunci)\s*(?:adalah|:)?\s*{re.escape(answer)}\b", caption_text, re.I):
+        issues.append("Caption kemungkinan membocorkan jawaban.")
+        score_penalty += 30
+    if len(caption_text.split()) > 180:
+        issues.append("Caption terlalu panjang.")
+        score_penalty += 10
+    if len(caption_text.split()) < 35:
+        issues.append("Caption terlalu pendek.")
+        score_penalty += 10
+    return {
+        "lolos": score_penalty == 0,
+        "issues": issues,
+        "score_penalty": score_penalty,
+    }
+
+
+def local_validation(question, caption=None):
     choices = question.get("pilihan", {})
     answer = question.get("jawaban", "")
     required = ["mapel", "topik", "level", "soal", "pilihan", "jawaban", "pembahasan"]
@@ -549,13 +780,41 @@ def local_validation(question):
         score -= 25
     if len(question.get("pembahasan", "")) < 80:
         score -= 10
+    if len(set(str(value).strip().lower() for value in choices.values())) != len(choices):
+        score -= 15
+    if "pilihan sementara" in json.dumps(choices, ensure_ascii=False).lower():
+        score -= 30
+    if len(question.get("soal", "").split()) < 12:
+        score -= 10
+    if len(question.get("soal", "")) > 850:
+        score -= 10
+    caption_result = validate_caption(caption or {"caption": "", "hashtag": []}, answer)
+    score -= caption_result["score_penalty"]
+    issues = []
+    if missing:
+        issues.append(f"Field kosong: {', '.join(missing)}")
+    if not valid_choices:
+        issues.append("Pilihan harus tepat A sampai E.")
+    if not answer_ok:
+        issues.append("Jawaban tidak cocok dengan pilihan.")
+    if len(question.get("pembahasan", "")) < 80:
+        issues.append("Pembahasan terlalu pendek.")
+    if len(set(str(value).strip().lower() for value in choices.values())) != len(choices):
+        issues.append("Ada opsi duplikat.")
+    if "pilihan sementara" in json.dumps(choices, ensure_ascii=False).lower():
+        issues.append("Masih ada placeholder.")
+    issues.extend(caption_result["issues"])
     return {
         "lolos_validasi": score >= 80,
         "skor": max(score, 0),
+        "issues": issues,
         "catatan": {
             "struktur": "Lengkap" if not missing else f"Field kosong: {', '.join(missing)}",
             "pilihan": "A sampai E tersedia" if valid_choices else "Pilihan harus tepat A sampai E",
             "jawaban": "Jawaban ada di pilihan" if answer_ok else "Jawaban tidak cocok dengan pilihan",
+            "duplikasi_opsi": "Tidak ada opsi duplikat" if len(set(str(value).strip().lower() for value in choices.values())) == len(choices) else "Ada opsi duplikat",
+            "placeholder": "Tidak ada placeholder" if "pilihan sementara" not in json.dumps(choices, ensure_ascii=False).lower() else "Masih ada placeholder",
+            "caption": "Caption bersih" if caption_result["lolos"] else "; ".join(caption_result["issues"]),
         },
         "saran_perbaikan": "" if score >= 80 else "Perbaiki struktur soal sebelum diposting.",
     }
@@ -659,6 +918,87 @@ def render_svg(question, output_path, variant):
     output_path.write_text("\n".join(blocks), encoding="utf-8")
 
 
+def load_font(size, bold=False):
+    candidates = [
+        "C:/Windows/Fonts/arialbd.ttf" if bold else "C:/Windows/Fonts/arial.ttf",
+        "C:/Windows/Fonts/segoeuib.ttf" if bold else "C:/Windows/Fonts/segoeui.ttf",
+    ]
+    try:
+        from PIL import ImageFont
+        for candidate in candidates:
+            if Path(candidate).exists():
+                return ImageFont.truetype(candidate, size=size)
+        return ImageFont.load_default(size=size)
+    except Exception:
+        return None
+
+
+def draw_wrapped(draw, text, xy, font, fill, width, line_spacing=10):
+    x, y = xy
+    for paragraph in str(text).splitlines() or [""]:
+        if not paragraph.strip():
+            y += int(getattr(font, "size", 24) * 0.8)
+            continue
+        for line in textwrap.wrap(paragraph, width=width, break_long_words=False):
+            draw.text((x, y), line, font=font, fill=fill)
+            bbox = draw.textbbox((x, y), line, font=font)
+            y += (bbox[3] - bbox[1]) + line_spacing
+    return y
+
+
+def render_png(question, output_path, variant):
+    from PIL import Image, ImageDraw
+
+    title = "Latihan UTBK" if variant == "soal" else "Pembahasan"
+    accent = "#2767d8"
+    ink = "#252a33"
+    muted = "#69707d"
+    bg = "#f8f9fb"
+    panel = "#eceff4"
+    line = "#d1d7e2"
+
+    image = Image.new("RGB", (1080, 1080), bg)
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle((62, 64, 1018, 1016), radius=8, fill=panel, outline=line, width=2)
+
+    title_font = load_font(38, bold=True)
+    meta_font = load_font(24, bold=True)
+    question_font = load_font(32, bold=True)
+    choice_font = load_font(26)
+    choice_label_font = load_font(19, bold=True)
+    body_font = load_font(28)
+    small_font = load_font(20, bold=True)
+
+    draw.text((88, 96), title, font=title_font, fill=ink)
+    draw.text(
+        (88, 148),
+        f"{question['mapel']} / {question['topik']} / {question['level']}",
+        font=meta_font,
+        fill=accent,
+    )
+
+    if variant == "soal":
+        y = draw_wrapped(draw, question["soal"], (88, 226), question_font, ink, 43, line_spacing=12)
+        y += 28
+        for key, value in question["pilihan"].items():
+            draw.ellipse((90, y - 2, 124, y + 32), fill=accent)
+            draw.text((100, y + 4), key, font=choice_label_font, fill=bg)
+            y = draw_wrapped(draw, value, (142, y), choice_font, ink, 50, line_spacing=8)
+            y += 20
+    else:
+        draw.text((88, 226), f"Jawaban: {question.get('jawaban', '')}", font=question_font, fill=accent)
+        y = draw_wrapped(draw, question["pembahasan"], (88, 292), body_font, ink, 50, line_spacing=10)
+        tip = question.get("tips_pengerjaan") or question.get("konsep_kunci") or ""
+        if tip and y < 850:
+            y += 22
+            draw.text((88, y), "Tips", font=meta_font, fill=muted)
+            draw_wrapped(draw, tip, (88, y + 42), choice_font, muted, 54, line_spacing=8)
+
+    draw.text((88, 946), "Manual review sebelum upload", font=small_font, fill=muted)
+    draw.text((844, 946), question.get("akun", "@namaakun"), font=small_font, fill=muted)
+    image.save(output_path, format="PNG")
+
+
 def generate_content(mapel, topic, level, mode="auto", account="@namaakun"):
     GEMINI_USAGE.clear()
     run_id = _now_id()
@@ -680,7 +1020,10 @@ def generate_content(mapel, topic, level, mode="auto", account="@namaakun"):
             )
         except Exception as exc:
             source = "fallback"
-            question = draft_question(mapel, topic, level)
+            if mapel in {"Pengetahuan Kuantitatif", "Penalaran Matematika"}:
+                question = deterministic_quant_question(mapel, topic, level, run_id)
+            else:
+                question = draft_question(mapel, topic, level)
             fallbacks.append("question")
             errors["question"] = clean_error_message(exc)
 
@@ -720,16 +1063,35 @@ def generate_content(mapel, topic, level, mode="auto", account="@namaakun"):
             caption = draft_caption(question)
             fallbacks.append("caption")
     else:
-        question = draft_question(mapel, topic, level)
-        validation = local_validation(question)
+        if mapel in {"Pengetahuan Kuantitatif", "Penalaran Matematika"}:
+            question = deterministic_quant_question(mapel, topic, level, run_id)
+        else:
+            question = draft_question(mapel, topic, level)
         caption = draft_caption(question)
+        validation = local_validation(question, caption)
 
+    if not GEMINI_VALIDATE or source in {"draft", "fallback"}:
+        validation = local_validation(question, caption)
     question["akun"] = account
     render_svg(question, run_dir / "post-soal.svg", "soal")
     render_svg(question, run_dir / "post-pembahasan.svg", "pembahasan")
+    render_png(question, run_dir / "post-soal.png", "soal")
+    render_png(question, run_dir / "post-pembahasan.png", "pembahasan")
+    dedup = check_duplicate(question)
     review_status = "needs_review" if "question" in fallbacks else "ready"
     if errors:
         review_status = "needs_review"
+    if dedup["is_duplicate"]:
+        review_status = "needs_review"
+        validation["lolos_validasi"] = False
+        validation["skor"] = min(validation.get("skor", 0), 74)
+        validation.setdefault("catatan", {})["duplikasi"] = (
+            f"Mirip {dedup['similarity']} dengan run {dedup['matched_run_id']}"
+        )
+        validation["saran_perbaikan"] = (
+            validation.get("saran_perbaikan", "")
+            + " Soal terdeteksi mirip dengan saved item; ubah konteks, angka, atau struktur."
+        ).strip()
 
     metadata = {
         "run_id": run_id,
@@ -737,6 +1099,7 @@ def generate_content(mapel, topic, level, mode="auto", account="@namaakun"):
         "fallbacks": fallbacks,
         "errors": errors,
         "review_status": review_status,
+        "dedup": dedup,
         "ai_usage": {
             "calls": GEMINI_USAGE.copy(),
             "total_prompt_tokens": sum(item.get("prompt_tokens") or 0 for item in GEMINI_USAGE),
@@ -753,6 +1116,8 @@ def generate_content(mapel, topic, level, mode="auto", account="@namaakun"):
             "caption": str(run_dir / "caption.txt"),
             "post_soal": str(run_dir / "post-soal.svg"),
             "post_pembahasan": str(run_dir / "post-pembahasan.svg"),
+            "post_soal_png": str(run_dir / "post-soal.png"),
+            "post_pembahasan_png": str(run_dir / "post-pembahasan.png"),
         },
     }
 

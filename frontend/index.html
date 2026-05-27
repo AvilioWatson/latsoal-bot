@@ -12,7 +12,10 @@
         <p class="eyebrow">UTBK Content Desk</p>
         <h1>Manual Generator</h1>
       </div>
-      <div class="status-pill" id="sourceStatus">Siap</div>
+      <div class="top-actions">
+        <a class="nav-link" href="/saved.html">Bank Review</a>
+        <div class="status-pill" id="sourceStatus">Siap</div>
+      </div>
     </header>
 
     <main class="workspace">
@@ -53,18 +56,6 @@
           <button class="primary" type="submit" id="generateButton">Generate</button>
         </form>
 
-        <section class="saved-panel">
-          <div class="panel-heading">
-            <div>
-              <p class="eyebrow">Saved</p>
-              <h2>Bank Review</h2>
-            </div>
-            <button id="refreshSavedButton" class="icon-button" type="button" title="Refresh saved">↻</button>
-          </div>
-          <div id="savedList" class="saved-list">
-            <p class="empty-copy">Belum ada soal disimpan.</p>
-          </div>
-        </section>
       </aside>
 
       <section class="review">
@@ -104,7 +95,10 @@
           <section class="detail-block">
             <div class="block-title">
               <h3>Caption</h3>
-              <span id="sourceLabel">Manual</span>
+              <div class="inline-actions">
+                <button id="copyCaptionButton" class="mini-button" type="button" disabled>Copy</button>
+                <span id="sourceLabel">Manual</span>
+              </div>
             </div>
             <p id="captionText" class="body-copy">Caption akan muncul di sini.</p>
             <p id="hashtagText" class="hashtags"></p>

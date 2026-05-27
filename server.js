@@ -10,6 +10,7 @@ const ROOT = path.dirname(__filename);
 const FRONTEND = path.join(ROOT, "frontend");
 const OUTPUTS = path.join(ROOT, "outputs");
 const SAVED = path.join(ROOT, "saved");
+const APPROVED = path.join(ROOT, "approved");
 const PORT = Number(process.env.PORT || 8765);
 const PYTHON = process.env.PYTHON || "python";
 
@@ -70,6 +71,7 @@ const MIME = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8",
+  ".png": "image/png",
   ".svg": "image/svg+xml; charset=utf-8",
   ".txt": "text/plain; charset=utf-8",
 };
@@ -173,8 +175,10 @@ function runGenerator(payload) {
       try {
         const metadata = JSON.parse(stdout);
         metadata.web_files = {
-          post_soal: `/outputs/${metadata.run_id}/post-soal.svg`,
-          post_pembahasan: `/outputs/${metadata.run_id}/post-pembahasan.svg`,
+          post_soal: `/outputs/${metadata.run_id}/post-soal.png`,
+          post_pembahasan: `/outputs/${metadata.run_id}/post-pembahasan.png`,
+          post_soal_svg: `/outputs/${metadata.run_id}/post-soal.svg`,
+          post_pembahasan_svg: `/outputs/${metadata.run_id}/post-pembahasan.svg`,
           metadata: `/outputs/${metadata.run_id}/metadata.json`,
         };
         resolve(metadata);
@@ -219,8 +223,10 @@ async function saveRun(runId) {
     saved_path: target,
     web_files: {
       metadata: `/saved/${runId}/metadata.json`,
-      post_soal: `/saved/${runId}/post-soal.svg`,
-      post_pembahasan: `/saved/${runId}/post-pembahasan.svg`,
+      post_soal: `/saved/${runId}/post-soal.png`,
+      post_pembahasan: `/saved/${runId}/post-pembahasan.png`,
+      post_soal_svg: `/saved/${runId}/post-soal.svg`,
+      post_pembahasan_svg: `/saved/${runId}/post-pembahasan.svg`,
     },
   };
 }
@@ -249,8 +255,10 @@ async function listSavedRuns() {
       jawaban: metadata?.question?.jawaban || null,
       web_files: {
         metadata: `/saved/${item.run_id}/metadata.json`,
-        post_soal: `/saved/${item.run_id}/post-soal.svg`,
-        post_pembahasan: `/saved/${item.run_id}/post-pembahasan.svg`,
+        post_soal: `/saved/${item.run_id}/post-soal.png`,
+        post_pembahasan: `/saved/${item.run_id}/post-pembahasan.png`,
+        post_soal_svg: `/saved/${item.run_id}/post-soal.svg`,
+        post_pembahasan_svg: `/saved/${item.run_id}/post-pembahasan.svg`,
       },
     });
   }
@@ -285,6 +293,59 @@ async function updateSavedStatus(runId, status) {
   ];
   await writeSavedIndex(nextIndex);
   return next;
+}
+
+async function exportApprovedRuns() {
+  const index = await readSavedIndex();
+  const approved = index.filter((item) => item.status === "approved" && isValidRunId(item.run_id));
+  const exportId = new Date().toISOString().replace(/[:.]/g, "-");
+  const targetDir = path.join(APPROVED, exportId);
+  await mkdir(targetDir, {recursive: true});
+
+  const manifest = [];
+  for (const item of approved) {
+    const sourceDir = path.join(SAVED, item.run_id);
+    const destinationDir = path.join(targetDir, item.run_id);
+    try {
+      await access(path.join(sourceDir, "metadata.json"));
+      await cp(sourceDir, destinationDir, {recursive: true, force: true});
+      const metadata = JSON.parse(await readFile(path.join(sourceDir, "metadata.json"), "utf-8"));
+      manifest.push({
+        run_id: item.run_id,
+        saved_at: item.saved_at || null,
+        status_updated_at: item.status_updated_at || null,
+        mapel: metadata?.question?.mapel || null,
+        topik: metadata?.question?.topik || null,
+        level: metadata?.question?.level || null,
+        jawaban: metadata?.question?.jawaban || null,
+        caption_file: path.join(destinationDir, "caption.txt"),
+        post_soal_png: path.join(destinationDir, "post-soal.png"),
+        post_pembahasan_png: path.join(destinationDir, "post-pembahasan.png"),
+        web_files: {
+          metadata: `/approved/${exportId}/${item.run_id}/metadata.json`,
+          caption: `/approved/${exportId}/${item.run_id}/caption.txt`,
+          post_soal_png: `/approved/${exportId}/${item.run_id}/post-soal.png`,
+          post_pembahasan_png: `/approved/${exportId}/${item.run_id}/post-pembahasan.png`,
+        },
+      });
+    } catch {
+      continue;
+    }
+  }
+
+  await writeFile(path.join(targetDir, "manifest.json"), JSON.stringify({
+    export_id: exportId,
+    created_at: new Date().toISOString(),
+    total: manifest.length,
+    items: manifest,
+  }, null, 2), "utf-8");
+
+  return {
+    export_id: exportId,
+    total: manifest.length,
+    path: targetDir,
+    manifest: `/approved/${exportId}/manifest.json`,
+  };
 }
 
 async function handleRequest(request, response) {
@@ -327,6 +388,27 @@ async function handleRequest(request, response) {
     return;
   }
 
+  if (request.method === "GET" && route.startsWith("/api/saved/")) {
+    try {
+      const runId = route.replace("/api/saved/", "");
+      if (!isValidRunId(runId)) {
+        throw new Error("Run ID tidak valid.");
+      }
+      const metadata = JSON.parse(await readFile(path.join(SAVED, runId, "metadata.json"), "utf-8"));
+      metadata.web_files = {
+        post_soal: `/saved/${runId}/post-soal.png`,
+        post_pembahasan: `/saved/${runId}/post-pembahasan.png`,
+        post_soal_svg: `/saved/${runId}/post-soal.svg`,
+        post_pembahasan_svg: `/saved/${runId}/post-pembahasan.svg`,
+        metadata: `/saved/${runId}/metadata.json`,
+      };
+      sendJson(response, metadata);
+    } catch (error) {
+      sendError(response, 500, error.message);
+    }
+    return;
+  }
+
   if (request.method === "POST" && route === "/api/saved/status") {
     try {
       const payload = await readJsonBody(request);
@@ -338,8 +420,22 @@ async function handleRequest(request, response) {
     return;
   }
 
+  if (request.method === "POST" && route === "/api/export/approved") {
+    try {
+      sendJson(response, await exportApprovedRuns());
+    } catch (error) {
+      sendError(response, 500, error.message);
+    }
+    return;
+  }
+
   if (request.method === "GET" && route === "/") {
     await sendFile(response, path.join(FRONTEND, "index.html"));
+    return;
+  }
+
+  if (request.method === "GET" && (route === "/saved.html" || route === "/saved")) {
+    await sendFile(response, path.join(FRONTEND, "saved.html"));
     return;
   }
 
@@ -365,6 +461,16 @@ async function handleRequest(request, response) {
 
   if (request.method === "GET" && route.startsWith("/saved/")) {
     const target = safeJoin(SAVED, route.replace("/saved/", ""));
+    if (!target) {
+      sendError(response, 403, "Path tidak valid.");
+      return;
+    }
+    await sendFile(response, target);
+    return;
+  }
+
+  if (request.method === "GET" && route.startsWith("/approved/")) {
+    const target = safeJoin(APPROVED, route.replace("/approved/", ""));
     if (!target) {
       sendError(response, 403, "Path tidak valid.");
       return;

@@ -14,6 +14,12 @@ Buka:
 http://127.0.0.1:8765
 ```
 
+Bank review tersedia di:
+
+```text
+http://127.0.0.1:8765/saved.html
+```
+
 Jika `GEMINI_API_KEY` belum diset, generator memakai mode draft lokal untuk mengecek alur dan tampilan.
 
 Server lokal memakai Node.js tanpa dependency tambahan. Logic generator tetap di Python.
@@ -47,6 +53,20 @@ Output tersimpan di:
 outputs/<run-id>/
 ```
 
+Setiap run menghasilkan:
+
+```text
+post-soal.svg
+post-soal.png
+post-pembahasan.svg
+post-pembahasan.png
+caption.txt
+metadata.json
+```
+
+PNG adalah format siap upload. SVG tetap disimpan untuk preview/edit.
+Generator juga menjalankan dedup lokal terhadap folder `saved/` dan mencatat hasilnya di `metadata.json`.
+
 Jika tombol `Simpan` dipakai di dashboard, output pilihan akan dicopy ke:
 
 ```text
@@ -54,7 +74,26 @@ saved/<run-id>/
 ```
 
 `saved/` dan `outputs/` diabaikan oleh git karena berisi hasil kerja lokal.
-Daftar saved bisa dikelola dari sidebar dashboard dengan status `Saved`, `Approved`, atau `Rejected`.
+Daftar saved bisa dikelola dari halaman Bank Review dengan status `Saved`, `Approved`, atau `Rejected`.
+Item `Approved` bisa diekspor ke folder:
+
+```text
+approved/<export-id>/
+```
+
+Folder export berisi copy PNG, SVG, caption, metadata, dan `manifest.json`.
+
+## Generator Lokal
+
+Untuk `Pengetahuan Kuantitatif` dan `Penalaran Matematika`, mode draft/fallback dapat membuat soal deterministik berbasis rumus:
+
+```text
+- rata-rata dengan data hilang
+- rasio dan total bagian
+- pola bilangan aritmetika
+```
+
+Jawaban dan pembahasan dihitung lokal sehingga tetap bisa dipakai saat API LLM sedang limit.
 
 ## GitHub Actions Self-Hosted
 
