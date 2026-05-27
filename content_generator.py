@@ -34,8 +34,10 @@ def load_env_file():
 load_env_file()
 DEFAULT_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
 MAX_GEMINI_RETRIES = int(os.getenv("GEMINI_RETRIES", "3"))
+GEMINI_MAX_OUTPUT_TOKENS = int(os.getenv("GEMINI_MAX_OUTPUT_TOKENS", "4096"))
 GEMINI_VALIDATE = os.getenv("GEMINI_VALIDATE", "").lower() in {"1", "true", "yes"}
 GEMINI_CAPTION = os.getenv("GEMINI_CAPTION", "").lower() in {"1", "true", "yes"}
+GEMINI_USAGE = []
 
 
 MAPEL_TOPICS = {
@@ -102,6 +104,81 @@ PATTERN_FILES = {
 }
 
 
+QUESTION_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "mapel": {"type": "STRING"},
+        "kelompok_tes": {"type": "STRING"},
+        "topik": {"type": "STRING"},
+        "level": {"type": "STRING"},
+        "soal": {"type": "STRING"},
+        "pilihan": {
+            "type": "OBJECT",
+            "properties": {
+                "A": {"type": "STRING"},
+                "B": {"type": "STRING"},
+                "C": {"type": "STRING"},
+                "D": {"type": "STRING"},
+                "E": {"type": "STRING"},
+            },
+            "required": ["A", "B", "C", "D", "E"],
+        },
+        "jawaban": {"type": "STRING"},
+        "pembahasan": {"type": "STRING"},
+        "konsep_kunci": {"type": "STRING"},
+        "tips_pengerjaan": {"type": "STRING"},
+        "butuh_visual": {"type": "BOOLEAN"},
+        "deskripsi_visual": {"type": "STRING"},
+    },
+    "required": [
+        "mapel",
+        "kelompok_tes",
+        "topik",
+        "level",
+        "soal",
+        "pilihan",
+        "jawaban",
+        "pembahasan",
+        "konsep_kunci",
+        "tips_pengerjaan",
+        "butuh_visual",
+        "deskripsi_visual",
+    ],
+}
+
+
+VALIDATION_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "lolos_validasi": {"type": "BOOLEAN"},
+        "skor": {"type": "INTEGER"},
+        "catatan": {
+            "type": "OBJECT",
+            "properties": {
+                "struktur": {"type": "STRING"},
+                "kebenaran": {"type": "STRING"},
+                "bahasa": {"type": "STRING"},
+            },
+        },
+        "saran_perbaikan": {"type": "STRING"},
+    },
+    "required": ["lolos_validasi", "skor", "catatan", "saran_perbaikan"],
+}
+
+
+CAPTION_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "caption": {"type": "STRING"},
+        "hashtag": {
+            "type": "ARRAY",
+            "items": {"type": "STRING"},
+        },
+    },
+    "required": ["caption", "hashtag"],
+}
+
+
 def _now_id():
     return dt.datetime.now().strftime("%Y%m%d-%H%M%S")
 
@@ -127,7 +204,7 @@ def clean_error_message(exc):
     return text[:240]
 
 
-def _gemini_json(prompt, label, retries=MAX_GEMINI_RETRIES):
+def _gemini_json(prompt, label, retries=MAX_GEMINI_RETRIES, schema=None):
     last_error = None
     strict_prompt = (
         f"{prompt}\n\n"
@@ -137,7 +214,7 @@ def _gemini_json(prompt, label, retries=MAX_GEMINI_RETRIES):
     )
     for attempt in range(1, retries + 1):
         try:
-            return _extract_json(_gemini_generate(strict_prompt))
+            return _extract_json(_gemini_generate(strict_prompt, schema=schema))
         except Exception as exc:
             clean_error = clean_error_message(exc)
             if clean_error != str(exc):
@@ -152,7 +229,7 @@ def _gemini_json(prompt, label, retries=MAX_GEMINI_RETRIES):
     raise ValueError(f"Gagal parse JSON Gemini untuk {label} setelah {retries} percobaan: {clean_error_message(last_error)}")
 
 
-def _gemini_generate(prompt):
+def _gemini_generate(prompt, schema=None):
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY belum tersedia.")
@@ -167,10 +244,12 @@ def _gemini_generate(prompt):
             "temperature": 0.7,
             "topP": 0.95,
             "topK": 40,
-            "maxOutputTokens": 2048,
+            "maxOutputTokens": GEMINI_MAX_OUTPUT_TOKENS,
             "responseMimeType": "application/json",
         },
     }
+    if schema:
+        payload["generationConfig"]["responseSchema"] = schema
     body = json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(
         url,
@@ -185,8 +264,24 @@ def _gemini_generate(prompt):
         message = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"Gemini API gagal: {exc.code} {message}") from exc
 
+    usage = raw.get("usageMetadata")
+    if usage:
+        GEMINI_USAGE.append({
+            "model": DEFAULT_MODEL,
+            "prompt_tokens": usage.get("promptTokenCount"),
+            "output_tokens": usage.get("candidatesTokenCount"),
+            "total_tokens": usage.get("totalTokenCount"),
+        })
+
     try:
-        return raw["candidates"][0]["content"]["parts"][0]["text"]
+        candidate = raw["candidates"][0]
+        finish_reason = candidate.get("finishReason")
+        text = candidate["content"]["parts"][0]["text"]
+        if finish_reason == "MAX_TOKENS":
+            raise RuntimeError(
+                f"Output Gemini terpotong karena maxOutputTokens={GEMINI_MAX_OUTPUT_TOKENS}."
+            )
+        return text
     except (KeyError, IndexError) as exc:
         raise RuntimeError("Format response Gemini tidak dikenali.") from exc
 
@@ -565,6 +660,7 @@ def render_svg(question, output_path, variant):
 
 
 def generate_content(mapel, topic, level, mode="auto", account="@namaakun"):
+    GEMINI_USAGE.clear()
     run_id = _now_id()
     run_dir = OUTPUT_DIR / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -577,7 +673,11 @@ def generate_content(mapel, topic, level, mode="auto", account="@namaakun"):
     if use_gemini:
         source = "gemini"
         try:
-            question = _gemini_json(build_question_prompt(mapel, topic, level), "soal")
+            question = _gemini_json(
+                build_question_prompt(mapel, topic, level),
+                "soal",
+                schema=QUESTION_SCHEMA,
+            )
         except Exception as exc:
             source = "fallback"
             question = draft_question(mapel, topic, level)
@@ -586,7 +686,12 @@ def generate_content(mapel, topic, level, mode="auto", account="@namaakun"):
 
         if GEMINI_VALIDATE and "question" not in fallbacks:
             try:
-                validation = _gemini_json(build_validation_prompt(question), "validasi", retries=2)
+                validation = _gemini_json(
+                    build_validation_prompt(question),
+                    "validasi",
+                    retries=2,
+                    schema=VALIDATION_SCHEMA,
+                )
             except Exception as exc:
                 validation = local_validation(question)
                 validation["saran_perbaikan"] = (
@@ -601,7 +706,12 @@ def generate_content(mapel, topic, level, mode="auto", account="@namaakun"):
 
         if GEMINI_CAPTION and "question" not in fallbacks:
             try:
-                caption = _gemini_json(build_caption_prompt(question), "caption", retries=2)
+                caption = _gemini_json(
+                    build_caption_prompt(question),
+                    "caption",
+                    retries=2,
+                    schema=CAPTION_SCHEMA,
+                )
             except Exception as exc:
                 caption = draft_caption(question)
                 fallbacks.append("caption")
@@ -627,6 +737,12 @@ def generate_content(mapel, topic, level, mode="auto", account="@namaakun"):
         "fallbacks": fallbacks,
         "errors": errors,
         "review_status": review_status,
+        "ai_usage": {
+            "calls": GEMINI_USAGE.copy(),
+            "total_prompt_tokens": sum(item.get("prompt_tokens") or 0 for item in GEMINI_USAGE),
+            "total_output_tokens": sum(item.get("output_tokens") or 0 for item in GEMINI_USAGE),
+            "total_tokens": sum(item.get("total_tokens") or 0 for item in GEMINI_USAGE),
+        },
         "model": DEFAULT_MODEL if source == "gemini" else None,
         "created_at": dt.datetime.now().isoformat(timespec="seconds"),
         "question": question,
