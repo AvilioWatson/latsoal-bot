@@ -13,8 +13,10 @@ const captionText = document.querySelector("#captionText");
 const hashtagText = document.querySelector("#hashtagText");
 const validationScore = document.querySelector("#validationScore");
 const metadataLink = document.querySelector("#metadataLink");
+const saveButton = document.querySelector("#saveButton");
 
 let topicsByMapel = {};
+let currentRunId = "";
 
 function setStatus(text) {
   sourceStatus.textContent = text;
@@ -46,6 +48,7 @@ async function loadConfig() {
 }
 
 function renderResult(data) {
+  currentRunId = data.run_id;
   const question = data.question;
   const caption = data.caption;
   const validation = data.validation;
@@ -68,6 +71,8 @@ function renderResult(data) {
   solutionImage.src = `${data.web_files.post_pembahasan}?v=${Date.now()}`;
   metadataLink.href = data.web_files.metadata;
   metadataLink.hidden = false;
+  saveButton.disabled = false;
+  saveButton.textContent = "Simpan";
 }
 
 mapelSelect.addEventListener("change", fillTopics);
@@ -95,6 +100,31 @@ form.addEventListener("submit", async (event) => {
     captionText.textContent = error.message;
   } finally {
     button.disabled = false;
+  }
+});
+
+saveButton.addEventListener("click", async () => {
+  if (!currentRunId) return;
+  saveButton.disabled = true;
+  saveButton.textContent = "Menyimpan";
+  try {
+    const response = await fetch("/api/save", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({run_id: currentRunId}),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || "Simpan gagal.");
+    }
+    saveButton.textContent = "Tersimpan";
+    setStatus("Saved");
+    metadataLink.href = data.web_files.metadata;
+  } catch (error) {
+    saveButton.disabled = false;
+    saveButton.textContent = "Simpan";
+    setStatus("Error");
+    captionText.textContent = error.message;
   }
 });
 

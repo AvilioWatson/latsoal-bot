@@ -1,6 +1,6 @@
 import {spawn} from "node:child_process";
 import {createReadStream} from "node:fs";
-import {access, readFile} from "node:fs/promises";
+import {access, cp, mkdir, readFile, writeFile} from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 import {fileURLToPath} from "node:url";
@@ -9,6 +9,7 @@ const __filename = fileURLToPath(import.meta.url);
 const ROOT = path.dirname(__filename);
 const FRONTEND = path.join(ROOT, "frontend");
 const OUTPUTS = path.join(ROOT, "outputs");
+const SAVED = path.join(ROOT, "saved");
 const PORT = Number(process.env.PORT || 8765);
 const PYTHON = process.env.PYTHON || "python";
 
@@ -126,6 +127,52 @@ function runGenerator(payload) {
   });
 }
 
+function isValidRunId(runId) {
+  return /^\d{8}-\d{6}$/.test(runId);
+}
+
+async function saveRun(runId) {
+  if (!isValidRunId(runId)) {
+    throw new Error("Run ID tidak valid.");
+  }
+
+  const source = safeJoin(OUTPUTS, runId);
+  const target = safeJoin(SAVED, runId);
+  if (!source || !target) {
+    throw new Error("Path run tidak valid.");
+  }
+
+  await access(path.join(source, "metadata.json"));
+  await mkdir(SAVED, {recursive: true});
+  await cp(source, target, {recursive: true, force: true});
+
+  const savedAt = new Date().toISOString();
+  const indexPath = path.join(SAVED, "index.json");
+  let index = [];
+  try {
+    index = JSON.parse(await readFile(indexPath, "utf-8"));
+  } catch {
+    index = [];
+  }
+
+  const nextIndex = [
+    {run_id: runId, saved_at: savedAt, path: target},
+    ...index.filter((item) => item.run_id !== runId),
+  ];
+  await writeFile(indexPath, JSON.stringify(nextIndex, null, 2), "utf-8");
+
+  return {
+    run_id: runId,
+    saved_at: savedAt,
+    saved_path: target,
+    web_files: {
+      metadata: `/saved/${runId}/metadata.json`,
+      post_soal: `/saved/${runId}/post-soal.svg`,
+      post_pembahasan: `/saved/${runId}/post-pembahasan.svg`,
+    },
+  };
+}
+
 async function handleRequest(request, response) {
   const url = new URL(request.url, `http://${request.headers.host}`);
   const route = decodeURIComponent(url.pathname);
@@ -140,6 +187,17 @@ async function handleRequest(request, response) {
       const payload = await readJsonBody(request);
       const metadata = await runGenerator(payload);
       sendJson(response, metadata);
+    } catch (error) {
+      sendError(response, 500, error.message);
+    }
+    return;
+  }
+
+  if (request.method === "POST" && route === "/api/save") {
+    try {
+      const payload = await readJsonBody(request);
+      const saved = await saveRun(payload.run_id || "");
+      sendJson(response, saved);
     } catch (error) {
       sendError(response, 500, error.message);
     }
@@ -163,6 +221,16 @@ async function handleRequest(request, response) {
 
   if (request.method === "GET" && route.startsWith("/outputs/")) {
     const target = safeJoin(OUTPUTS, route.replace("/outputs/", ""));
+    if (!target) {
+      sendError(response, 403, "Path tidak valid.");
+      return;
+    }
+    await sendFile(response, target);
+    return;
+  }
+
+  if (request.method === "GET" && route.startsWith("/saved/")) {
+    const target = safeJoin(SAVED, route.replace("/saved/", ""));
     if (!target) {
       sendError(response, 403, "Path tidak valid.");
       return;

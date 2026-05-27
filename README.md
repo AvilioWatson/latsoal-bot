@@ -47,6 +47,12 @@ Output tersimpan di:
 outputs/<run-id>/
 ```
 
+Jika tombol `Simpan` dipakai di dashboard, output pilihan akan dicopy ke:
+
+```text
+saved/<run-id>/
+```
+
 ## GitHub Actions Self-Hosted
 
 Workflow tersedia di `.github/workflows/manual-content.yml` dan hanya berjalan saat dipicu manual dari tab Actions.

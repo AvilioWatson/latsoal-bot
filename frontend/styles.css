@@ -34,6 +34,10 @@ select {
   font: inherit;
 }
 
+button {
+  border: 0;
+}
+
 .topbar {
   display: flex;
   align-items: center;
@@ -134,26 +138,43 @@ input:focus {
   box-shadow: 0 0 0 3px oklch(0.56 0.16 252 / 0.15);
 }
 
-.primary {
+.primary,
+.secondary {
   min-height: 44px;
-  border: 0;
   border-radius: 8px;
-  background: var(--accent);
-  color: var(--accent-ink);
   font-weight: 800;
   cursor: pointer;
   transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1), background-color 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.secondary {
+  min-height: 36px;
+  border: 1px solid var(--line);
+  padding: 0 14px;
+  background: var(--surface);
+  color: var(--ink);
 }
 
 .primary:hover {
   background: oklch(0.51 0.17 252);
 }
 
-.primary:active {
+.secondary:hover {
+  background: var(--panel);
+}
+
+.primary:active,
+.secondary:active {
   transform: translateY(1px);
 }
 
-.primary:disabled {
+.primary:disabled,
+.secondary:disabled {
   cursor: wait;
   opacity: 0.65;
 }
@@ -175,6 +196,12 @@ input:focus {
   color: var(--accent);
   font-weight: 750;
   text-decoration: none;
+}
+
+.review-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .preview-grid {

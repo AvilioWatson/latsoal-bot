@@ -4,6 +4,7 @@ import html
 import json
 import os
 import re
+import sys
 import textwrap
 import urllib.error
 import urllib.request
@@ -12,7 +13,26 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 OUTPUT_DIR = ROOT / "outputs"
+
+
+def load_env_file():
+    env_path = ROOT / ".env"
+    if not env_path.exists():
+        return
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+load_env_file()
 DEFAULT_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
+MAX_GEMINI_RETRIES = int(os.getenv("GEMINI_RETRIES", "3"))
 
 
 MAPEL_TOPICS = {
@@ -37,6 +57,28 @@ def _extract_json(text):
     if not match:
         raise ValueError("Response tidak berisi JSON.")
     return json.loads(match.group(0))
+
+
+def _gemini_json(prompt, label, retries=MAX_GEMINI_RETRIES):
+    last_error = None
+    strict_prompt = (
+        f"{prompt}\n\n"
+        "PENTING: Balas hanya dengan satu objek JSON valid. "
+        "Jangan gunakan markdown, komentar, trailing comma, atau teks tambahan. "
+        "Semua string harus memakai kutip ganda dan newline di dalam string harus di-escape."
+    )
+    for attempt in range(1, retries + 1):
+        try:
+            return _extract_json(_gemini_generate(strict_prompt))
+        except Exception as exc:
+            last_error = exc
+            strict_prompt = (
+                f"{prompt}\n\n"
+                f"Percobaan sebelumnya untuk {label} gagal diparse sebagai JSON valid: {exc}. "
+                "Kirim ulang hanya satu objek JSON valid RFC 8259. "
+                "Jangan ada teks pembuka, markdown, trailing comma, atau newline mentah di dalam string."
+            )
+    raise ValueError(f"Gagal parse JSON Gemini untuk {label} setelah {retries} percobaan: {last_error}")
 
 
 def _gemini_generate(prompt):
@@ -125,7 +167,10 @@ def build_caption_prompt(question):
     return (
         "Kamu adalah copywriter konten edukasi Instagram untuk akun latihan soal UTBK. "
         "Buat caption 100 sampai 150 kata, ada hook, CTA jawab di komentar, "
-        "motivasi singkat, dan hashtag relevan. Output JSON valid.\n\n"
+        "motivasi singkat, dan hashtag relevan. "
+        "Wajib pakai konteks UTBK 2026. Jangan memakai tahun 2024 atau 2025. "
+        "Hashtag wajib diawali tanda # dan wajib memuat #UTBK2026, #LatsoalUTBK, "
+        "#BelajarUTBK, dan #SoalUTBK. Output JSON valid.\n\n"
         f"{json.dumps(question, ensure_ascii=False)}\n\n"
         'Kembalikan JSON: {"caption": "", "hashtag": []}'
     )
@@ -290,11 +335,28 @@ def generate_content(mapel, topic, level, mode="auto", account="@namaakun"):
 
     use_gemini = mode != "draft" and bool(os.getenv("GEMINI_API_KEY"))
     source = "draft"
+    fallbacks = []
 
     if use_gemini:
-        question = _extract_json(_gemini_generate(build_question_prompt(mapel, topic, level)))
-        validation = _extract_json(_gemini_generate(build_validation_prompt(question)))
-        caption = _extract_json(_gemini_generate(build_caption_prompt(question)))
+        question = _gemini_json(build_question_prompt(mapel, topic, level), "soal")
+        try:
+            validation = _gemini_json(build_validation_prompt(question), "validasi", retries=2)
+        except Exception as exc:
+            validation = local_validation(question)
+            validation["saran_perbaikan"] = (
+                validation.get("saran_perbaikan", "")
+                + f" Fallback lokal dipakai karena validasi Gemini gagal diparse: {exc}"
+            ).strip()
+            fallbacks.append("validation")
+        try:
+            caption = _gemini_json(build_caption_prompt(question), "caption", retries=2)
+        except Exception as exc:
+            caption = draft_caption(question)
+            caption["caption"] = (
+                caption["caption"]
+                + f"\n\nCatatan internal: caption Gemini gagal diparse ({exc}); edit manual sebelum upload."
+            )
+            fallbacks.append("caption")
         source = "gemini"
     else:
         question = draft_question(mapel, topic, level)
@@ -308,6 +370,7 @@ def generate_content(mapel, topic, level, mode="auto", account="@namaakun"):
     metadata = {
         "run_id": run_id,
         "source": source,
+        "fallbacks": fallbacks,
         "model": DEFAULT_MODEL if source == "gemini" else None,
         "created_at": dt.datetime.now().isoformat(timespec="seconds"),
         "question": question,
@@ -336,6 +399,8 @@ def generate_content(mapel, topic, level, mode="auto", account="@namaakun"):
 
 
 def main():
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser()
     parser.add_argument("--mapel", default="Matematika", choices=sorted(MAPEL_TOPICS.keys()))
     parser.add_argument("--topik", default="")
