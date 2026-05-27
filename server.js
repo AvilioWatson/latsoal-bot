@@ -116,6 +116,21 @@ async function readJsonBody(request) {
   return raw ? JSON.parse(raw) : {};
 }
 
+async function readSavedIndex() {
+  const indexPath = path.join(SAVED, "index.json");
+  try {
+    const index = JSON.parse(await readFile(indexPath, "utf-8"));
+    return Array.isArray(index) ? index : [];
+  } catch {
+    return [];
+  }
+}
+
+async function writeSavedIndex(index) {
+  await mkdir(SAVED, {recursive: true});
+  await writeFile(path.join(SAVED, "index.json"), JSON.stringify(index, null, 2), "utf-8");
+}
+
 function runGenerator(payload) {
   return new Promise((resolve, reject) => {
     const args = [
@@ -190,19 +205,13 @@ async function saveRun(runId) {
   await cp(source, target, {recursive: true, force: true});
 
   const savedAt = new Date().toISOString();
-  const indexPath = path.join(SAVED, "index.json");
-  let index = [];
-  try {
-    index = JSON.parse(await readFile(indexPath, "utf-8"));
-  } catch {
-    index = [];
-  }
+  const index = await readSavedIndex();
 
   const nextIndex = [
-    {run_id: runId, saved_at: savedAt, path: target},
+    {run_id: runId, saved_at: savedAt, status: "saved", path: target},
     ...index.filter((item) => item.run_id !== runId),
   ];
-  await writeFile(indexPath, JSON.stringify(nextIndex, null, 2), "utf-8");
+  await writeSavedIndex(nextIndex);
 
   return {
     run_id: runId,
@@ -214,6 +223,68 @@ async function saveRun(runId) {
       post_pembahasan: `/saved/${runId}/post-pembahasan.svg`,
     },
   };
+}
+
+async function listSavedRuns() {
+  const index = await readSavedIndex();
+  const items = [];
+  for (const item of index) {
+    if (!isValidRunId(item.run_id)) continue;
+    const metadataPath = path.join(SAVED, item.run_id, "metadata.json");
+    let metadata = null;
+    try {
+      metadata = JSON.parse(await readFile(metadataPath, "utf-8"));
+    } catch {
+      metadata = null;
+    }
+    items.push({
+      run_id: item.run_id,
+      saved_at: item.saved_at || null,
+      status: item.status || "saved",
+      source: metadata?.source || null,
+      review_status: metadata?.review_status || null,
+      mapel: metadata?.question?.mapel || null,
+      topik: metadata?.question?.topik || null,
+      level: metadata?.question?.level || null,
+      jawaban: metadata?.question?.jawaban || null,
+      web_files: {
+        metadata: `/saved/${item.run_id}/metadata.json`,
+        post_soal: `/saved/${item.run_id}/post-soal.svg`,
+        post_pembahasan: `/saved/${item.run_id}/post-pembahasan.svg`,
+      },
+    });
+  }
+  return items;
+}
+
+async function updateSavedStatus(runId, status) {
+  const allowed = new Set(["saved", "approved", "rejected"]);
+  if (!isValidRunId(runId)) {
+    throw new Error("Run ID tidak valid.");
+  }
+  if (!allowed.has(status)) {
+    throw new Error("Status tidak valid.");
+  }
+
+  const target = safeJoin(SAVED, runId);
+  if (!target) {
+    throw new Error("Path run tidak valid.");
+  }
+  await access(path.join(target, "metadata.json"));
+
+  const index = await readSavedIndex();
+  const existing = index.find((item) => item.run_id === runId);
+  const next = {
+    ...(existing || {run_id: runId, saved_at: new Date().toISOString(), path: target}),
+    status,
+    status_updated_at: new Date().toISOString(),
+  };
+  const nextIndex = [
+    next,
+    ...index.filter((item) => item.run_id !== runId),
+  ];
+  await writeSavedIndex(nextIndex);
+  return next;
 }
 
 async function handleRequest(request, response) {
@@ -241,6 +312,26 @@ async function handleRequest(request, response) {
       const payload = await readJsonBody(request);
       const saved = await saveRun(payload.run_id || "");
       sendJson(response, saved);
+    } catch (error) {
+      sendError(response, 500, error.message);
+    }
+    return;
+  }
+
+  if (request.method === "GET" && route === "/api/saved") {
+    try {
+      sendJson(response, {items: await listSavedRuns()});
+    } catch (error) {
+      sendError(response, 500, error.message);
+    }
+    return;
+  }
+
+  if (request.method === "POST" && route === "/api/saved/status") {
+    try {
+      const payload = await readJsonBody(request);
+      const updated = await updateSavedStatus(payload.run_id || "", payload.status || "");
+      sendJson(response, updated);
     } catch (error) {
       sendError(response, 500, error.message);
     }

@@ -54,6 +54,7 @@ saved/<run-id>/
 ```
 
 `saved/` dan `outputs/` diabaikan oleh git karena berisi hasil kerja lokal.
+Daftar saved bisa dikelola dari sidebar dashboard dengan status `Saved`, `Approved`, atau `Rejected`.
 
 ## GitHub Actions Self-Hosted
 

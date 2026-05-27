@@ -18,6 +18,8 @@ const runNote = document.querySelector("#runNote");
 const debugPanel = document.querySelector("#debugPanel");
 const debugSource = document.querySelector("#debugSource");
 const debugText = document.querySelector("#debugText");
+const refreshSavedButton = document.querySelector("#refreshSavedButton");
+const savedList = document.querySelector("#savedList");
 
 let topicsByMapel = {};
 let currentRunId = "";
@@ -129,6 +131,77 @@ function renderResult(data) {
   saveButton.textContent = "Simpan";
 }
 
+function statusLabel(status) {
+  if (status === "approved") return "Approved";
+  if (status === "rejected") return "Rejected";
+  return "Saved";
+}
+
+function renderSavedList(items) {
+  savedList.innerHTML = "";
+  if (!items || items.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "empty-copy";
+    empty.textContent = "Belum ada soal disimpan.";
+    savedList.append(empty);
+    return;
+  }
+
+  for (const item of items) {
+    const row = document.createElement("article");
+    row.className = "saved-item";
+    row.dataset.status = item.status || "saved";
+    row.innerHTML = `
+      <div>
+        <strong></strong>
+        <p></p>
+      </div>
+      <span></span>
+      <div class="saved-actions">
+        <a target="_blank" rel="noreferrer">Buka</a>
+        <button type="button" data-action="approved">Approve</button>
+        <button type="button" data-action="rejected">Reject</button>
+      </div>
+    `;
+    row.querySelector("strong").textContent = item.mapel ? `${item.mapel}: ${item.topik}` : item.run_id;
+    row.querySelector("p").textContent = `${item.run_id} / ${item.source || "-"} / ${item.level || "-"}`;
+    row.querySelector("span").textContent = statusLabel(item.status);
+    row.querySelector("a").href = item.web_files.metadata;
+    row.querySelectorAll("button").forEach((button) => {
+      button.addEventListener("click", () => updateSavedStatus(item.run_id, button.dataset.action));
+    });
+    savedList.append(row);
+  }
+}
+
+async function loadSavedList() {
+  const response = await fetch("/api/saved");
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error || "Gagal memuat saved.");
+  }
+  renderSavedList(data.items || []);
+}
+
+async function updateSavedStatus(runId, status) {
+  setStatus("Updating");
+  const response = await fetch("/api/saved/status", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({run_id: runId, status}),
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    setStatus("Error");
+    debugPanel.hidden = false;
+    debugSource.textContent = "saved/status";
+    debugText.textContent = data.error || "Update status gagal.";
+    return;
+  }
+  setStatus(status === "approved" ? "Approved" : "Rejected");
+  await loadSavedList();
+}
+
 mapelSelect.addEventListener("change", fillTopics);
 
 form.addEventListener("submit", async (event) => {
@@ -177,6 +250,7 @@ saveButton.addEventListener("click", async () => {
     saveButton.textContent = "Tersimpan";
     setStatus("Saved");
     metadataLink.href = data.web_files.metadata;
+    await loadSavedList();
   } catch (error) {
     saveButton.disabled = false;
     saveButton.textContent = "Simpan";
@@ -188,6 +262,15 @@ saveButton.addEventListener("click", async () => {
   }
 });
 
+refreshSavedButton.addEventListener("click", () => {
+  loadSavedList().catch((error) => {
+    setStatus("Error");
+    debugPanel.hidden = false;
+    debugSource.textContent = "saved";
+    debugText.textContent = error.stack || error.message;
+  });
+});
+
 loadConfig().catch((error) => {
   setStatus("Error");
   captionText.textContent = error.message;
@@ -195,3 +278,5 @@ loadConfig().catch((error) => {
   debugSource.textContent = "config";
   debugText.textContent = error.stack || error.message;
 });
+
+loadSavedList().catch(() => {});
