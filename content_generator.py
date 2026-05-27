@@ -13,6 +13,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 OUTPUT_DIR = ROOT / "outputs"
+BANK_DIR = ROOT / "bank_soal" / "patterns"
 
 
 def load_env_file():
@@ -33,15 +34,71 @@ def load_env_file():
 load_env_file()
 DEFAULT_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
 MAX_GEMINI_RETRIES = int(os.getenv("GEMINI_RETRIES", "3"))
+GEMINI_VALIDATE = os.getenv("GEMINI_VALIDATE", "").lower() in {"1", "true", "yes"}
+GEMINI_CAPTION = os.getenv("GEMINI_CAPTION", "").lower() in {"1", "true", "yes"}
 
 
 MAPEL_TOPICS = {
-    "Matematika": ["Statistika", "Trigonometri", "Limit", "Peluang", "Fungsi"],
-    "Fisika": ["Kinematika", "Dinamika", "Gelombang", "Listrik", "Usaha dan Energi"],
-    "Kimia": ["Stoikiometri", "Asam Basa", "Termokimia", "Elektrokimia", "Ikatan Kimia"],
-    "Biologi": ["Sel", "Genetika", "Metabolisme", "Ekologi", "Sistem Organ"],
-    "TPS": ["Penalaran Umum", "Penalaran Kuantitatif", "Penalaran Analitis"],
-    "Bahasa Indonesia": ["Pemahaman Bacaan", "Ejaan", "Tata Bahasa", "Paragraf"],
+    "Penalaran Umum": [
+        "Penalaran deduktif",
+        "Penalaran induktif",
+        "Analogi",
+        "Sebab akibat",
+        "Penalaran analitis",
+    ],
+    "Pengetahuan dan Pemahaman Umum": [
+        "Makna kata",
+        "Hubungan antarkalimat",
+        "Ide pokok",
+        "Simpulan teks",
+        "Kesesuaian pernyataan",
+    ],
+    "Pemahaman Bacaan dan Menulis": [
+        "Kalimat efektif",
+        "Ejaan",
+        "Kohesi dan koherensi",
+        "Paragraf padu",
+        "Perbaikan kalimat",
+    ],
+    "Pengetahuan Kuantitatif": [
+        "Aritmetika",
+        "Aljabar dasar",
+        "Perbandingan",
+        "Peluang",
+        "Statistika",
+    ],
+    "Literasi Bahasa Indonesia": [
+        "Pemahaman teks informatif",
+        "Pemahaman teks argumentatif",
+        "Simpulan bacaan",
+        "Tujuan penulis",
+        "Evaluasi pernyataan",
+    ],
+    "Literasi Bahasa Inggris": [
+        "Main idea",
+        "Inference",
+        "Vocabulary in context",
+        "Author purpose",
+        "Detail information",
+    ],
+    "Penalaran Matematika": [
+        "Data dan ketidakpastian",
+        "Bilangan",
+        "Aljabar",
+        "Geometri",
+        "Pemodelan matematika",
+    ],
+}
+
+
+PATTERN_FILES = {
+    "Penalaran Umum": "penalaran_umum.json",
+    "Pengetahuan dan Pemahaman Umum": "pengetahuan_pemahaman_umum.json",
+    "Pemahaman Bacaan dan Menulis": "pemahaman_bacaan_menulis.json",
+    "Pengetahuan Kuantitatif": "pengetahuan_kuantitatif.json",
+    "Literasi Bahasa Indonesia": "literasi_bahasa_indonesia.json",
+    "Literasi Bahasa Inggris": "literasi_bahasa_inggris.json",
+    "Penalaran Matematika": "penalaran_matematika.json",
 }
 
 
@@ -59,6 +116,17 @@ def _extract_json(text):
     return json.loads(match.group(0))
 
 
+def clean_error_message(exc):
+    text = str(exc)
+    if "429" in text or "RESOURCE_EXHAUSTED" in text:
+        return "Kuota Gemini habis untuk model/free tier saat ini."
+    if "WinError 10013" in text or "urlopen error" in text:
+        return "Akses jaringan ke Gemini belum tersedia dari proses ini."
+    if "Gagal parse JSON Gemini" in text:
+        return "Gemini mengembalikan JSON yang tidak valid."
+    return text[:240]
+
+
 def _gemini_json(prompt, label, retries=MAX_GEMINI_RETRIES):
     last_error = None
     strict_prompt = (
@@ -71,6 +139,9 @@ def _gemini_json(prompt, label, retries=MAX_GEMINI_RETRIES):
         try:
             return _extract_json(_gemini_generate(strict_prompt))
         except Exception as exc:
+            clean_error = clean_error_message(exc)
+            if clean_error != str(exc):
+                raise RuntimeError(clean_error) from exc
             last_error = exc
             strict_prompt = (
                 f"{prompt}\n\n"
@@ -78,7 +149,7 @@ def _gemini_json(prompt, label, retries=MAX_GEMINI_RETRIES):
                 "Kirim ulang hanya satu objek JSON valid RFC 8259. "
                 "Jangan ada teks pembuka, markdown, trailing comma, atau newline mentah di dalam string."
             )
-    raise ValueError(f"Gagal parse JSON Gemini untuk {label} setelah {retries} percobaan: {last_error}")
+    raise ValueError(f"Gagal parse JSON Gemini untuk {label} setelah {retries} percobaan: {clean_error_message(last_error)}")
 
 
 def _gemini_generate(prompt):
@@ -120,17 +191,48 @@ def _gemini_generate(prompt):
         raise RuntimeError("Format response Gemini tidak dikenali.") from exc
 
 
+def load_patterns(mapel, topic, limit=2):
+    pattern_file = PATTERN_FILES.get(mapel)
+    if not pattern_file:
+        return []
+    path = BANK_DIR / pattern_file
+    if not path.exists():
+        return []
+    data = json.loads(path.read_text(encoding="utf-8"))
+    patterns = data.get("patterns", [])
+    topic_lower = topic.lower()
+    matched = [
+        pattern for pattern in patterns
+        if topic_lower in " ".join([
+            str(pattern.get("topik", "")),
+            str(pattern.get("tipe", "")),
+            " ".join(pattern.get("konsep_kunci", [])),
+        ]).lower()
+    ]
+    selected = matched or patterns
+    return selected[:limit]
+
+
 def build_question_prompt(mapel, topic, level):
     base_rules = """
-Kamu adalah generator soal latihan UTBK untuk platform Instagram edukatif.
-Buat soal orisinal, tidak menyalin soal UTBK yang sudah ada.
+Kamu adalah generator soal latihan UTBK/SNBT untuk platform Instagram edukatif.
+Buat soal orisinal sesuai format SNBT modern, bukan format mapel Saintek/Soshum lama.
 Gunakan bahasa Indonesia baku. Setiap soal punya tepat 5 pilihan A sampai E,
 hanya 1 jawaban benar, dan pembahasan jelas untuk pelajar SMA.
+Jika memakai pola referensi, gunakan hanya struktur konsepnya. Jangan menyalin kalimat,
+angka, konteks, atau pilihan dari contoh/pola referensi.
 Output harus JSON valid tanpa markdown.
 """.strip()
 
+    patterns = load_patterns(mapel, topic)
     schema = {
         "mapel": mapel,
+        "kelompok_tes": "TPS" if mapel in [
+            "Penalaran Umum",
+            "Pengetahuan dan Pemahaman Umum",
+            "Pemahaman Bacaan dan Menulis",
+            "Pengetahuan Kuantitatif",
+        ] else "Literasi",
         "topik": topic,
         "level": level,
         "soal": "",
@@ -144,9 +246,11 @@ Output harus JSON valid tanpa markdown.
     }
     return (
         f"{base_rules}\n\n"
-        f"Buatkan 1 soal latihan UTBK mata pelajaran {mapel}.\n"
+        f"Buatkan 1 soal latihan UTBK/SNBT subtes {mapel}.\n"
         f"Topik: {topic}\n"
         f"Tingkat kesulitan: {level}\n\n"
+        "Pola referensi yang boleh dipakai sebagai cetakan konsep, bukan untuk disalin:\n"
+        f"{json.dumps(patterns, ensure_ascii=False, indent=2)}\n\n"
         "Kembalikan JSON dengan struktur berikut:\n"
         f"{json.dumps(schema, ensure_ascii=False, indent=2)}"
     )
@@ -177,27 +281,157 @@ def build_caption_prompt(question):
 
 
 def draft_question(mapel, topic, level):
+    kelompok_tes = "TPS" if mapel in [
+        "Penalaran Umum",
+        "Pengetahuan dan Pemahaman Umum",
+        "Pemahaman Bacaan dan Menulis",
+        "Pengetahuan Kuantitatif",
+    ] else "Literasi"
+
+    templates = {
+        "Penalaran Umum": {
+            "soal": (
+                "Semua peserta yang disiplin mengerjakan latihan secara rutin. "
+                "Sebagian peserta yang mengerjakan latihan secara rutin mengalami peningkatan skor. "
+                "Simpulan yang pasti benar adalah..."
+            ),
+            "pilihan": {
+                "A": "Semua peserta yang disiplin mengalami peningkatan skor.",
+                "B": "Sebagian peserta yang disiplin mungkin mengalami peningkatan skor.",
+                "C": "Tidak ada peserta disiplin yang mengalami peningkatan skor.",
+                "D": "Semua peserta yang meningkat skornya pasti disiplin.",
+                "E": "Peserta yang tidak rutin berlatih pasti tidak disiplin.",
+            },
+            "jawaban": "B",
+            "pembahasan": (
+                "Premis pertama menyatakan semua peserta disiplin termasuk kelompok yang rutin latihan. "
+                "Premis kedua menyatakan sebagian kelompok rutin mengalami peningkatan skor. "
+                "Karena tidak dijamin bahwa bagian yang meningkat adalah semua peserta disiplin, simpulan paling aman adalah kemungkinan sebagian peserta disiplin mengalami peningkatan skor."
+            ),
+            "konsep_kunci": "Simpulan valid dari premis",
+        },
+        "Pengetahuan dan Pemahaman Umum": {
+            "soal": (
+                "Perhatikan kalimat berikut.\n"
+                "(1) Banyak siswa mulai memakai aplikasi belajar daring. "
+                "(2) Aplikasi tersebut memudahkan siswa mengakses latihan kapan saja. "
+                "Hubungan antarkalimat yang paling tepat adalah..."
+            ),
+            "pilihan": {
+                "A": "Kalimat (2) menyatakan akibat dari kalimat (1).",
+                "B": "Kalimat (2) memberikan penjelasan terhadap kalimat (1).",
+                "C": "Kalimat (2) bertentangan dengan kalimat (1).",
+                "D": "Kalimat (2) menyatakan perbandingan dengan kalimat (1).",
+                "E": "Kalimat (2) merupakan simpulan yang tidak berkaitan dengan kalimat (1).",
+            },
+            "jawaban": "B",
+            "pembahasan": (
+                "Kalimat (1) menyampaikan fakta umum bahwa banyak siswa memakai aplikasi belajar daring. "
+                "Kalimat (2) menjelaskan alasan atau manfaat dari aplikasi tersebut, yaitu memudahkan akses latihan. "
+                "Jadi, kalimat (2) berfungsi sebagai penjelasan terhadap kalimat (1)."
+            ),
+            "konsep_kunci": "Fungsi kalimat dan koherensi",
+        },
+        "Pemahaman Bacaan dan Menulis": {
+            "soal": (
+                "Kalimat berikut belum efektif: Para siswa-siswa diminta untuk mengumpulkan tugasnya masing-masing sebelum jam pelajaran dimulai. "
+                "Perbaikan yang paling efektif adalah..."
+            ),
+            "pilihan": {
+                "A": "Para siswa-siswa diminta mengumpulkan tugas sebelum jam pelajaran dimulai.",
+                "B": "Siswa-siswa diminta untuk mengumpulkan tugasnya masing-masing sebelum jam pelajaran dimulai.",
+                "C": "Para siswa diminta mengumpulkan tugas sebelum jam pelajaran dimulai.",
+                "D": "Para siswa diminta untuk mengumpulkan tugasnya masing-masing sebelum jam pelajaran akan dimulai.",
+                "E": "Semua para siswa diminta mengumpulkan tugas sebelum jam pelajaran dimulai.",
+            },
+            "jawaban": "C",
+            "pembahasan": (
+                "Bentuk 'para siswa-siswa' tidak efektif karena penanda jamak digunakan ganda. "
+                "Kata 'untuk' dan 'masing-masing' juga tidak wajib dalam konteks ini. "
+                "Kalimat paling hemat, jelas, dan tetap bermakna sama adalah pilihan C."
+            ),
+            "konsep_kunci": "Kalimat efektif",
+        },
+        "Pengetahuan Kuantitatif": {
+            "soal": (
+                "Rata-rata nilai 5 siswa adalah 78. Empat nilai yang diketahui adalah 72, 80, 76, dan 84. "
+                "Nilai siswa kelima adalah..."
+            ),
+            "pilihan": {"A": "76", "B": "78", "C": "80", "D": "82", "E": "84"},
+            "jawaban": "B",
+            "pembahasan": (
+                "Jumlah seluruh nilai adalah 5 x 78 = 390. "
+                "Jumlah empat nilai yang diketahui adalah 72 + 80 + 76 + 84 = 312. "
+                "Maka nilai siswa kelima adalah 390 - 312 = 78."
+            ),
+            "konsep_kunci": "Rata-rata",
+        },
+        "Literasi Bahasa Indonesia": {
+            "soal": (
+                "Bacalah teks berikut. Program membaca singkat di sekolah dapat membantu siswa membangun kebiasaan memahami teks. "
+                "Kegiatan ini tidak harus berlangsung lama, tetapi perlu dilakukan konsisten agar siswa terbiasa menemukan informasi utama. "
+                "Pernyataan yang sesuai dengan teks adalah..."
+            ),
+            "pilihan": {
+                "A": "Program membaca hanya efektif jika dilakukan dalam waktu lama.",
+                "B": "Konsistensi kegiatan membaca membantu siswa memahami informasi utama.",
+                "C": "Siswa tidak perlu membaca teks untuk menemukan informasi utama.",
+                "D": "Program membaca singkat selalu menggantikan pelajaran lain.",
+                "E": "Kebiasaan membaca tidak berhubungan dengan pemahaman teks.",
+            },
+            "jawaban": "B",
+            "pembahasan": (
+                "Teks menyatakan bahwa kegiatan membaca tidak harus lama, tetapi perlu dilakukan konsisten agar siswa terbiasa menemukan informasi utama. "
+                "Pernyataan yang paling sesuai adalah pilihan B."
+            ),
+            "konsep_kunci": "Informasi eksplisit",
+        },
+        "Literasi Bahasa Inggris": {
+            "soal": (
+                "Read the text. Many students use short study sessions to stay consistent. "
+                "Although each session may seem simple, regular practice helps them remember concepts better. "
+                "What is the main idea of the text?"
+            ),
+            "pilihan": {
+                "A": "Long study sessions are always better than short ones.",
+                "B": "Regular short practice can support better learning.",
+                "C": "Students should avoid simple study sessions.",
+                "D": "Remembering concepts does not require practice.",
+                "E": "Consistency is unrelated to learning.",
+            },
+            "jawaban": "B",
+            "pembahasan": (
+                "Teks menekankan bahwa sesi belajar singkat yang dilakukan secara rutin membantu siswa mengingat konsep dengan lebih baik. "
+                "Gagasan utama paling tepat adalah pilihan B."
+            ),
+            "konsep_kunci": "Main idea",
+        },
+        "Penalaran Matematika": {
+            "soal": (
+                "Sebuah toko mencatat penjualan buku selama tiga hari: Senin 24 buku, Selasa 30 buku, dan Rabu 36 buku. "
+                "Jika pola kenaikan penjualan tetap sama, banyak buku yang terjual pada Kamis adalah..."
+            ),
+            "pilihan": {"A": "38", "B": "40", "C": "42", "D": "44", "E": "46"},
+            "jawaban": "C",
+            "pembahasan": (
+                "Penjualan naik 6 buku setiap hari: 24 ke 30 naik 6, 30 ke 36 naik 6. "
+                "Jika pola tetap sama, penjualan Kamis adalah 36 + 6 = 42."
+            ),
+            "konsep_kunci": "Pola bilangan dalam konteks data",
+        },
+    }
+
+    template = templates.get(mapel, templates["Penalaran Umum"])
     return {
         "mapel": mapel,
+        "kelompok_tes": kelompok_tes,
         "topik": topic,
         "level": level,
-        "soal": (
-            f"Sebuah latihan {mapel} topik {topic} disiapkan untuk level {level}. "
-            "Jika nilai akhir ditentukan dari pola yang diberikan, pilihan mana yang paling tepat?"
-        ),
-        "pilihan": {
-            "A": "Pilihan sementara A",
-            "B": "Pilihan sementara B",
-            "C": "Pilihan sementara C",
-            "D": "Pilihan sementara D",
-            "E": "Pilihan sementara E",
-        },
-        "jawaban": "C",
-        "pembahasan": (
-            "Ini adalah draft lokal karena GEMINI_API_KEY belum tersedia atau mode draft dipilih. "
-            "Gunakan hasil ini untuk mengecek layout, alur review, dan output file."
-        ),
-        "konsep_kunci": topic,
+        "soal": template["soal"],
+        "pilihan": template["pilihan"],
+        "jawaban": template["jawaban"],
+        "pembahasan": template["pembahasan"],
+        "konsep_kunci": template["konsep_kunci"],
         "tips_pengerjaan": "Identifikasi informasi penting, eliminasi opsi yang tidak konsisten, lalu cek jawaban.",
         "butuh_visual": False,
         "deskripsi_visual": "",
@@ -233,11 +467,13 @@ def local_validation(question):
 
 
 def draft_caption(question):
+    concept = question.get("konsep_kunci") or question.get("topik")
     caption = (
         f"Latihan {question['mapel']} hari ini: {question['topik']}.\n\n"
-        "Coba kerjakan dulu sebelum melihat pembahasan. Fokus pada informasi kunci, "
-        "lalu eliminasi pilihan yang tidak sesuai.\n\n"
-        "Jawab di kolom komentar! Belajar sedikit setiap hari tetap lebih kuat daripada menunggu sempurna."
+        f"Topik ini sering menguji ketelitian membaca pola dan hubungan informasi. "
+        f"Kerjakan dulu sebelum melihat pembahasan, lalu cek apakah pilihanmu sudah sejalan dengan konsep {concept}.\n\n"
+        f"Menurutmu jawabannya apa? Tulis A, B, C, D, atau E di komentar. "
+        "Konsisten latihan kecil seperti ini akan membuatmu lebih siap menghadapi UTBK 2026."
     )
     return {
         "caption": caption,
@@ -336,28 +572,43 @@ def generate_content(mapel, topic, level, mode="auto", account="@namaakun"):
     use_gemini = mode != "draft" and bool(os.getenv("GEMINI_API_KEY"))
     source = "draft"
     fallbacks = []
+    errors = {}
 
     if use_gemini:
-        question = _gemini_json(build_question_prompt(mapel, topic, level), "soal")
-        try:
-            validation = _gemini_json(build_validation_prompt(question), "validasi", retries=2)
-        except Exception as exc:
-            validation = local_validation(question)
-            validation["saran_perbaikan"] = (
-                validation.get("saran_perbaikan", "")
-                + f" Fallback lokal dipakai karena validasi Gemini gagal diparse: {exc}"
-            ).strip()
-            fallbacks.append("validation")
-        try:
-            caption = _gemini_json(build_caption_prompt(question), "caption", retries=2)
-        except Exception as exc:
-            caption = draft_caption(question)
-            caption["caption"] = (
-                caption["caption"]
-                + f"\n\nCatatan internal: caption Gemini gagal diparse ({exc}); edit manual sebelum upload."
-            )
-            fallbacks.append("caption")
         source = "gemini"
+        try:
+            question = _gemini_json(build_question_prompt(mapel, topic, level), "soal")
+        except Exception as exc:
+            source = "fallback"
+            question = draft_question(mapel, topic, level)
+            fallbacks.append("question")
+            errors["question"] = clean_error_message(exc)
+
+        if GEMINI_VALIDATE and "question" not in fallbacks:
+            try:
+                validation = _gemini_json(build_validation_prompt(question), "validasi", retries=2)
+            except Exception as exc:
+                validation = local_validation(question)
+                validation["saran_perbaikan"] = (
+                    validation.get("saran_perbaikan", "")
+                    + f" Fallback lokal dipakai karena validasi Gemini gagal diparse: {exc}"
+                ).strip()
+                fallbacks.append("validation")
+                errors["validation"] = clean_error_message(exc)
+        else:
+            validation = local_validation(question)
+            fallbacks.append("validation")
+
+        if GEMINI_CAPTION and "question" not in fallbacks:
+            try:
+                caption = _gemini_json(build_caption_prompt(question), "caption", retries=2)
+            except Exception as exc:
+                caption = draft_caption(question)
+                fallbacks.append("caption")
+                errors["caption"] = clean_error_message(exc)
+        else:
+            caption = draft_caption(question)
+            fallbacks.append("caption")
     else:
         question = draft_question(mapel, topic, level)
         validation = local_validation(question)
@@ -366,11 +617,16 @@ def generate_content(mapel, topic, level, mode="auto", account="@namaakun"):
     question["akun"] = account
     render_svg(question, run_dir / "post-soal.svg", "soal")
     render_svg(question, run_dir / "post-pembahasan.svg", "pembahasan")
+    review_status = "needs_review" if "question" in fallbacks else "ready"
+    if errors:
+        review_status = "needs_review"
 
     metadata = {
         "run_id": run_id,
         "source": source,
         "fallbacks": fallbacks,
+        "errors": errors,
+        "review_status": review_status,
         "model": DEFAULT_MODEL if source == "gemini" else None,
         "created_at": dt.datetime.now().isoformat(timespec="seconds"),
         "question": question,
@@ -402,7 +658,7 @@ def main():
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mapel", default="Matematika", choices=sorted(MAPEL_TOPICS.keys()))
+    parser.add_argument("--mapel", default="Penalaran Umum", choices=sorted(MAPEL_TOPICS.keys()))
     parser.add_argument("--topik", default="")
     parser.add_argument("--level", default="sedang", choices=["mudah", "sedang", "sulit"])
     parser.add_argument("--mode", default="auto", choices=["auto", "gemini", "draft"])

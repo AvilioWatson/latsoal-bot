@@ -19,7 +19,7 @@
       <aside class="control-panel">
         <form id="generateForm">
           <label>
-            Mata pelajaran
+            Subtes
             <select name="mapel" id="mapel"></select>
           </label>
 
@@ -59,6 +59,7 @@
           <div>
             <p class="eyebrow">Preview</p>
             <h2 id="previewTitle">Belum ada output</h2>
+            <p id="runNote" class="run-note">Generate konten untuk mulai review.</p>
           </div>
           <div class="review-actions">
             <button id="saveButton" class="secondary" type="button" disabled>Simpan</button>
@@ -96,6 +97,14 @@
             <p id="hashtagText" class="hashtags"></p>
           </section>
         </div>
+
+        <section class="debug-panel" id="debugPanel" hidden>
+          <div class="block-title">
+            <h3>Error / Fallback</h3>
+            <span id="debugSource">Tidak ada</span>
+          </div>
+          <pre id="debugText"></pre>
+        </section>
       </section>
     </main>
 

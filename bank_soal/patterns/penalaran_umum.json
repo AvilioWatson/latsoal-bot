@@ -1,0 +1,30 @@
+{
+  "subtes": "Penalaran Umum",
+  "kelompok_tes": "TPS",
+  "patterns": [
+    {
+      "topik": "Penalaran deduktif",
+      "tipe": "silogisme kategori",
+      "level": "mudah",
+      "pola_soal": "Diberikan dua atau tiga premis umum tentang kelompok/objek, peserta memilih simpulan yang pasti benar.",
+      "konsep_kunci": ["premis", "simpulan valid", "kuantor semua/sebagian"],
+      "batasan": ["hindari konteks sensitif", "simpulan harus ditentukan dari premis saja", "satu jawaban pasti benar"]
+    },
+    {
+      "topik": "Penalaran induktif",
+      "tipe": "generalisasi dari data singkat",
+      "level": "sedang",
+      "pola_soal": "Diberikan beberapa pengamatan sederhana, peserta memilih generalisasi yang paling didukung data.",
+      "konsep_kunci": ["pola data", "generalisasi", "batas kesimpulan"],
+      "batasan": ["jangan membuat kesimpulan terlalu luas", "opsi pengecoh harus tampak masuk akal"]
+    },
+    {
+      "topik": "Analogi",
+      "tipe": "hubungan dua konsep",
+      "level": "mudah",
+      "pola_soal": "Diberikan pasangan konsep dengan relasi tertentu, peserta memilih pasangan lain dengan relasi sepadan.",
+      "konsep_kunci": ["relasi fungsi", "relasi sebab", "relasi bagian-keseluruhan"],
+      "batasan": ["gunakan kosakata umum", "relasi tidak boleh ambigu"]
+    }
+  ]
+}

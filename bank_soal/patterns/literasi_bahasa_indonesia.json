@@ -1,0 +1,30 @@
+{
+  "subtes": "Literasi Bahasa Indonesia",
+  "kelompok_tes": "Literasi",
+  "patterns": [
+    {
+      "topik": "Pemahaman teks informatif",
+      "tipe": "identifikasi informasi eksplisit",
+      "level": "mudah",
+      "pola_soal": "Diberikan teks informatif 80 sampai 120 kata, peserta memilih pernyataan yang sesuai dengan isi teks.",
+      "konsep_kunci": ["informasi eksplisit", "parafrasa", "detail bacaan"],
+      "batasan": ["teks orisinal", "opsi salah berupa distorsi detail"]
+    },
+    {
+      "topik": "Tujuan penulis",
+      "tipe": "fungsi komunikatif teks",
+      "level": "sedang",
+      "pola_soal": "Diberikan teks argumentatif atau eksplanatif, peserta menentukan tujuan utama penulis.",
+      "konsep_kunci": ["tujuan teks", "sikap penulis", "gagasan utama"],
+      "batasan": ["hindari opini politik praktis", "tujuan harus didukung seluruh teks"]
+    },
+    {
+      "topik": "Evaluasi pernyataan",
+      "tipe": "menilai dukungan argumen",
+      "level": "sulit",
+      "pola_soal": "Diberikan teks dan beberapa pernyataan, peserta memilih pernyataan yang memperkuat atau melemahkan argumen.",
+      "konsep_kunci": ["argumen", "bukti", "relevansi"],
+      "batasan": ["jawaban tidak boleh bergantung pada pengetahuan luar"]
+    }
+  ]
+}

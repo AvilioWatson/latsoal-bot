@@ -1,0 +1,30 @@
+{
+  "subtes": "Pemahaman Bacaan dan Menulis",
+  "kelompok_tes": "TPS",
+  "patterns": [
+    {
+      "topik": "Kalimat efektif",
+      "tipe": "perbaikan kalimat tidak efektif",
+      "level": "mudah",
+      "pola_soal": "Diberikan satu kalimat dengan pemborosan kata atau struktur tidak sejajar, peserta memilih perbaikan paling efektif.",
+      "konsep_kunci": ["kehematan", "kesejajaran", "kejelasan subjek-predikat"],
+      "batasan": ["jangan mengubah makna utama", "opsi benar harus paling ringkas dan baku"]
+    },
+    {
+      "topik": "Ejaan",
+      "tipe": "perbaikan ejaan dan tanda baca",
+      "level": "mudah",
+      "pola_soal": "Diberikan kalimat dengan kesalahan ejaan, huruf kapital, atau tanda baca, peserta memilih versi yang benar.",
+      "konsep_kunci": ["PUEBI", "tanda koma", "huruf kapital", "kata baku"],
+      "batasan": ["gunakan kasus umum", "jangan terlalu banyak kesalahan dalam satu soal"]
+    },
+    {
+      "topik": "Paragraf padu",
+      "tipe": "urutan kalimat",
+      "level": "sedang",
+      "pola_soal": "Diberikan beberapa kalimat acak, peserta menentukan urutan yang membentuk paragraf padu.",
+      "konsep_kunci": ["gagasan utama", "kata rujukan", "alur informasi"],
+      "batasan": ["jumlah kalimat 4 sampai 5", "hindari urutan yang punya dua jawaban masuk akal"]
+    }
+  ]
+}

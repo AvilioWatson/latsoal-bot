@@ -4,6 +4,6 @@
 __pycache__/
 *.py[cod]
 outputs/
+saved/
 server.out.log
 server.err.log
-

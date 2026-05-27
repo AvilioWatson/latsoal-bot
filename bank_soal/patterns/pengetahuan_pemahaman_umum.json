@@ -1,0 +1,30 @@
+{
+  "subtes": "Pengetahuan dan Pemahaman Umum",
+  "kelompok_tes": "TPS",
+  "patterns": [
+    {
+      "topik": "Makna kata",
+      "tipe": "makna kata dalam konteks",
+      "level": "mudah",
+      "pola_soal": "Diberikan paragraf pendek, peserta memilih makna kata/frasa tertentu sesuai konteks kalimat.",
+      "konsep_kunci": ["konteks", "sinonim kontekstual", "makna denotatif"],
+      "batasan": ["teks maksimal 90 kata", "hindari istilah terlalu teknis"]
+    },
+    {
+      "topik": "Simpulan teks",
+      "tipe": "simpulan tersirat",
+      "level": "sedang",
+      "pola_soal": "Diberikan teks informatif singkat, peserta memilih simpulan yang paling tepat dan tidak melampaui isi teks.",
+      "konsep_kunci": ["inferensi", "gagasan utama", "dukungan bukti"],
+      "batasan": ["opsi salah berupa overgeneralization atau detail yang tidak didukung"]
+    },
+    {
+      "topik": "Hubungan antarkalimat",
+      "tipe": "fungsi kalimat",
+      "level": "sedang",
+      "pola_soal": "Diberikan dua sampai empat kalimat, peserta menentukan hubungan kalimat seperti sebab-akibat, pertentangan, atau penjelasan.",
+      "konsep_kunci": ["koherensi", "konjungsi", "fungsi kalimat"],
+      "batasan": ["kalimat harus alami dan ringkas"]
+    }
+  ]
+}

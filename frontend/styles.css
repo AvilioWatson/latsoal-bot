@@ -95,6 +95,25 @@ h3 {
   font-weight: 650;
 }
 
+.status-pill[data-state="fallback"] {
+  border-color: oklch(0.72 0.11 78);
+  color: oklch(0.42 0.08 78);
+  background: oklch(0.95 0.04 78);
+}
+
+.status-pill[data-state="gemini"],
+.status-pill[data-state="saved"] {
+  border-color: oklch(0.66 0.1 155);
+  color: oklch(0.38 0.08 155);
+  background: oklch(0.95 0.04 155);
+}
+
+.status-pill[data-state="error"] {
+  border-color: oklch(0.68 0.12 28);
+  color: oklch(0.42 0.12 28);
+  background: oklch(0.95 0.04 28);
+}
+
 .workspace {
   display: grid;
   grid-template-columns: 320px minmax(0, 1fr);
@@ -192,6 +211,14 @@ input:focus {
   margin-bottom: 20px;
 }
 
+.run-note {
+  max-width: 64ch;
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .ghost-link {
   color: var(--accent);
   font-weight: 750;
@@ -254,6 +281,25 @@ figcaption {
   border-radius: 8px;
   padding: 18px;
   background: var(--surface);
+}
+
+.debug-panel {
+  margin-top: 18px;
+  border: 1px solid oklch(0.72 0.11 78);
+  border-radius: 8px;
+  padding: 18px;
+  background: oklch(0.97 0.025 78);
+}
+
+.debug-panel pre {
+  max-height: 260px;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  color: oklch(0.28 0.04 78);
+  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.55;
 }
 
 .block-title {

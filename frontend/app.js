@@ -14,12 +14,64 @@ const hashtagText = document.querySelector("#hashtagText");
 const validationScore = document.querySelector("#validationScore");
 const metadataLink = document.querySelector("#metadataLink");
 const saveButton = document.querySelector("#saveButton");
+const runNote = document.querySelector("#runNote");
+const debugPanel = document.querySelector("#debugPanel");
+const debugSource = document.querySelector("#debugSource");
+const debugText = document.querySelector("#debugText");
 
 let topicsByMapel = {};
 let currentRunId = "";
 
 function setStatus(text) {
   sourceStatus.textContent = text;
+  sourceStatus.dataset.state = text.toLowerCase().replace(/\s+/g, "-");
+}
+
+function sourceText(data) {
+  if (data.source === "gemini" && (!data.fallbacks || data.fallbacks.length === 0)) {
+    return "Gemini penuh";
+  }
+  if (data.source === "fallback") {
+    return "Fallback lokal";
+  }
+  if (data.fallbacks && data.fallbacks.length > 0) {
+    return `Gemini + fallback ${data.fallbacks.join(", ")}`;
+  }
+  return data.source || "Draft lokal";
+}
+
+function reviewNote(data) {
+  if (data.review_status === "ready") {
+    return "Konten dari Gemini berhasil dibuat. Tetap lakukan review manual sebelum upload.";
+  }
+  if (data.errors && data.errors.question) {
+    return `Mode fallback aktif: ${data.errors.question}`;
+  }
+  if (data.fallbacks && data.fallbacks.length > 0) {
+    return `Fallback aktif untuk: ${data.fallbacks.join(", ")}. Review manual disarankan.`;
+  }
+  return "Review manual sebelum upload.";
+}
+
+function renderDebug(data) {
+  const errors = data.errors || {};
+  const fallbacks = data.fallbacks || [];
+  const hasDebug = Object.keys(errors).length > 0 || fallbacks.length > 0 || data.source === "fallback";
+  debugPanel.hidden = !hasDebug;
+  if (!hasDebug) {
+    debugText.textContent = "";
+    debugSource.textContent = "Tidak ada";
+    return;
+  }
+
+  debugSource.textContent = data.source || "unknown";
+  debugText.textContent = JSON.stringify({
+    source: data.source,
+    review_status: data.review_status,
+    fallbacks,
+    errors,
+    model: data.model,
+  }, null, 2);
 }
 
 function fillTopics() {
@@ -53,8 +105,10 @@ function renderResult(data) {
   const caption = data.caption;
   const validation = data.validation;
   previewTitle.textContent = `${question.mapel}: ${question.topik}`;
-  sourceLabel.textContent = data.source === "gemini" ? "Gemini" : "Draft lokal";
+  sourceLabel.textContent = sourceText(data);
   validationScore.textContent = `Skor ${validation.skor ?? "-"}`;
+  runNote.textContent = reviewNote(data);
+  renderDebug(data);
   questionText.textContent = question.soal;
 
   choicesList.innerHTML = "";
@@ -94,10 +148,13 @@ form.addEventListener("submit", async (event) => {
       throw new Error(data.error || "Generate gagal.");
     }
     renderResult(data);
-    setStatus(data.source === "gemini" ? "Gemini" : "Draft");
+    setStatus(data.source === "gemini" ? "Gemini" : data.source === "fallback" ? "Fallback" : "Draft");
   } catch (error) {
     setStatus("Error");
     captionText.textContent = error.message;
+    debugPanel.hidden = false;
+    debugSource.textContent = "request";
+    debugText.textContent = error.stack || error.message;
   } finally {
     button.disabled = false;
   }
@@ -125,10 +182,16 @@ saveButton.addEventListener("click", async () => {
     saveButton.textContent = "Simpan";
     setStatus("Error");
     captionText.textContent = error.message;
+    debugPanel.hidden = false;
+    debugSource.textContent = "save";
+    debugText.textContent = error.stack || error.message;
   }
 });
 
 loadConfig().catch((error) => {
   setStatus("Error");
   captionText.textContent = error.message;
+  debugPanel.hidden = false;
+  debugSource.textContent = "config";
+  debugText.textContent = error.stack || error.message;
 });

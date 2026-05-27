@@ -4,21 +4,22 @@ on:
   workflow_dispatch:
     inputs:
       mapel:
-        description: Mata pelajaran
+        description: Subtes UTBK/SNBT
         required: true
-        default: Matematika
+        default: Penalaran Umum
         type: choice
         options:
-          - Matematika
-          - Fisika
-          - Kimia
-          - Biologi
-          - TPS
-          - Bahasa Indonesia
+          - Penalaran Umum
+          - Pengetahuan dan Pemahaman Umum
+          - Pemahaman Bacaan dan Menulis
+          - Pengetahuan Kuantitatif
+          - Literasi Bahasa Indonesia
+          - Literasi Bahasa Inggris
+          - Penalaran Matematika
       topik:
         description: Topik
         required: true
-        default: Statistika
+        default: Penalaran deduktif
       level:
         description: Level
         required: true

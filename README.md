@@ -1,6 +1,6 @@
 # UTBK Content Desk
 
-Manual-first workflow untuk membuat konten latihan soal UTBK.
+Manual-first workflow untuk membuat konten latihan soal UTBK/SNBT berdasarkan subtes modern.
 
 ## Jalankan Frontend Lokal
 
@@ -38,7 +38,7 @@ $env:GEMINI_MODEL="gemini-3.5-flash"
 ## Generate Manual Tanpa UI
 
 ```powershell
-python content_generator.py --mapel Matematika --topik Statistika --level sedang --mode auto
+python content_generator.py --mapel "Penalaran Umum" --topik "Penalaran deduktif" --level sedang --mode auto
 ```
 
 Output tersimpan di:
@@ -53,6 +53,8 @@ Jika tombol `Simpan` dipakai di dashboard, output pilihan akan dicopy ke:
 saved/<run-id>/
 ```
 
+`saved/` dan `outputs/` diabaikan oleh git karena berisi hasil kerja lokal.
+
 ## GitHub Actions Self-Hosted
 
 Workflow tersedia di `.github/workflows/manual-content.yml` dan hanya berjalan saat dipicu manual dari tab Actions.
@@ -62,3 +64,28 @@ Runner memakai:
 ```yaml
 runs-on: self-hosted
 ```
+
+## Struktur Subtes
+
+Default generator mengikuti struktur UTBK/SNBT modern:
+
+```text
+TPS
+  - Penalaran Umum
+  - Pengetahuan dan Pemahaman Umum
+  - Pemahaman Bacaan dan Menulis
+  - Pengetahuan Kuantitatif
+
+Literasi
+  - Literasi Bahasa Indonesia
+  - Literasi Bahasa Inggris
+  - Penalaran Matematika
+```
+
+Pola referensi tersimpan di:
+
+```text
+bank_soal/patterns/
+```
+
+Pola ini dipakai sebagai cetakan konsep, bukan untuk menyalin soal.

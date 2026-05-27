@@ -1,0 +1,30 @@
+{
+  "subtes": "Penalaran Matematika",
+  "kelompok_tes": "Literasi",
+  "patterns": [
+    {
+      "topik": "Data dan ketidakpastian",
+      "tipe": "interpretasi tabel sederhana",
+      "level": "mudah",
+      "pola_soal": "Diberikan tabel data sederhana dalam teks, peserta menafsirkan tren, selisih, rata-rata, atau perbandingan.",
+      "konsep_kunci": ["interpretasi data", "rata-rata", "perbandingan"],
+      "batasan": ["data harus konsisten", "hindari tabel terlalu besar untuk Instagram"]
+    },
+    {
+      "topik": "Pemodelan matematika",
+      "tipe": "menerjemahkan situasi ke persamaan",
+      "level": "sedang",
+      "pola_soal": "Diberikan situasi realistis, peserta menentukan model matematika atau nilai berdasarkan model tersebut.",
+      "konsep_kunci": ["variabel", "persamaan", "model kontekstual"],
+      "batasan": ["konteks dekat dengan kehidupan siswa", "angka realistis"]
+    },
+    {
+      "topik": "Geometri",
+      "tipe": "penalaran luas atau keliling",
+      "level": "sedang",
+      "pola_soal": "Diberikan deskripsi bangun datar atau gabungan bangun, peserta menentukan luas, keliling, atau hubungan ukuran.",
+      "konsep_kunci": ["luas", "keliling", "skala", "visualisasi bangun"],
+      "batasan": ["jika butuh gambar, isi butuh_visual true dan deskripsi_visual jelas"]
+    }
+  ]
+}

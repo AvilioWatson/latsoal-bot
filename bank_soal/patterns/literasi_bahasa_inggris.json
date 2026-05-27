@@ -1,0 +1,30 @@
+{
+  "subtes": "Literasi Bahasa Inggris",
+  "kelompok_tes": "Literasi",
+  "patterns": [
+    {
+      "topik": "Main idea",
+      "tipe": "main idea of short passage",
+      "level": "easy",
+      "pola_soal": "A short English passage is given. The test taker chooses the best main idea.",
+      "konsep_kunci": ["main idea", "topic sentence", "supporting detail"],
+      "batasan": ["passage 80 to 120 words", "options in English", "explanation may be in Indonesian"]
+    },
+    {
+      "topik": "Inference",
+      "tipe": "reasonable inference",
+      "level": "medium",
+      "pola_soal": "A short English passage implies unstated information. The test taker chooses the inference best supported by the text.",
+      "konsep_kunci": ["inference", "context clues", "implied meaning"],
+      "batasan": ["avoid outside knowledge", "wrong options should overstate or contradict the passage"]
+    },
+    {
+      "topik": "Vocabulary in context",
+      "tipe": "contextual meaning",
+      "level": "easy",
+      "pola_soal": "A word or phrase is highlighted in an English sentence or passage. The test taker chooses the closest meaning in context.",
+      "konsep_kunci": ["context clues", "synonym", "tone"],
+      "batasan": ["use common academic vocabulary", "one best answer"]
+    }
+  ]
+}
