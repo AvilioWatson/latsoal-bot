@@ -135,21 +135,6 @@
     "path": "saved/20260527-181725"
   },
   {
-    "run_id": "20260527-174409",
-    "subtes": "matematika",
-    "topik": "statistika",
-    "level": "sedang",
-    "status": "saved",
-    "source": "gemini",
-    "is_duplicate": false,
-    "saved_at": "2026-05-27T10:46:26.024Z",
-    "approved_at": null,
-    "rejected_at": null,
-    "exported_at": null,
-    "export_batch_id": null,
-    "path": "saved/20260527-174409"
-  },
-  {
     "run_id": "20260527-174131",
     "subtes": "matematika",
     "topik": "statistika",

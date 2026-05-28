@@ -643,12 +643,19 @@ select option {
   border-radius: var(--radius);
   padding: 12px;
   background: var(--surface);
-  transition: border-color 150ms ease, background 150ms ease;
+  cursor: pointer;
+  transition: border-color 150ms ease, background 150ms ease, box-shadow 150ms ease;
 }
 
 .saved-item:hover {
   border-color: var(--border2);
   background: var(--surface2);
+}
+
+.saved-item:focus-visible {
+  outline: none;
+  border-color: var(--gold);
+  box-shadow: 0 0 0 3px var(--gold-dim);
 }
 
 .saved-item strong {

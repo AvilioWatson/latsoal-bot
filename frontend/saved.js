@@ -147,21 +147,37 @@ function renderSavedList(items = filteredSavedItems()) {
       </div>
       <span></span>
       <div class="saved-actions">
-        <button type="button" data-open="preview">Preview</button>
         <a target="_blank" rel="noreferrer">JSON</a>
         <button type="button" data-action="approved">Approve</button>
         <button type="button" data-action="rejected">Reject</button>
         <button type="button" data-delete="true">Hapus</button>
       </div>
     `;
+    row.tabIndex = 0;
+    row.setAttribute("role", "button");
+    row.setAttribute("aria-label", `Preview ${item.mapel || item.run_id}`);
     row.querySelector("strong").textContent = item.mapel ? `${item.mapel}: ${item.topik}` : item.run_id;
     row.querySelector("p").textContent = `${item.run_id} / ${item.source || "-"} / ${item.level || "-"}`;
     row.querySelector("span").textContent = statusLabel(item.status);
     row.querySelector("a").href = item.web_files.metadata;
-    row.querySelector("[data-open='preview']").addEventListener("click", () => loadSavedPreview(item.run_id));
-    row.querySelector("[data-delete='true']").addEventListener("click", () => deleteSavedRun(item.run_id));
+    row.addEventListener("click", () => loadSavedPreview(item.run_id));
+    row.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      loadSavedPreview(item.run_id);
+    });
+    row.querySelector("a").addEventListener("click", (event) => event.stopPropagation());
+    row.querySelector("[data-delete='true']").addEventListener("click", (event) => {
+      event.stopPropagation();
+      deleteSavedRun(item.run_id);
+    });
     row.querySelectorAll("button").forEach((button) => {
-      if (button.dataset.action) button.addEventListener("click", () => updateSavedStatus(item.run_id, button.dataset.action));
+      if (button.dataset.action) {
+        button.addEventListener("click", (event) => {
+          event.stopPropagation();
+          updateSavedStatus(item.run_id, button.dataset.action);
+        });
+      }
     });
     savedList.append(row);
   }
