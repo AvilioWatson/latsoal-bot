@@ -154,14 +154,14 @@ function statsHtml() {
     <title>Stats / UTBK Content Desk</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500&display=swap" rel="stylesheet">
     <style>
       *, *::before, *::after { box-sizing: border-box; }
       :root {
         --bg:#0c0c0e; --surface:#141417; --surface2:#1c1c21; --border:rgba(255,255,255,.08);
         --border2:rgba(255,255,255,.14); --text:#f0f0f2; --muted:#8a8a9a; --faint:#4a4a5a;
         --gold:#e8a830; --gold-dim:rgba(232,168,48,.12); --green:#3ecf8e; --red:#f66; --blue:#58afdd;
-        --font-head:'Syne',sans-serif; --font-body:'DM Sans',sans-serif;
+        --font-head:'Manrope',sans-serif; --font-body:'DM Sans',sans-serif;
       }
       body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 var(--font-body); -webkit-font-smoothing:antialiased; }
       .topbar { height:56px; display:flex; align-items:center; justify-content:space-between; padding:0 28px; background:var(--surface); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:5; }

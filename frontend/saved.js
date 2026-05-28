@@ -136,10 +136,11 @@ function renderSavedList(items = filteredSavedItems()) {
     savedList.append(empty);
     return;
   }
-  for (const item of items) {
+  items.forEach((item, index) => {
     const row = document.createElement("article");
     row.className = "saved-item";
     row.dataset.status = item.status || "saved";
+    row.style.setProperty("--item-index", String(index));
     row.innerHTML = `
       <div>
         <strong></strong>
@@ -147,7 +148,6 @@ function renderSavedList(items = filteredSavedItems()) {
       </div>
       <span></span>
       <div class="saved-actions">
-        <a target="_blank" rel="noreferrer">JSON</a>
         <button type="button" data-action="approved">Approve</button>
         <button type="button" data-action="rejected">Reject</button>
         <button type="button" data-delete="true">Hapus</button>
@@ -159,14 +159,12 @@ function renderSavedList(items = filteredSavedItems()) {
     row.querySelector("strong").textContent = item.mapel ? `${item.mapel}: ${item.topik}` : item.run_id;
     row.querySelector("p").textContent = `${item.run_id} / ${item.source || "-"} / ${item.level || "-"}`;
     row.querySelector("span").textContent = statusLabel(item.status);
-    row.querySelector("a").href = item.web_files.metadata;
     row.addEventListener("click", () => loadSavedPreview(item.run_id));
     row.addEventListener("keydown", (event) => {
       if (event.key !== "Enter" && event.key !== " ") return;
       event.preventDefault();
       loadSavedPreview(item.run_id);
     });
-    row.querySelector("a").addEventListener("click", (event) => event.stopPropagation());
     row.querySelector("[data-delete='true']").addEventListener("click", (event) => {
       event.stopPropagation();
       deleteSavedRun(item.run_id);
@@ -180,7 +178,7 @@ function renderSavedList(items = filteredSavedItems()) {
       }
     });
     savedList.append(row);
-  }
+  });
 }
 
 async function loadSavedList() {
@@ -194,10 +192,14 @@ async function loadSavedList() {
 async function loadSavedPreview(runId) {
   setStatus("Loading");
   activePreviewRunId = runId;
+  const previewPanel = document.querySelector(".saved-preview");
+  previewPanel?.classList.remove("is-loaded");
+  previewPanel?.classList.add("is-loading");
   const response = await fetch(`/api/saved/${runId}`);
   const data = await response.json();
   if (!response.ok) {
     setStatus("Error");
+    previewPanel?.classList.remove("is-loading");
     debugPanel.hidden = false;
     debugSource.textContent = "saved/preview";
     debugText.textContent = data.error || "Gagal membuka preview saved.";
@@ -225,6 +227,8 @@ async function loadSavedPreview(runId) {
   metadataLink.hidden = false;
   renderDebug(data);
   setStatus(data.source === "gemini" ? "Gemini" : data.source === "fallback" ? "Fallback" : "Draft");
+  previewPanel?.classList.remove("is-loading");
+  requestAnimationFrame(() => previewPanel?.classList.add("is-loaded"));
 }
 
 function clearPreviewIfDeleted(runId) {
