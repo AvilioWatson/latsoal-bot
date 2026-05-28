@@ -81,6 +81,16 @@ function renderDebug(data) {
   }, null, 2);
 }
 
+function setPreviewImage(image, primaryUrl, fallbackUrl) {
+  image.onerror = () => {
+    if (fallbackUrl && image.src !== new URL(fallbackUrl, window.location.origin).href) {
+      image.onerror = null;
+      image.src = `${fallbackUrl}?v=${Date.now()}`;
+    }
+  };
+  image.src = `${primaryUrl}?v=${Date.now()}`;
+}
+
 function fillTopics() {
   const topics = topicsByMapel[mapelSelect.value] || [];
   topicSelect.innerHTML = "";
@@ -129,8 +139,8 @@ function renderResult(data) {
   captionText.textContent = caption.caption || "";
   hashtagText.textContent = (caption.hashtag || []).join(" ");
   copyCaptionButton.disabled = false;
-  questionImage.src = `${data.web_files.post_soal}?v=${Date.now()}`;
-  solutionImage.src = `${data.web_files.post_pembahasan}?v=${Date.now()}`;
+  setPreviewImage(questionImage, data.web_files.post_soal, data.web_files.post_soal_svg);
+  setPreviewImage(solutionImage, data.web_files.post_pembahasan, data.web_files.post_pembahasan_svg);
   metadataLink.href = data.web_files.metadata;
   metadataLink.hidden = false;
   saveButton.disabled = false;

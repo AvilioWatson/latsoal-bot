@@ -4,6 +4,7 @@ const savedSearch = document.querySelector("#savedSearch");
 const savedStatusFilter = document.querySelector("#savedStatusFilter");
 const refreshSavedButton = document.querySelector("#refreshSavedButton");
 const exportApprovedButton = document.querySelector("#exportApprovedButton");
+const subtestTabs = document.querySelector("#subtestTabs");
 const copyCaptionButton = document.querySelector("#copyCaptionButton");
 const previewTitle = document.querySelector("#previewTitle");
 const runNote = document.querySelector("#runNote");
@@ -21,6 +22,29 @@ const debugSource = document.querySelector("#debugSource");
 const debugText = document.querySelector("#debugText");
 
 let savedItems = [];
+let activeSubtest = "all";
+
+const SUBTESTS = [
+  "Penalaran Umum",
+  "Pengetahuan dan Pemahaman Umum",
+  "Pemahaman Bacaan dan Menulis",
+  "Pengetahuan Kuantitatif",
+  "Literasi Bahasa Indonesia",
+  "Literasi Bahasa Inggris",
+  "Penalaran Matematika",
+];
+
+function slugifySubtest(name) {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+function subtestFromPath() {
+  const parts = window.location.pathname.split("/").filter(Boolean);
+  if (parts[0] !== "saved" || !parts[1]) return "all";
+  const slug = parts[1];
+  const match = SUBTESTS.find((name) => slugifySubtest(name) === slug);
+  return match || "all";
+}
 
 function setStatus(text) {
   sourceStatus.textContent = text;
@@ -70,14 +94,48 @@ function renderDebug(data) {
   }, null, 2);
 }
 
+function setPreviewImage(image, primaryUrl, fallbackUrl) {
+  image.onerror = () => {
+    if (fallbackUrl && image.src !== new URL(fallbackUrl, window.location.origin).href) {
+      image.onerror = null;
+      image.src = `${fallbackUrl}?v=${Date.now()}`;
+    }
+  };
+  image.src = `${primaryUrl}?v=${Date.now()}`;
+}
+
 function filteredSavedItems() {
   const query = savedSearch.value.trim().toLowerCase();
   const status = savedStatusFilter.value;
   return savedItems.filter((item) => {
     const statusOk = status === "all" || (item.status || "saved") === status;
+    const subtestOk = activeSubtest === "all" || item.mapel === activeSubtest;
     const haystack = [item.run_id, item.mapel, item.topik, item.level, item.source, item.status].join(" ").toLowerCase();
-    return statusOk && (!query || haystack.includes(query));
+    return subtestOk && statusOk && (!query || haystack.includes(query));
   });
+}
+
+function renderSubtestTabs() {
+  subtestTabs.innerHTML = "";
+  const tabs = [{label: "Semua", value: "all", href: "/saved"}, ...SUBTESTS.map((name) => ({
+    label: name,
+    value: name,
+    href: `/saved/${slugifySubtest(name)}`,
+  }))];
+  for (const tab of tabs) {
+    const link = document.createElement("a");
+    link.href = tab.href;
+    link.textContent = tab.label;
+    link.dataset.active = tab.value === activeSubtest ? "true" : "false";
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      activeSubtest = tab.value;
+      window.history.pushState({}, "", tab.href);
+      renderSubtestTabs();
+      renderSavedList();
+    });
+    subtestTabs.append(link);
+  }
 }
 
 function renderSavedList(items = filteredSavedItems()) {
@@ -155,8 +213,8 @@ async function loadSavedPreview(runId) {
   captionText.textContent = caption.caption || "";
   hashtagText.textContent = (caption.hashtag || []).join(" ");
   copyCaptionButton.disabled = false;
-  questionImage.src = `${data.web_files.post_soal}?v=${Date.now()}`;
-  solutionImage.src = `${data.web_files.post_pembahasan}?v=${Date.now()}`;
+  setPreviewImage(questionImage, data.web_files.post_soal, data.web_files.post_soal_svg);
+  setPreviewImage(solutionImage, data.web_files.post_pembahasan, data.web_files.post_pembahasan_svg);
   metadataLink.href = data.web_files.metadata;
   metadataLink.hidden = false;
   renderDebug(data);
@@ -235,3 +293,12 @@ loadSavedList().catch((error) => {
   debugSource.textContent = "saved";
   debugText.textContent = error.stack || error.message;
 });
+
+window.addEventListener("popstate", () => {
+  activeSubtest = subtestFromPath();
+  renderSubtestTabs();
+  renderSavedList();
+});
+
+activeSubtest = subtestFromPath();
+renderSubtestTabs();

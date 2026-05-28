@@ -66,6 +66,12 @@ const TOPICS = {
   ],
 };
 
+function slugifySubtest(name) {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+const SAVED_PAGE_ROUTES = new Set(Object.keys(TOPICS).map((name) => `/saved/${slugifySubtest(name)}`));
+
 const MIME = {
   ".css": "text/css; charset=utf-8",
   ".html": "text/html; charset=utf-8",
@@ -107,6 +113,29 @@ function safeJoin(base, requestPath) {
     return null;
   }
   return target;
+}
+
+async function fileExists(filePath) {
+  try {
+    await access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function buildWebFiles(routeBase, runId, directory) {
+  const hasQuestionPng = await fileExists(path.join(directory, "post-soal.png"));
+  const hasSolutionPng = await fileExists(path.join(directory, "post-pembahasan.png"));
+  return {
+    post_soal: `${routeBase}/${runId}/${hasQuestionPng ? "post-soal.png" : "post-soal.svg"}`,
+    post_pembahasan: `${routeBase}/${runId}/${hasSolutionPng ? "post-pembahasan.png" : "post-pembahasan.svg"}`,
+    post_soal_png: `${routeBase}/${runId}/post-soal.png`,
+    post_pembahasan_png: `${routeBase}/${runId}/post-pembahasan.png`,
+    post_soal_svg: `${routeBase}/${runId}/post-soal.svg`,
+    post_pembahasan_svg: `${routeBase}/${runId}/post-pembahasan.svg`,
+    metadata: `${routeBase}/${runId}/metadata.json`,
+  };
 }
 
 async function readJsonBody(request) {
@@ -167,20 +196,18 @@ function runGenerator(payload) {
       stderr += chunk;
     });
     child.on("error", reject);
-    child.on("close", (code) => {
+    child.on("close", async (code) => {
       if (code !== 0) {
         reject(new Error(stderr || `Generator keluar dengan kode ${code}.`));
         return;
       }
       try {
         const metadata = JSON.parse(stdout);
-        metadata.web_files = {
-          post_soal: `/outputs/${metadata.run_id}/post-soal.png`,
-          post_pembahasan: `/outputs/${metadata.run_id}/post-pembahasan.png`,
-          post_soal_svg: `/outputs/${metadata.run_id}/post-soal.svg`,
-          post_pembahasan_svg: `/outputs/${metadata.run_id}/post-pembahasan.svg`,
-          metadata: `/outputs/${metadata.run_id}/metadata.json`,
-        };
+        metadata.web_files = await buildWebFiles(
+          "/outputs",
+          metadata.run_id,
+          path.join(OUTPUTS, metadata.run_id),
+        );
         resolve(metadata);
       } catch (error) {
         reject(new Error(`Output generator bukan JSON valid: ${error.message}`));
@@ -221,13 +248,7 @@ async function saveRun(runId) {
     run_id: runId,
     saved_at: savedAt,
     saved_path: target,
-    web_files: {
-      metadata: `/saved/${runId}/metadata.json`,
-      post_soal: `/saved/${runId}/post-soal.png`,
-      post_pembahasan: `/saved/${runId}/post-pembahasan.png`,
-      post_soal_svg: `/saved/${runId}/post-soal.svg`,
-      post_pembahasan_svg: `/saved/${runId}/post-pembahasan.svg`,
-    },
+    web_files: await buildWebFiles("/saved", runId, target),
   };
 }
 
@@ -253,13 +274,7 @@ async function listSavedRuns() {
       topik: metadata?.question?.topik || null,
       level: metadata?.question?.level || null,
       jawaban: metadata?.question?.jawaban || null,
-      web_files: {
-        metadata: `/saved/${item.run_id}/metadata.json`,
-        post_soal: `/saved/${item.run_id}/post-soal.png`,
-        post_pembahasan: `/saved/${item.run_id}/post-pembahasan.png`,
-        post_soal_svg: `/saved/${item.run_id}/post-soal.svg`,
-        post_pembahasan_svg: `/saved/${item.run_id}/post-pembahasan.svg`,
-      },
+      web_files: await buildWebFiles("/saved", item.run_id, path.join(SAVED, item.run_id)),
     });
   }
   return items;
@@ -394,14 +409,9 @@ async function handleRequest(request, response) {
       if (!isValidRunId(runId)) {
         throw new Error("Run ID tidak valid.");
       }
-      const metadata = JSON.parse(await readFile(path.join(SAVED, runId, "metadata.json"), "utf-8"));
-      metadata.web_files = {
-        post_soal: `/saved/${runId}/post-soal.png`,
-        post_pembahasan: `/saved/${runId}/post-pembahasan.png`,
-        post_soal_svg: `/saved/${runId}/post-soal.svg`,
-        post_pembahasan_svg: `/saved/${runId}/post-pembahasan.svg`,
-        metadata: `/saved/${runId}/metadata.json`,
-      };
+      const runDir = path.join(SAVED, runId);
+      const metadata = JSON.parse(await readFile(path.join(runDir, "metadata.json"), "utf-8"));
+      metadata.web_files = await buildWebFiles("/saved", runId, runDir);
       sendJson(response, metadata);
     } catch (error) {
       sendError(response, 500, error.message);
@@ -434,7 +444,10 @@ async function handleRequest(request, response) {
     return;
   }
 
-  if (request.method === "GET" && (route === "/saved.html" || route === "/saved")) {
+  if (
+    request.method === "GET"
+    && (route === "/saved.html" || route === "/saved" || SAVED_PAGE_ROUTES.has(route))
+  ) {
     await sendFile(response, path.join(FRONTEND, "saved.html"));
     return;
   }

@@ -852,14 +852,29 @@ def wrap_lines(text, width):
         if not paragraph.strip():
             lines.append("")
             continue
-        lines.extend(textwrap.wrap(paragraph, width=width, break_long_words=False))
+        lines.extend(textwrap.wrap(paragraph, width=width, break_long_words=True, break_on_hyphens=False))
     return lines
 
 
-def svg_text_block(lines, x, y, size=28, weight=500, color="oklch(0.22 0.02 255)", line_height=1.35):
+def fit_lines(lines, start_y, size, max_y, line_height=1.35):
+    fitted = []
+    cursor = start_y
+    step = int(size * line_height)
+    for line in lines:
+        if cursor + step > max_y:
+            if fitted:
+                fitted[-1] = fitted[-1].rstrip(" .") + "..."
+            break
+        fitted.append(line)
+        cursor += step
+    return fitted
+
+
+def svg_text_block(lines, x, y, size=28, weight=500, color="oklch(0.22 0.02 255)", line_height=1.35, max_y=None):
     output = []
     cursor = y
-    for line in lines:
+    source_lines = fit_lines(lines, y, size, max_y, line_height) if max_y else lines
+    for line in source_lines:
         safe = html.escape(line)
         output.append(
             f'<text x="{x}" y="{cursor}" font-size="{size}" font-weight="{weight}" '
@@ -886,30 +901,34 @@ def render_svg(question, output_path, variant):
     ]
 
     if variant == "soal":
-        text, y = svg_text_block(wrap_lines(question["soal"], 42), 88, 244, 31, 650, ink)
+        text, y = svg_text_block(wrap_lines(question["soal"], 42), 88, 244, 31, 650, ink, max_y=620)
         blocks.append(text)
         y += 34
         for key, value in question["pilihan"].items():
+            if y > 852:
+                blocks.append(f'<text x="88" y="872" font-size="22" font-weight="700" fill="{muted}">Pilihan dipersingkat untuk preview...</text>')
+                break
             blocks.append(f'<circle cx="106" cy="{y - 9}" r="17" fill="{accent}"/>')
             blocks.append(f'<text x="100" y="{y}" font-size="19" font-weight="800" fill="{bg}">{key}</text>')
             lines = wrap_lines(value, 48)
-            text, y = svg_text_block(lines, 142, y, 25, 500, ink)
+            text, y = svg_text_block(lines, 142, y, 25, 500, ink, max_y=868)
             blocks.append(text)
             y += 20
     else:
         answer = f"Jawaban: {question.get('jawaban', '')}"
         blocks.append(f'<text x="88" y="246" font-size="30" font-weight="750" fill="{accent}">{html.escape(answer)}</text>')
-        text, y = svg_text_block(wrap_lines(question["pembahasan"], 48), 88, 312, 27, 500, ink)
+        text, y = svg_text_block(wrap_lines(question["pembahasan"], 48), 88, 312, 27, 500, ink, max_y=820)
         blocks.append(text)
         y += 28
         tip = question.get("tips_pengerjaan") or question.get("konsep_kunci") or ""
         if tip:
             blocks.append(f'<text x="88" y="{y}" font-size="24" font-weight="700" fill="{muted}">Tips</text>')
-            text, _ = svg_text_block(wrap_lines(tip, 52), 88, y + 42, 23, 500, muted)
+            text, _ = svg_text_block(wrap_lines(tip, 52), 88, y + 42, 23, 500, muted, max_y=878)
             blocks.append(text)
 
     blocks.extend(
         [
+            f'<rect x="80" y="916" width="920" height="78" fill="{panel}"/>',
             f'<text x="88" y="958" font-size="20" font-weight="600" fill="{muted}">Manual review sebelum upload</text>',
             f'<text x="844" y="958" font-size="20" font-weight="700" fill="{muted}">@namaakun</text>',
             "</svg>",
@@ -933,16 +952,72 @@ def load_font(size, bold=False):
         return None
 
 
-def draw_wrapped(draw, text, xy, font, fill, width, line_spacing=10):
-    x, y = xy
+def split_long_token(draw, token, font, max_width):
+    pieces = []
+    current = ""
+    for char in token:
+        candidate = current + char
+        if current and draw.textlength(candidate, font=font) > max_width:
+            pieces.append(current)
+            current = char
+        else:
+            current = candidate
+    if current:
+        pieces.append(current)
+    return pieces
+
+
+def pixel_wrap(draw, text, font, max_width):
+    lines = []
     for paragraph in str(text).splitlines() or [""]:
         if not paragraph.strip():
-            y += int(getattr(font, "size", 24) * 0.8)
+            lines.append("")
             continue
-        for line in textwrap.wrap(paragraph, width=width, break_long_words=False):
+
+        current = ""
+        for raw_word in paragraph.split():
+            word_parts = [raw_word]
+            if draw.textlength(raw_word, font=font) > max_width:
+                word_parts = split_long_token(draw, raw_word, font, max_width)
+
+            for word in word_parts:
+                candidate = word if not current else f"{current} {word}"
+                if current and draw.textlength(candidate, font=font) > max_width:
+                    lines.append(current)
+                    current = word
+                else:
+                    current = candidate
+        if current:
+            lines.append(current)
+    return lines
+
+
+def ellipsize(draw, text, font, max_width):
+    suffix = "..."
+    if draw.textlength(text, font=font) <= max_width:
+        return text
+    while text and draw.textlength(text.rstrip() + suffix, font=font) > max_width:
+        text = text[:-1]
+    return text.rstrip() + suffix
+
+
+def draw_wrapped(draw, text, xy, font, fill, max_width, line_spacing=10, max_y=None, background_fill="#eceff4"):
+    x, y = xy
+    lines = pixel_wrap(draw, text, font, max_width)
+    for index, line in enumerate(lines):
+        bbox = draw.textbbox((x, y), line or "Ag", font=font)
+        line_height = (bbox[3] - bbox[1]) + line_spacing
+        if max_y is not None and y + line_height > max_y:
+            if index > 0:
+                previous = ellipsize(draw, lines[index - 1], font, max_width)
+                draw.rectangle((x, y - line_height, x + max_width, y - line_spacing), fill=background_fill)
+                draw.text((x, y - line_height), previous, font=font, fill=fill)
+            elif y < max_y:
+                draw.text((x, y), ellipsize(draw, line, font, max_width), font=font, fill=fill)
+            break
+        if line:
             draw.text((x, y), line, font=font, fill=fill)
-            bbox = draw.textbbox((x, y), line, font=font)
-            y += (bbox[3] - bbox[1]) + line_spacing
+        y += line_height
     return y
 
 
@@ -956,6 +1031,8 @@ def render_png(question, output_path, variant):
     bg = "#f8f9fb"
     panel = "#eceff4"
     line = "#d1d7e2"
+    footer_clear_top = 916
+    content_bottom = 868
 
     image = Image.new("RGB", (1080, 1080), bg)
     draw = ImageDraw.Draw(image)
@@ -972,28 +1049,32 @@ def render_png(question, output_path, variant):
     draw.text((88, 96), title, font=title_font, fill=ink)
     draw.text(
         (88, 148),
-        f"{question['mapel']} / {question['topik']} / {question['level']}",
+        ellipsize(draw, f"{question['mapel']} / {question['topik']} / {question['level']}", meta_font, 904),
         font=meta_font,
         fill=accent,
     )
 
     if variant == "soal":
-        y = draw_wrapped(draw, question["soal"], (88, 226), question_font, ink, 43, line_spacing=12)
+        y = draw_wrapped(draw, question["soal"], (88, 226), question_font, ink, 904, line_spacing=12, max_y=610)
         y += 28
         for key, value in question["pilihan"].items():
+            if y > content_bottom - 16:
+                draw.text((88, 872), "Pilihan dipersingkat untuk preview...", font=small_font, fill=muted)
+                break
             draw.ellipse((90, y - 2, 124, y + 32), fill=accent)
             draw.text((100, y + 4), key, font=choice_label_font, fill=bg)
-            y = draw_wrapped(draw, value, (142, y), choice_font, ink, 50, line_spacing=8)
+            y = draw_wrapped(draw, value, (142, y), choice_font, ink, 850, line_spacing=8, max_y=content_bottom)
             y += 20
     else:
         draw.text((88, 226), f"Jawaban: {question.get('jawaban', '')}", font=question_font, fill=accent)
-        y = draw_wrapped(draw, question["pembahasan"], (88, 292), body_font, ink, 50, line_spacing=10)
+        y = draw_wrapped(draw, question["pembahasan"], (88, 292), body_font, ink, 904, line_spacing=10, max_y=820)
         tip = question.get("tips_pengerjaan") or question.get("konsep_kunci") or ""
         if tip and y < 850:
             y += 22
             draw.text((88, y), "Tips", font=meta_font, fill=muted)
-            draw_wrapped(draw, tip, (88, y + 42), choice_font, muted, 54, line_spacing=8)
+            draw_wrapped(draw, tip, (88, y + 42), choice_font, muted, 904, line_spacing=8, max_y=878)
 
+    draw.rectangle((80, footer_clear_top, 1000, 994), fill=panel)
     draw.text((88, 946), "Manual review sebelum upload", font=small_font, fill=muted)
     draw.text((844, 946), question.get("akun", "@namaakun"), font=small_font, fill=muted)
     image.save(output_path, format="PNG")

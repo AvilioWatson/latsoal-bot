@@ -1,39 +1,100 @@
 # UTBK Content Desk
 
-Manual-first workflow untuk membuat konten latihan soal UTBK/SNBT berdasarkan subtes modern.
+Web lokal untuk membuat, meninjau, menyimpan, dan mengekspor konten latihan soal UTBK/SNBT. Aplikasi ini dibuat untuk workflow gratis dan manual-first: generator bisa memakai Gemini jika tersedia, tetapi tetap punya fallback lokal agar alur kerja tidak berhenti saat API limit.
 
-## Jalankan Frontend Lokal
+## Fitur Utama
+
+- Generate soal UTBK/SNBT dari browser.
+- Pilih subtes, topik, level, mode konten, dan akun/brand caption.
+- Preview gambar soal, gambar pembahasan, caption, metadata, dan error/fallback.
+- Simpan soal yang dianggap bagus ke Bank Review.
+- Bank Review terpisah dari halaman generator.
+- Bank Review bisa dibuka per subtes.
+- Approve atau reject soal saved.
+- Export semua item approved ke folder `approved/`.
+- Dedup lokal terhadap soal yang sudah tersimpan.
+- Validator lokal untuk mengecek struktur soal, opsi jawaban, caption, hashtag, dan potensi masalah dasar.
+- PNG dan SVG otomatis dibuat untuk post soal dan pembahasan.
+
+## Halaman Web
+
+### Generator
+
+```text
+http://127.0.0.1:8765/
+```
+
+Halaman utama untuk membuat konten baru. Di halaman ini kamu bisa:
+
+- memilih subtes UTBK/SNBT;
+- memilih topik;
+- memilih level;
+- generate soal;
+- melihat preview gambar dan caption;
+- melihat error/fallback jika ada;
+- menyimpan hasil yang bagus ke Bank Review.
+
+### Bank Review
+
+```text
+http://127.0.0.1:8765/saved
+```
+
+Halaman untuk meninjau semua soal yang sudah disimpan. Di halaman ini kamu bisa:
+
+- mencari soal berdasarkan subtes, topik, level, run id, atau source;
+- filter berdasarkan status `Saved`, `Approved`, atau `Rejected`;
+- preview soal dan pembahasan;
+- copy caption;
+- buka metadata JSON;
+- approve atau reject soal;
+- export semua soal approved.
+
+### Bank Review per Subtes
+
+Setiap subtes punya URL sendiri agar review lebih rapi:
+
+```text
+http://127.0.0.1:8765/saved/penalaran-umum
+http://127.0.0.1:8765/saved/pengetahuan-dan-pemahaman-umum
+http://127.0.0.1:8765/saved/pemahaman-bacaan-dan-menulis
+http://127.0.0.1:8765/saved/pengetahuan-kuantitatif
+http://127.0.0.1:8765/saved/literasi-bahasa-indonesia
+http://127.0.0.1:8765/saved/literasi-bahasa-inggris
+http://127.0.0.1:8765/saved/penalaran-matematika
+```
+
+## Cara Menjalankan
+
+Pastikan Node.js dan Python sudah tersedia.
+
+Jalankan server lokal:
 
 ```powershell
 node server.js
 ```
 
-Buka:
+Lalu buka:
 
 ```text
 http://127.0.0.1:8765
 ```
 
-Bank review tersedia di:
+Server memakai Node.js built-in HTTP server, tanpa Express dan tanpa dependency npm tambahan. Logic generator tetap berada di Python.
 
-```text
-http://127.0.0.1:8765/saved.html
+Jika PowerShell memblokir `npm.ps1`, jalankan lewat:
+
+```powershell
+npm.cmd start
 ```
 
-Jika `GEMINI_API_KEY` belum diset, generator memakai mode draft lokal untuk mengecek alur dan tampilan.
+## Konfigurasi Gemini
 
-Server lokal memakai Node.js tanpa dependency tambahan. Logic generator tetap di Python.
-Jika ingin lewat npm di PowerShell yang memblokir `npm.ps1`, pakai `npm.cmd start`.
-
-## Pakai Gemini
-
-Set environment variable di mesin runner atau terminal lokal:
+Buat file `.env` di root project atau set environment variable di terminal:
 
 ```powershell
 $env:GEMINI_API_KEY="isi_api_key"
 ```
-
-Jangan commit API key ke repo. Jika key pernah terkirim di chat, issue, atau log, revoke key tersebut dan buat key baru.
 
 Opsional:
 
@@ -41,19 +102,89 @@ Opsional:
 $env:GEMINI_MODEL="gemini-3.5-flash"
 ```
 
-## Generate Manual Tanpa UI
+Jangan commit API key. File `.env`, `outputs/`, `saved/`, dan `approved/` harus tetap lokal.
 
-```powershell
-python content_generator.py --mapel "Penalaran Umum" --topik "Penalaran deduktif" --level sedang --mode auto
+## Cara Kerja Generator
+
+Alur dasar saat tombol generate ditekan:
+
+1. Browser mengirim pilihan subtes, topik, level, mode, dan akun ke `server.js`.
+2. `server.js` menjalankan `content_generator.py`.
+3. Python membuat soal, pembahasan, caption, metadata, dan gambar.
+4. Hasil disimpan ke folder `outputs/<run-id>/`.
+5. Browser menampilkan preview dari output tersebut.
+6. Jika pengguna menekan tombol simpan, output dicopy ke `saved/<run-id>/`.
+
+## LLM dan Fallback Lokal
+
+Sistem ini masih bisa memakai LLM untuk membuat soal, tetapi tidak sepenuhnya bergantung pada LLM.
+
+Jika Gemini berhasil:
+
+- soal dibuat oleh Gemini;
+- metadata mencatat model dan estimasi token dari `usageMetadata`;
+- validator lokal tetap mengecek hasilnya.
+
+Jika Gemini gagal, quota habis, network error, atau JSON tidak valid:
+
+- generator masuk mode fallback lokal;
+- error ditampilkan di web;
+- metadata mencatat bagian mana yang fallback;
+- konten diberi status review agar dicek manual.
+
+Untuk `Pengetahuan Kuantitatif` dan `Penalaran Matematika`, fallback lokal dapat membuat soal deterministik berbasis rumus, misalnya:
+
+- rata-rata dengan data hilang;
+- rasio dan total bagian;
+- pola bilangan aritmetika.
+
+## Validator Lokal
+
+Validator lokal mengecek hal-hal dasar tanpa LLM:
+
+- struktur data soal lengkap;
+- pilihan jawaban A sampai E tersedia;
+- kunci jawaban ada di pilihan;
+- opsi tidak duplikat;
+- teks soal tidak terlalu kosong;
+- caption tidak membocorkan jawaban;
+- hashtag wajib ada;
+- tahun lama yang tidak relevan terdeteksi;
+- dedup terhadap soal yang sudah disimpan.
+
+Validator tidak menggantikan review manusia. Fungsinya untuk menangkap kesalahan teknis sebelum soal dipakai.
+
+## Dedup Soal
+
+Saat generate, sistem membandingkan teks soal baru dengan bank saved lokal. Jika kemiripan melewati threshold, metadata akan mencatat:
+
+```json
+{
+  "dedup": {
+    "is_duplicate": true,
+    "similarity": 0.86,
+    "matched_run_id": "..."
+  }
+}
 ```
 
-Output tersimpan di:
+Threshold default:
+
+```text
+DEDUP_THRESHOLD=0.82
+```
+
+Nilai ini bisa diubah lewat environment variable.
+
+## Output File
+
+Setiap run membuat folder:
 
 ```text
 outputs/<run-id>/
 ```
 
-Setiap run menghasilkan:
+Isi umumnya:
 
 ```text
 post-soal.svg
@@ -62,52 +193,36 @@ post-pembahasan.svg
 post-pembahasan.png
 caption.txt
 metadata.json
+soal.json
 ```
 
-PNG adalah format siap upload. SVG tetap disimpan untuk preview/edit.
-Generator juga menjalankan dedup lokal terhadap folder `saved/` dan mencatat hasilnya di `metadata.json`.
+Keterangan:
 
-Jika tombol `Simpan` dipakai di dashboard, output pilihan akan dicopy ke:
+- `post-soal.png`: gambar soal siap upload.
+- `post-pembahasan.png`: gambar pembahasan siap upload.
+- `post-soal.svg`: versi SVG untuk preview atau edit.
+- `post-pembahasan.svg`: versi SVG pembahasan.
+- `caption.txt`: caption final.
+- `metadata.json`: catatan source, fallback, error, validator, dedup, dan usage token.
+- `soal.json`: data soal mentah.
+
+Saat tombol simpan dipakai, output terpilih dicopy ke:
 
 ```text
 saved/<run-id>/
 ```
 
-`saved/` dan `outputs/` diabaikan oleh git karena berisi hasil kerja lokal.
-Daftar saved bisa dikelola dari halaman Bank Review dengan status `Saved`, `Approved`, atau `Rejected`.
-Item `Approved` bisa diekspor ke folder:
+Saat export approved dipakai, item approved dicopy ke:
 
 ```text
 approved/<export-id>/
 ```
 
-Folder export berisi copy PNG, SVG, caption, metadata, dan `manifest.json`.
-
-## Generator Lokal
-
-Untuk `Pengetahuan Kuantitatif` dan `Penalaran Matematika`, mode draft/fallback dapat membuat soal deterministik berbasis rumus:
-
-```text
-- rata-rata dengan data hilang
-- rasio dan total bagian
-- pola bilangan aritmetika
-```
-
-Jawaban dan pembahasan dihitung lokal sehingga tetap bisa dipakai saat API LLM sedang limit.
-
-## GitHub Actions Self-Hosted
-
-Workflow tersedia di `.github/workflows/manual-content.yml` dan hanya berjalan saat dipicu manual dari tab Actions.
-
-Runner memakai:
-
-```yaml
-runs-on: self-hosted
-```
+Folder export berisi file konten dan `manifest.json`.
 
 ## Struktur Subtes
 
-Default generator mengikuti struktur UTBK/SNBT modern:
+Subtes default mengikuti struktur UTBK/SNBT modern:
 
 ```text
 TPS
@@ -122,10 +237,64 @@ Literasi
   - Penalaran Matematika
 ```
 
-Pola referensi tersimpan di:
+Pola referensi disimpan di:
 
 ```text
 bank_soal/patterns/
 ```
 
 Pola ini dipakai sebagai cetakan konsep, bukan untuk menyalin soal.
+
+## Generate Manual Tanpa Web
+
+Generator bisa dijalankan langsung dari terminal:
+
+```powershell
+python content_generator.py --mapel "Penalaran Umum" --topik "Penalaran deduktif" --level sedang --mode auto
+```
+
+Output tetap masuk ke:
+
+```text
+outputs/<run-id>/
+```
+
+## GitHub Actions Self-Hosted
+
+Workflow manual tersedia di:
+
+```text
+.github/workflows/manual-content.yml
+```
+
+Workflow ini memakai:
+
+```yaml
+runs-on: self-hosted
+```
+
+Artinya proses berjalan di runner milik sendiri, bukan runner cloud berbayar. Aktivasi tetap manual dari tab Actions.
+
+## Troubleshooting
+
+### Route tidak ditemukan di `/saved/<subtes>`
+
+Restart server Node:
+
+```powershell
+node server.js
+```
+
+Jika masih error, pastikan file `server.js` terbaru sedang dijalankan.
+
+### Gemini quota habis
+
+Web akan menampilkan error quota dan generator akan memakai fallback jika memungkinkan. Tunggu reset quota atau ganti model/key yang masih punya kuota.
+
+### Preview gambar tidak muncul
+
+Cek folder `outputs/<run-id>/` atau `saved/<run-id>/`. Pastikan file SVG/PNG ada. Jika hanya SVG yang ada, preview tetap bisa memakai SVG.
+
+### API key bocor
+
+Segera revoke key di Google AI Studio, lalu buat key baru. Jangan simpan key di README, commit, issue, atau chat publik.
