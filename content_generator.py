@@ -1,12 +1,10 @@
 import argparse
 import datetime as dt
-import html
 import json
 import os
 import random
 import re
 import sys
-import textwrap
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -17,6 +15,36 @@ OUTPUT_DIR = ROOT / "outputs"
 BANK_DIR = ROOT / "bank_soal" / "patterns"
 SAVED_DIR = ROOT / "saved"
 DEDUP_THRESHOLD = float(os.getenv("DEDUP_THRESHOLD", "0.82"))
+
+
+def json_stdout(payload):
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+
+
+def classify_error(exc):
+    message = clean_error_message(exc) if "clean_error_message" in globals() else str(exc)
+    lowered = message.lower()
+    if "quota" in lowered or "429" in lowered:
+        return "quota_exceeded"
+    if any(token in lowered for token in ["urlopen", "timed out", "timeout", "network", "connection", "dns"]):
+        return "network_error"
+    if "json" in lowered or "parse" in lowered:
+        return "invalid_json"
+    if "validasi" in lowered or "validation" in lowered:
+        return "validation_failed"
+    return "unknown"
+
+
+class JsonArgumentParser(argparse.ArgumentParser):
+    def error(self, message):
+        json_stdout({
+            "ok": False,
+            "error": "validation_failed",
+            "detail": message,
+            "fallback_used": False,
+            "fallback_reason": None,
+        })
+        raise SystemExit(2)
 
 
 def load_env_file():
@@ -846,240 +874,6 @@ def draft_caption(question):
     }
 
 
-def wrap_lines(text, width):
-    lines = []
-    for paragraph in str(text).splitlines() or [""]:
-        if not paragraph.strip():
-            lines.append("")
-            continue
-        lines.extend(textwrap.wrap(paragraph, width=width, break_long_words=True, break_on_hyphens=False))
-    return lines
-
-
-def fit_lines(lines, start_y, size, max_y, line_height=1.35):
-    fitted = []
-    cursor = start_y
-    step = int(size * line_height)
-    for line in lines:
-        if cursor + step > max_y:
-            if fitted:
-                fitted[-1] = fitted[-1].rstrip(" .") + "..."
-            break
-        fitted.append(line)
-        cursor += step
-    return fitted
-
-
-def svg_text_block(lines, x, y, size=28, weight=500, color="oklch(0.22 0.02 255)", line_height=1.35, max_y=None):
-    output = []
-    cursor = y
-    source_lines = fit_lines(lines, y, size, max_y, line_height) if max_y else lines
-    for line in source_lines:
-        safe = html.escape(line)
-        output.append(
-            f'<text x="{x}" y="{cursor}" font-size="{size}" font-weight="{weight}" '
-            f'fill="{color}">{safe}</text>'
-        )
-        cursor += int(size * line_height)
-    return "\n".join(output), cursor
-
-
-def render_svg(question, output_path, variant):
-    title = "Latihan UTBK" if variant == "soal" else "Pembahasan"
-    accent = "#2767d8"
-    ink = "#252a33"
-    muted = "#69707d"
-    bg = "#f8f9fb"
-    panel = "#eceff4"
-
-    blocks = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080">',
-        f'<rect width="1080" height="1080" fill="{bg}"/>',
-        f'<rect x="62" y="64" width="956" height="952" rx="8" fill="{panel}" stroke="#d1d7e2"/>',
-        f'<text x="88" y="126" font-size="34" font-weight="700" fill="{ink}">{title}</text>',
-        f'<text x="88" y="170" font-size="22" font-weight="600" fill="{accent}">{html.escape(question["mapel"])} / {html.escape(question["topik"])} / {html.escape(question["level"])}</text>',
-    ]
-
-    if variant == "soal":
-        text, y = svg_text_block(wrap_lines(question["soal"], 42), 88, 244, 31, 650, ink, max_y=620)
-        blocks.append(text)
-        y += 34
-        for key, value in question["pilihan"].items():
-            if y > 852:
-                blocks.append(f'<text x="88" y="872" font-size="22" font-weight="700" fill="{muted}">Pilihan dipersingkat untuk preview...</text>')
-                break
-            blocks.append(f'<circle cx="106" cy="{y - 9}" r="17" fill="{accent}"/>')
-            blocks.append(f'<text x="100" y="{y}" font-size="19" font-weight="800" fill="{bg}">{key}</text>')
-            lines = wrap_lines(value, 48)
-            text, y = svg_text_block(lines, 142, y, 25, 500, ink, max_y=868)
-            blocks.append(text)
-            y += 20
-    else:
-        answer = f"Jawaban: {question.get('jawaban', '')}"
-        blocks.append(f'<text x="88" y="246" font-size="30" font-weight="750" fill="{accent}">{html.escape(answer)}</text>')
-        text, y = svg_text_block(wrap_lines(question["pembahasan"], 48), 88, 312, 27, 500, ink, max_y=820)
-        blocks.append(text)
-        y += 28
-        tip = question.get("tips_pengerjaan") or question.get("konsep_kunci") or ""
-        if tip:
-            blocks.append(f'<text x="88" y="{y}" font-size="24" font-weight="700" fill="{muted}">Tips</text>')
-            text, _ = svg_text_block(wrap_lines(tip, 52), 88, y + 42, 23, 500, muted, max_y=878)
-            blocks.append(text)
-
-    blocks.extend(
-        [
-            f'<rect x="80" y="916" width="920" height="78" fill="{panel}"/>',
-            f'<text x="88" y="958" font-size="20" font-weight="600" fill="{muted}">Manual review sebelum upload</text>',
-            f'<text x="844" y="958" font-size="20" font-weight="700" fill="{muted}">@namaakun</text>',
-            "</svg>",
-        ]
-    )
-    output_path.write_text("\n".join(blocks), encoding="utf-8")
-
-
-def load_font(size, bold=False):
-    candidates = [
-        "C:/Windows/Fonts/arialbd.ttf" if bold else "C:/Windows/Fonts/arial.ttf",
-        "C:/Windows/Fonts/segoeuib.ttf" if bold else "C:/Windows/Fonts/segoeui.ttf",
-    ]
-    try:
-        from PIL import ImageFont
-        for candidate in candidates:
-            if Path(candidate).exists():
-                return ImageFont.truetype(candidate, size=size)
-        return ImageFont.load_default(size=size)
-    except Exception:
-        return None
-
-
-def split_long_token(draw, token, font, max_width):
-    pieces = []
-    current = ""
-    for char in token:
-        candidate = current + char
-        if current and draw.textlength(candidate, font=font) > max_width:
-            pieces.append(current)
-            current = char
-        else:
-            current = candidate
-    if current:
-        pieces.append(current)
-    return pieces
-
-
-def pixel_wrap(draw, text, font, max_width):
-    lines = []
-    for paragraph in str(text).splitlines() or [""]:
-        if not paragraph.strip():
-            lines.append("")
-            continue
-
-        current = ""
-        for raw_word in paragraph.split():
-            word_parts = [raw_word]
-            if draw.textlength(raw_word, font=font) > max_width:
-                word_parts = split_long_token(draw, raw_word, font, max_width)
-
-            for word in word_parts:
-                candidate = word if not current else f"{current} {word}"
-                if current and draw.textlength(candidate, font=font) > max_width:
-                    lines.append(current)
-                    current = word
-                else:
-                    current = candidate
-        if current:
-            lines.append(current)
-    return lines
-
-
-def ellipsize(draw, text, font, max_width):
-    suffix = "..."
-    if draw.textlength(text, font=font) <= max_width:
-        return text
-    while text and draw.textlength(text.rstrip() + suffix, font=font) > max_width:
-        text = text[:-1]
-    return text.rstrip() + suffix
-
-
-def draw_wrapped(draw, text, xy, font, fill, max_width, line_spacing=10, max_y=None, background_fill="#eceff4"):
-    x, y = xy
-    lines = pixel_wrap(draw, text, font, max_width)
-    for index, line in enumerate(lines):
-        bbox = draw.textbbox((x, y), line or "Ag", font=font)
-        line_height = (bbox[3] - bbox[1]) + line_spacing
-        if max_y is not None and y + line_height > max_y:
-            if index > 0:
-                previous = ellipsize(draw, lines[index - 1], font, max_width)
-                draw.rectangle((x, y - line_height, x + max_width, y - line_spacing), fill=background_fill)
-                draw.text((x, y - line_height), previous, font=font, fill=fill)
-            elif y < max_y:
-                draw.text((x, y), ellipsize(draw, line, font, max_width), font=font, fill=fill)
-            break
-        if line:
-            draw.text((x, y), line, font=font, fill=fill)
-        y += line_height
-    return y
-
-
-def render_png(question, output_path, variant):
-    from PIL import Image, ImageDraw
-
-    title = "Latihan UTBK" if variant == "soal" else "Pembahasan"
-    accent = "#2767d8"
-    ink = "#252a33"
-    muted = "#69707d"
-    bg = "#f8f9fb"
-    panel = "#eceff4"
-    line = "#d1d7e2"
-    footer_clear_top = 916
-    content_bottom = 868
-
-    image = Image.new("RGB", (1080, 1080), bg)
-    draw = ImageDraw.Draw(image)
-    draw.rounded_rectangle((62, 64, 1018, 1016), radius=8, fill=panel, outline=line, width=2)
-
-    title_font = load_font(38, bold=True)
-    meta_font = load_font(24, bold=True)
-    question_font = load_font(32, bold=True)
-    choice_font = load_font(26)
-    choice_label_font = load_font(19, bold=True)
-    body_font = load_font(28)
-    small_font = load_font(20, bold=True)
-
-    draw.text((88, 96), title, font=title_font, fill=ink)
-    draw.text(
-        (88, 148),
-        ellipsize(draw, f"{question['mapel']} / {question['topik']} / {question['level']}", meta_font, 904),
-        font=meta_font,
-        fill=accent,
-    )
-
-    if variant == "soal":
-        y = draw_wrapped(draw, question["soal"], (88, 226), question_font, ink, 904, line_spacing=12, max_y=610)
-        y += 28
-        for key, value in question["pilihan"].items():
-            if y > content_bottom - 16:
-                draw.text((88, 872), "Pilihan dipersingkat untuk preview...", font=small_font, fill=muted)
-                break
-            draw.ellipse((90, y - 2, 124, y + 32), fill=accent)
-            draw.text((100, y + 4), key, font=choice_label_font, fill=bg)
-            y = draw_wrapped(draw, value, (142, y), choice_font, ink, 850, line_spacing=8, max_y=content_bottom)
-            y += 20
-    else:
-        draw.text((88, 226), f"Jawaban: {question.get('jawaban', '')}", font=question_font, fill=accent)
-        y = draw_wrapped(draw, question["pembahasan"], (88, 292), body_font, ink, 904, line_spacing=10, max_y=820)
-        tip = question.get("tips_pengerjaan") or question.get("konsep_kunci") or ""
-        if tip and y < 850:
-            y += 22
-            draw.text((88, y), "Tips", font=meta_font, fill=muted)
-            draw_wrapped(draw, tip, (88, y + 42), choice_font, muted, 904, line_spacing=8, max_y=878)
-
-    draw.rectangle((80, footer_clear_top, 1000, 994), fill=panel)
-    draw.text((88, 946), "Manual review sebelum upload", font=small_font, fill=muted)
-    draw.text((844, 946), question.get("akun", "@namaakun"), font=small_font, fill=muted)
-    image.save(output_path, format="PNG")
-
-
 def generate_content(mapel, topic, level, mode="auto", account="@namaakun"):
     GEMINI_USAGE.clear()
     run_id = _now_id()
@@ -1154,10 +948,6 @@ def generate_content(mapel, topic, level, mode="auto", account="@namaakun"):
     if not GEMINI_VALIDATE or source in {"draft", "fallback"}:
         validation = local_validation(question, caption)
     question["akun"] = account
-    render_svg(question, run_dir / "post-soal.svg", "soal")
-    render_svg(question, run_dir / "post-pembahasan.svg", "pembahasan")
-    render_png(question, run_dir / "post-soal.png", "soal")
-    render_png(question, run_dir / "post-pembahasan.png", "pembahasan")
     dedup = check_duplicate(question)
     review_status = "needs_review" if "question" in fallbacks else "ready"
     if errors:
@@ -1175,12 +965,23 @@ def generate_content(mapel, topic, level, mode="auto", account="@namaakun"):
         ).strip()
 
     metadata = {
+        "ok": True,
         "run_id": run_id,
         "source": source,
+        "fallback_used": bool(fallbacks),
+        "fallback_reason": "; ".join(fallbacks) if fallbacks else None,
         "fallbacks": fallbacks,
         "errors": errors,
         "review_status": review_status,
         "dedup": dedup,
+        "validator": {
+            "passed": bool(validation.get("lolos_validasi")),
+            "issues": validation.get("issues", []),
+        },
+        "usage": {
+            "input_tokens": sum(item.get("prompt_tokens") or 0 for item in GEMINI_USAGE),
+            "output_tokens": sum(item.get("output_tokens") or 0 for item in GEMINI_USAGE),
+        },
         "ai_usage": {
             "calls": GEMINI_USAGE.copy(),
             "total_prompt_tokens": sum(item.get("prompt_tokens") or 0 for item in GEMINI_USAGE),
@@ -1195,10 +996,6 @@ def generate_content(mapel, topic, level, mode="auto", account="@namaakun"):
         "files": {
             "question": str(run_dir / "soal.json"),
             "caption": str(run_dir / "caption.txt"),
-            "post_soal": str(run_dir / "post-soal.svg"),
-            "post_pembahasan": str(run_dir / "post-pembahasan.svg"),
-            "post_soal_png": str(run_dir / "post-soal.png"),
-            "post_pembahasan_png": str(run_dir / "post-pembahasan.png"),
         },
     }
 
@@ -1219,18 +1016,34 @@ def generate_content(mapel, topic, level, mode="auto", account="@namaakun"):
 def main():
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
-    parser = argparse.ArgumentParser()
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8")
+    parser = JsonArgumentParser()
     parser.add_argument("--mapel", default="Penalaran Umum", choices=sorted(MAPEL_TOPICS.keys()))
     parser.add_argument("--topik", default="")
     parser.add_argument("--level", default="sedang", choices=["mudah", "sedang", "sulit"])
     parser.add_argument("--mode", default="auto", choices=["auto", "gemini", "draft"])
     parser.add_argument("--account", default="@namaakun")
-    args = parser.parse_args()
-
-    topic = args.topik or MAPEL_TOPICS[args.mapel][0]
-    mode = "auto" if args.mode == "gemini" else args.mode
-    metadata = generate_content(args.mapel, topic, args.level, mode, args.account)
-    print(json.dumps(metadata, ensure_ascii=False, indent=2))
+    try:
+        args = parser.parse_args()
+        topic = args.topik or MAPEL_TOPICS[args.mapel][0]
+        mode = "auto" if args.mode == "gemini" else args.mode
+        metadata = generate_content(args.mapel, topic, args.level, mode, args.account)
+        json_stdout(metadata)
+    except SystemExit:
+        raise
+    except Exception as exc:
+        error = classify_error(exc)
+        detail = clean_error_message(exc)
+        json_stdout({
+            "ok": False,
+            "error": error,
+            "detail": detail,
+            "fallback_used": False,
+            "fallback_reason": None,
+        })
+        print(f"[ERROR] {error}: {detail}", file=sys.stderr)
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

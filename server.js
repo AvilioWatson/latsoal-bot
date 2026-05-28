@@ -1,9 +1,17 @@
 import {spawn} from "node:child_process";
 import {createReadStream} from "node:fs";
-import {access, cp, mkdir, readFile, writeFile} from "node:fs/promises";
+import {access, cp, mkdir, readFile, rm, writeFile} from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 import {fileURLToPath} from "node:url";
+import {
+  addEntry,
+  createEntryFromMetadata,
+  readIndex,
+  removeEntry,
+  updateEntry,
+} from "./lib/filestore.js";
+import {sendStatsJson, sendStatsPage} from "./routes/stats.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const ROOT = path.dirname(__filename);
@@ -13,6 +21,8 @@ const SAVED = path.join(ROOT, "saved");
 const APPROVED = path.join(ROOT, "approved");
 const PORT = Number(process.env.PORT || 8765);
 const PYTHON = process.env.PYTHON || "python";
+const GENERATOR_TIMEOUT_MS = Number(process.env.GENERATOR_TIMEOUT_MS || 60000);
+const GENERATOR_TIMEOUT_LABEL = `${Math.max(1, Math.ceil(GENERATOR_TIMEOUT_MS / 1000))}s`;
 
 const TOPICS = {
   "Penalaran Umum": [
@@ -115,25 +125,10 @@ function safeJoin(base, requestPath) {
   return target;
 }
 
-async function fileExists(filePath) {
-  try {
-    await access(filePath);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function buildWebFiles(routeBase, runId, directory) {
-  const hasQuestionPng = await fileExists(path.join(directory, "post-soal.png"));
-  const hasSolutionPng = await fileExists(path.join(directory, "post-pembahasan.png"));
+async function buildWebFiles(routeBase, runId) {
   return {
-    post_soal: `${routeBase}/${runId}/${hasQuestionPng ? "post-soal.png" : "post-soal.svg"}`,
-    post_pembahasan: `${routeBase}/${runId}/${hasSolutionPng ? "post-pembahasan.png" : "post-pembahasan.svg"}`,
-    post_soal_png: `${routeBase}/${runId}/post-soal.png`,
-    post_pembahasan_png: `${routeBase}/${runId}/post-pembahasan.png`,
-    post_soal_svg: `${routeBase}/${runId}/post-soal.svg`,
-    post_pembahasan_svg: `${routeBase}/${runId}/post-pembahasan.svg`,
+    question: `${routeBase}/${runId}/soal.json`,
+    caption: `${routeBase}/${runId}/caption.txt`,
     metadata: `${routeBase}/${runId}/metadata.json`,
   };
 }
@@ -147,23 +142,9 @@ async function readJsonBody(request) {
   return raw ? JSON.parse(raw) : {};
 }
 
-async function readSavedIndex() {
-  const indexPath = path.join(SAVED, "index.json");
-  try {
-    const index = JSON.parse(await readFile(indexPath, "utf-8"));
-    return Array.isArray(index) ? index : [];
-  } catch {
-    return [];
-  }
-}
-
-async function writeSavedIndex(index) {
-  await mkdir(SAVED, {recursive: true});
-  await writeFile(path.join(SAVED, "index.json"), JSON.stringify(index, null, 2), "utf-8");
-}
-
 function runGenerator(payload) {
   return new Promise((resolve, reject) => {
+    const startedAt = Date.now();
     const args = [
       "content_generator.py",
       "--mapel",
@@ -186,6 +167,35 @@ function runGenerator(payload) {
 
     let stdout = "";
     let stderr = "";
+    let settled = false;
+    let timedOut = false;
+
+    const cleanup = () => {
+      clearTimeout(timer);
+      child.removeAllListeners("error");
+      child.removeAllListeners("close");
+    };
+
+    const finishReject = (error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+
+    const finishResolve = (metadata) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(metadata);
+    };
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      const elapsed = Date.now() - startedAt;
+      console.error(`[TIMEOUT] run_id=unknown elapsed=${elapsed}ms`);
+      child.kill("SIGKILL");
+    }, GENERATOR_TIMEOUT_MS);
 
     child.stdout.setEncoding("utf-8");
     child.stderr.setEncoding("utf-8");
@@ -195,22 +205,50 @@ function runGenerator(payload) {
     child.stderr.on("data", (chunk) => {
       stderr += chunk;
     });
-    child.on("error", reject);
+    child.on("error", finishReject);
     child.on("close", async (code) => {
+      if (timedOut) {
+        finishReject(Object.assign(
+          new Error(`generator did not respond within ${GENERATOR_TIMEOUT_LABEL}`),
+          {
+            payload: {
+              ok: false,
+              error: "timeout",
+              detail: `generator did not respond within ${GENERATOR_TIMEOUT_LABEL}`,
+            },
+          },
+        ));
+        return;
+      }
+      let parsed = null;
+      try {
+        parsed = JSON.parse(stdout);
+      } catch (error) {
+        finishReject(new Error(`Output generator bukan JSON valid: ${error.message}`));
+        return;
+      }
+
+      if (parsed && parsed.ok === false) {
+        const error = new Error(parsed.detail || parsed.error || "Generator gagal.");
+        error.payload = parsed;
+        finishReject(error);
+        return;
+      }
+
       if (code !== 0) {
-        reject(new Error(stderr || `Generator keluar dengan kode ${code}.`));
+        const error = new Error(parsed.detail || stderr || `Generator keluar dengan kode ${code}.`);
+        error.payload = parsed;
+        finishReject(error);
         return;
       }
       try {
-        const metadata = JSON.parse(stdout);
-        metadata.web_files = await buildWebFiles(
+        parsed.web_files = await buildWebFiles(
           "/outputs",
-          metadata.run_id,
-          path.join(OUTPUTS, metadata.run_id),
+          parsed.run_id,
         );
-        resolve(metadata);
+        finishResolve(parsed);
       } catch (error) {
-        reject(new Error(`Output generator bukan JSON valid: ${error.message}`));
+        finishReject(error);
       }
     });
   });
@@ -236,24 +274,23 @@ async function saveRun(runId) {
   await cp(source, target, {recursive: true, force: true});
 
   const savedAt = new Date().toISOString();
-  const index = await readSavedIndex();
-
-  const nextIndex = [
-    {run_id: runId, saved_at: savedAt, status: "saved", path: target},
-    ...index.filter((item) => item.run_id !== runId),
-  ];
-  await writeSavedIndex(nextIndex);
+  const metadata = JSON.parse(await readFile(path.join(target, "metadata.json"), "utf-8"));
+  await addEntry(createEntryFromMetadata(runId, metadata, {
+    saved_at: savedAt,
+    status: "saved",
+    path: `saved/${runId}`,
+  }));
 
   return {
     run_id: runId,
     saved_at: savedAt,
     saved_path: target,
-    web_files: await buildWebFiles("/saved", runId, target),
+    web_files: await buildWebFiles("/saved", runId),
   };
 }
 
 async function listSavedRuns() {
-  const index = await readSavedIndex();
+  const index = await readIndex();
   const items = [];
   for (const item of index) {
     if (!isValidRunId(item.run_id)) continue;
@@ -274,7 +311,7 @@ async function listSavedRuns() {
       topik: metadata?.question?.topik || null,
       level: metadata?.question?.level || null,
       jawaban: metadata?.question?.jawaban || null,
-      web_files: await buildWebFiles("/saved", item.run_id, path.join(SAVED, item.run_id)),
+      web_files: await buildWebFiles("/saved", item.run_id),
     });
   }
   return items;
@@ -295,23 +332,36 @@ async function updateSavedStatus(runId, status) {
   }
   await access(path.join(target, "metadata.json"));
 
-  const index = await readSavedIndex();
-  const existing = index.find((item) => item.run_id === runId);
-  const next = {
-    ...(existing || {run_id: runId, saved_at: new Date().toISOString(), path: target}),
+  const now = new Date().toISOString();
+  const patch = {
     status,
-    status_updated_at: new Date().toISOString(),
+    approved_at: status === "approved" ? now : null,
+    rejected_at: status === "rejected" ? now : null,
   };
-  const nextIndex = [
-    next,
-    ...index.filter((item) => item.run_id !== runId),
-  ];
-  await writeSavedIndex(nextIndex);
-  return next;
+  return updateEntry(runId, patch);
+}
+
+async function deleteSavedRun(runId) {
+  if (!isValidRunId(runId)) {
+    throw new Error("Run ID tidak valid.");
+  }
+
+  const target = safeJoin(SAVED, runId);
+  if (!target) {
+    throw new Error("Path run tidak valid.");
+  }
+
+  await removeEntry(runId);
+  await rm(target, {recursive: true, force: true});
+
+  return {
+    run_id: runId,
+    deleted: true,
+  };
 }
 
 async function exportApprovedRuns() {
-  const index = await readSavedIndex();
+  const index = await readIndex();
   const approved = index.filter((item) => item.status === "approved" && isValidRunId(item.run_id));
   const exportId = new Date().toISOString().replace(/[:.]/g, "-");
   const targetDir = path.join(APPROVED, exportId);
@@ -333,14 +383,12 @@ async function exportApprovedRuns() {
         topik: metadata?.question?.topik || null,
         level: metadata?.question?.level || null,
         jawaban: metadata?.question?.jawaban || null,
+        question_file: path.join(destinationDir, "soal.json"),
         caption_file: path.join(destinationDir, "caption.txt"),
-        post_soal_png: path.join(destinationDir, "post-soal.png"),
-        post_pembahasan_png: path.join(destinationDir, "post-pembahasan.png"),
         web_files: {
           metadata: `/approved/${exportId}/${item.run_id}/metadata.json`,
+          question: `/approved/${exportId}/${item.run_id}/soal.json`,
           caption: `/approved/${exportId}/${item.run_id}/caption.txt`,
-          post_soal_png: `/approved/${exportId}/${item.run_id}/post-soal.png`,
-          post_pembahasan_png: `/approved/${exportId}/${item.run_id}/post-pembahasan.png`,
         },
       });
     } catch {
@@ -372,13 +420,27 @@ async function handleRequest(request, response) {
     return;
   }
 
+  if (request.method === "GET" && route === "/stats") {
+    const accept = request.headers.accept || "";
+    if (accept.includes("text/html") && !accept.includes("application/json")) {
+      sendStatsPage(response);
+    } else {
+      await sendStatsJson(response);
+    }
+    return;
+  }
+
   if (request.method === "POST" && route === "/api/generate") {
     try {
       const payload = await readJsonBody(request);
       const metadata = await runGenerator(payload);
       sendJson(response, metadata);
     } catch (error) {
-      sendError(response, 500, error.message);
+      if (error.payload) {
+        sendJson(response, error.payload, 500);
+      } else {
+        sendError(response, 500, error.message);
+      }
     }
     return;
   }
@@ -411,7 +473,7 @@ async function handleRequest(request, response) {
       }
       const runDir = path.join(SAVED, runId);
       const metadata = JSON.parse(await readFile(path.join(runDir, "metadata.json"), "utf-8"));
-      metadata.web_files = await buildWebFiles("/saved", runId, runDir);
+      metadata.web_files = await buildWebFiles("/saved", runId);
       sendJson(response, metadata);
     } catch (error) {
       sendError(response, 500, error.message);
@@ -424,6 +486,17 @@ async function handleRequest(request, response) {
       const payload = await readJsonBody(request);
       const updated = await updateSavedStatus(payload.run_id || "", payload.status || "");
       sendJson(response, updated);
+    } catch (error) {
+      sendError(response, 500, error.message);
+    }
+    return;
+  }
+
+  if (request.method === "POST" && route === "/api/saved/delete") {
+    try {
+      const payload = await readJsonBody(request);
+      const deleted = await deleteSavedRun(payload.run_id || "");
+      sendJson(response, deleted);
     } catch (error) {
       sendError(response, 500, error.message);
     }
@@ -508,5 +581,8 @@ const server = http.createServer((request, response) => {
 });
 
 server.listen(PORT, "127.0.0.1", () => {
+  readIndex().catch((error) => {
+    console.error(`[INDEX] rebuild failed: ${error.message}`);
+  });
   console.log(`UTBK Content Desk: http://127.0.0.1:${PORT}`);
 });

@@ -5,8 +5,6 @@ const button = document.querySelector("#generateButton");
 const sourceStatus = document.querySelector("#sourceStatus");
 const sourceLabel = document.querySelector("#sourceLabel");
 const previewTitle = document.querySelector("#previewTitle");
-const questionImage = document.querySelector("#questionImage");
-const solutionImage = document.querySelector("#solutionImage");
 const questionText = document.querySelector("#questionText");
 const choicesList = document.querySelector("#choicesList");
 const captionText = document.querySelector("#captionText");
@@ -81,16 +79,6 @@ function renderDebug(data) {
   }, null, 2);
 }
 
-function setPreviewImage(image, primaryUrl, fallbackUrl) {
-  image.onerror = () => {
-    if (fallbackUrl && image.src !== new URL(fallbackUrl, window.location.origin).href) {
-      image.onerror = null;
-      image.src = `${fallbackUrl}?v=${Date.now()}`;
-    }
-  };
-  image.src = `${primaryUrl}?v=${Date.now()}`;
-}
-
 function fillTopics() {
   const topics = topicsByMapel[mapelSelect.value] || [];
   topicSelect.innerHTML = "";
@@ -139,8 +127,6 @@ function renderResult(data) {
   captionText.textContent = caption.caption || "";
   hashtagText.textContent = (caption.hashtag || []).join(" ");
   copyCaptionButton.disabled = false;
-  setPreviewImage(questionImage, data.web_files.post_soal, data.web_files.post_soal_svg);
-  setPreviewImage(solutionImage, data.web_files.post_pembahasan, data.web_files.post_pembahasan_svg);
   metadataLink.href = data.web_files.metadata;
   metadataLink.hidden = false;
   saveButton.disabled = false;

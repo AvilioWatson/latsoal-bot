@@ -8,8 +8,6 @@ const subtestTabs = document.querySelector("#subtestTabs");
 const copyCaptionButton = document.querySelector("#copyCaptionButton");
 const previewTitle = document.querySelector("#previewTitle");
 const runNote = document.querySelector("#runNote");
-const questionImage = document.querySelector("#questionImage");
-const solutionImage = document.querySelector("#solutionImage");
 const questionText = document.querySelector("#questionText");
 const choicesList = document.querySelector("#choicesList");
 const captionText = document.querySelector("#captionText");
@@ -23,6 +21,7 @@ const debugText = document.querySelector("#debugText");
 
 let savedItems = [];
 let activeSubtest = "all";
+let activePreviewRunId = "";
 
 const SUBTESTS = [
   "Penalaran Umum",
@@ -94,16 +93,6 @@ function renderDebug(data) {
   }, null, 2);
 }
 
-function setPreviewImage(image, primaryUrl, fallbackUrl) {
-  image.onerror = () => {
-    if (fallbackUrl && image.src !== new URL(fallbackUrl, window.location.origin).href) {
-      image.onerror = null;
-      image.src = `${fallbackUrl}?v=${Date.now()}`;
-    }
-  };
-  image.src = `${primaryUrl}?v=${Date.now()}`;
-}
-
 function filteredSavedItems() {
   const query = savedSearch.value.trim().toLowerCase();
   const status = savedStatusFilter.value;
@@ -162,6 +151,7 @@ function renderSavedList(items = filteredSavedItems()) {
         <a target="_blank" rel="noreferrer">JSON</a>
         <button type="button" data-action="approved">Approve</button>
         <button type="button" data-action="rejected">Reject</button>
+        <button type="button" data-delete="true">Hapus</button>
       </div>
     `;
     row.querySelector("strong").textContent = item.mapel ? `${item.mapel}: ${item.topik}` : item.run_id;
@@ -169,6 +159,7 @@ function renderSavedList(items = filteredSavedItems()) {
     row.querySelector("span").textContent = statusLabel(item.status);
     row.querySelector("a").href = item.web_files.metadata;
     row.querySelector("[data-open='preview']").addEventListener("click", () => loadSavedPreview(item.run_id));
+    row.querySelector("[data-delete='true']").addEventListener("click", () => deleteSavedRun(item.run_id));
     row.querySelectorAll("button").forEach((button) => {
       if (button.dataset.action) button.addEventListener("click", () => updateSavedStatus(item.run_id, button.dataset.action));
     });
@@ -186,6 +177,7 @@ async function loadSavedList() {
 
 async function loadSavedPreview(runId) {
   setStatus("Loading");
+  activePreviewRunId = runId;
   const response = await fetch(`/api/saved/${runId}`);
   const data = await response.json();
   if (!response.ok) {
@@ -213,12 +205,27 @@ async function loadSavedPreview(runId) {
   captionText.textContent = caption.caption || "";
   hashtagText.textContent = (caption.hashtag || []).join(" ");
   copyCaptionButton.disabled = false;
-  setPreviewImage(questionImage, data.web_files.post_soal, data.web_files.post_soal_svg);
-  setPreviewImage(solutionImage, data.web_files.post_pembahasan, data.web_files.post_pembahasan_svg);
   metadataLink.href = data.web_files.metadata;
   metadataLink.hidden = false;
   renderDebug(data);
   setStatus(data.source === "gemini" ? "Gemini" : data.source === "fallback" ? "Fallback" : "Draft");
+}
+
+function clearPreviewIfDeleted(runId) {
+  if (activePreviewRunId !== runId) return;
+  activePreviewRunId = "";
+  previewTitle.textContent = "Pilih item saved";
+  runNote.textContent = "Preview saved akan muncul di sini.";
+  questionText.textContent = "Pilih item saved untuk melihat soal.";
+  choicesList.innerHTML = "";
+  captionText.textContent = "Caption akan muncul di sini.";
+  hashtagText.textContent = "";
+  validationScore.textContent = "Skor belum tersedia";
+  sourceLabel.textContent = "-";
+  metadataLink.hidden = true;
+  metadataLink.href = "#";
+  copyCaptionButton.disabled = true;
+  debugPanel.hidden = true;
 }
 
 async function updateSavedStatus(runId, status) {
@@ -237,6 +244,32 @@ async function updateSavedStatus(runId, status) {
     return;
   }
   setStatus(status === "approved" ? "Approved" : "Rejected");
+  await loadSavedList();
+}
+
+async function deleteSavedRun(runId) {
+  const item = savedItems.find((entry) => entry.run_id === runId);
+  const label = item?.mapel ? `${item.mapel}: ${item.topik}` : runId;
+  const ok = window.confirm(`Hapus soal saved ini?\n\n${label}\n${runId}\n\nFile preview dan metadata di folder saved juga akan dihapus.`);
+  if (!ok) return;
+
+  setStatus("Deleting");
+  const response = await fetch("/api/saved/delete", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({run_id: runId}),
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    setStatus("Error");
+    debugPanel.hidden = false;
+    debugSource.textContent = "saved/delete";
+    debugText.textContent = data.error || "Hapus soal gagal.";
+    return;
+  }
+
+  setStatus("Deleted");
+  clearPreviewIfDeleted(runId);
   await loadSavedList();
 }
 

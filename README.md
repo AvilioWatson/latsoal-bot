@@ -187,10 +187,6 @@ outputs/<run-id>/
 Isi umumnya:
 
 ```text
-post-soal.svg
-post-soal.png
-post-pembahasan.svg
-post-pembahasan.png
 caption.txt
 metadata.json
 soal.json
@@ -198,13 +194,11 @@ soal.json
 
 Keterangan:
 
-- `post-soal.png`: gambar soal siap upload.
-- `post-pembahasan.png`: gambar pembahasan siap upload.
-- `post-soal.svg`: versi SVG untuk preview atau edit.
-- `post-pembahasan.svg`: versi SVG pembahasan.
 - `caption.txt`: caption final.
 - `metadata.json`: catatan source, fallback, error, validator, dedup, dan usage token.
 - `soal.json`: data soal mentah.
+
+Generator ini hanya fokus membuat data soal. Konversi `soal.json` menjadi PNG/SVG dilakukan oleh sistem terpisah.
 
 Saat tombol simpan dipakai, output terpilih dicopy ke:
 
