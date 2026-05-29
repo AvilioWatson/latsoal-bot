@@ -1,0 +1,117 @@
+import assert from "node:assert/strict";
+import {mkdtemp, mkdir, readFile, rm, writeFile} from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+
+const dataRoot = await mkdtemp(path.join(os.tmpdir(), "latsoal-filestore-"));
+process.env.LATSOAL_DATA_ROOT = dataRoot;
+
+const {
+  addEntry,
+  createEntryFromMetadata,
+  readIndex,
+  rebuildIndex,
+  removeEntry,
+  updateEntry,
+  writeIndex,
+} = await import("../lib/filestore.js");
+
+test.after(async () => {
+  await rm(dataRoot, {recursive: true, force: true});
+});
+
+function metadata(mapel = "Penalaran Umum", topik = "Penalaran deduktif") {
+  return {
+    created_at: "2026-05-29T10:00:00",
+    source: "draft",
+    dedup: {is_duplicate: false},
+    question: {
+      mapel,
+      topik,
+      level: "mudah",
+    },
+  };
+}
+
+async function writeSavedRun(runId, payload = metadata()) {
+  const runDir = path.join(dataRoot, "saved", runId);
+  await mkdir(runDir, {recursive: true});
+  await writeFile(path.join(runDir, "metadata.json"), JSON.stringify(payload, null, 2), "utf-8");
+}
+
+test("rebuildIndex creates entries from saved metadata and legacy status data", async () => {
+  const runId = "20990101-010101";
+  await writeSavedRun(runId);
+  await writeFile(path.join(dataRoot, "saved", "index.json"), JSON.stringify([
+    {
+      run_id: runId,
+      status: "approved",
+      saved_at: "2026-05-29T11:00:00.000Z",
+      status_updated_at: "2026-05-29T12:00:00.000Z",
+    },
+  ]), "utf-8");
+
+  const entries = await rebuildIndex();
+
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].run_id, runId);
+  assert.equal(entries[0].subtes, "penalaran-umum");
+  assert.equal(entries[0].topik, "penalaran-deduktif");
+  assert.equal(entries[0].status, "approved");
+  assert.equal(entries[0].status_updated_at, "2026-05-29T12:00:00.000Z");
+  assert.equal(entries[0].approved_at, "2026-05-29T12:00:00.000Z");
+});
+
+test("addEntry replaces an existing run id and keeps newest entry first", async () => {
+  await writeIndex([{run_id: "20990101-010101", status: "saved"}]);
+
+  await addEntry({
+    run_id: "20990101-010101",
+    status: "approved",
+    path: "saved/20990101-010101",
+  });
+
+  const entries = await readIndex();
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].status, "approved");
+});
+
+test("updateEntry patches matching entries and returns null for missing run id", async () => {
+  await writeIndex([{run_id: "20990101-010101", status: "saved"}]);
+
+  const updated = await updateEntry("20990101-010101", {
+    status: "rejected",
+    status_updated_at: "2026-05-29T13:00:00.000Z",
+  });
+  const missing = await updateEntry("20990101-999999", {status: "approved"});
+
+  assert.equal(updated.status, "rejected");
+  assert.equal(updated.status_updated_at, "2026-05-29T13:00:00.000Z");
+  assert.equal(missing, null);
+});
+
+test("removeEntry deletes only the requested run id", async () => {
+  await writeIndex([
+    {run_id: "20990101-010101", status: "saved"},
+    {run_id: "20990101-020202", status: "approved"},
+  ]);
+
+  const entries = await removeEntry("20990101-010101");
+
+  assert.deepEqual(entries.map((entry) => entry.run_id), ["20990101-020202"]);
+});
+
+test("createEntryFromMetadata preserves review patch fields", () => {
+  const entry = createEntryFromMetadata("20990101-030303", metadata(), {
+    status: "approved",
+    saved_at: "2026-05-29T11:00:00.000Z",
+    status_updated_at: "2026-05-29T12:00:00.000Z",
+    approved_at: "2026-05-29T12:00:00.000Z",
+  });
+
+  assert.equal(entry.status, "approved");
+  assert.equal(entry.status_updated_at, "2026-05-29T12:00:00.000Z");
+  assert.equal(entry.approved_at, "2026-05-29T12:00:00.000Z");
+  assert.equal(entry.path, "saved/20990101-030303");
+});

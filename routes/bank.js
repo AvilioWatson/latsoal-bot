@@ -7,21 +7,31 @@ import {
   removeEntry,
   updateEntry,
 } from "../lib/filestore.js";
-import {readJsonBody, sendError, sendJson} from "../lib/http.js";
+import {errorStatus, readJsonBody, sendError, sendJson} from "../lib/http.js";
 import {OUTPUTS, SAVED, buildWebFiles, isValidRunId, safeJoin} from "../lib/paths.js";
+
+function requestError(status, message) {
+  const error = new Error(message);
+  error.status = status;
+  return error;
+}
 
 async function saveRun(runId) {
   if (!isValidRunId(runId)) {
-    throw new Error("Run ID tidak valid.");
+    throw requestError(400, "Run ID tidak valid.");
   }
 
   const source = safeJoin(OUTPUTS, runId);
   const target = safeJoin(SAVED, runId);
   if (!source || !target) {
-    throw new Error("Path run tidak valid.");
+    throw requestError(400, "Path run tidak valid.");
   }
 
-  await access(path.join(source, "metadata.json"));
+  try {
+    await access(path.join(source, "metadata.json"));
+  } catch {
+    throw requestError(404, "Output run tidak ditemukan.");
+  }
   await mkdir(SAVED, {recursive: true});
   await cp(source, target, {recursive: true, force: true});
 
@@ -72,21 +82,26 @@ async function listSavedRuns() {
 async function updateSavedStatus(runId, status) {
   const allowed = new Set(["saved", "approved", "rejected"]);
   if (!isValidRunId(runId)) {
-    throw new Error("Run ID tidak valid.");
+    throw requestError(400, "Run ID tidak valid.");
   }
   if (!allowed.has(status)) {
-    throw new Error("Status tidak valid.");
+    throw requestError(400, "Status tidak valid.");
   }
 
   const target = safeJoin(SAVED, runId);
   if (!target) {
-    throw new Error("Path run tidak valid.");
+    throw requestError(400, "Path run tidak valid.");
   }
-  await access(path.join(target, "metadata.json"));
+  try {
+    await access(path.join(target, "metadata.json"));
+  } catch {
+    throw requestError(404, "Saved run tidak ditemukan.");
+  }
 
   const now = new Date().toISOString();
   return updateEntry(runId, {
     status,
+    status_updated_at: now,
     approved_at: status === "approved" ? now : null,
     rejected_at: status === "rejected" ? now : null,
   });
@@ -94,12 +109,12 @@ async function updateSavedStatus(runId, status) {
 
 async function deleteSavedRun(runId) {
   if (!isValidRunId(runId)) {
-    throw new Error("Run ID tidak valid.");
+    throw requestError(400, "Run ID tidak valid.");
   }
 
   const target = safeJoin(SAVED, runId);
   if (!target) {
-    throw new Error("Path run tidak valid.");
+    throw requestError(400, "Path run tidak valid.");
   }
 
   await removeEntry(runId);
@@ -113,10 +128,15 @@ async function deleteSavedRun(runId) {
 
 async function sendSavedMetadata(response, runId) {
   if (!isValidRunId(runId)) {
-    throw new Error("Run ID tidak valid.");
+    throw requestError(400, "Run ID tidak valid.");
   }
   const runDir = path.join(SAVED, runId);
-  const metadata = JSON.parse(await readFile(path.join(runDir, "metadata.json"), "utf-8"));
+  let metadata;
+  try {
+    metadata = JSON.parse(await readFile(path.join(runDir, "metadata.json"), "utf-8"));
+  } catch {
+    throw requestError(404, "Saved run tidak ditemukan.");
+  }
   metadata.web_files = buildWebFiles("/saved", runId);
   sendJson(response, metadata);
 }
@@ -138,7 +158,7 @@ export async function handle(request, response, route) {
       const payload = await readJsonBody(request);
       sendJson(response, await saveRun(payload.run_id || ""));
     } catch (error) {
-      sendError(response, 500, error.message);
+      sendError(response, errorStatus(error), error.message);
     }
     return true;
   }
@@ -150,7 +170,7 @@ export async function handle(request, response, route) {
     try {
       sendJson(response, {items: await listSavedRuns()});
     } catch (error) {
-      sendError(response, 500, error.message);
+      sendError(response, errorStatus(error), error.message);
     }
     return true;
   }
@@ -160,7 +180,7 @@ export async function handle(request, response, route) {
     try {
       await sendSavedMetadata(response, savedRoute[1]);
     } catch (error) {
-      sendError(response, 500, error.message);
+      sendError(response, errorStatus(error), error.message);
     }
     return true;
   }
@@ -169,7 +189,7 @@ export async function handle(request, response, route) {
     try {
       await sendSavedMetadata(response, route.replace("/api/saved/", ""));
     } catch (error) {
-      sendError(response, 500, error.message);
+      sendError(response, errorStatus(error), error.message);
     }
     return true;
   }
@@ -179,7 +199,7 @@ export async function handle(request, response, route) {
       const payload = await readJsonBody(request);
       sendJson(response, await updateSavedStatus(savedRoute[1], payload.status || ""));
     } catch (error) {
-      sendError(response, 500, error.message);
+      sendError(response, errorStatus(error), error.message);
     }
     return true;
   }
@@ -189,7 +209,7 @@ export async function handle(request, response, route) {
       const payload = await readJsonBody(request);
       sendJson(response, await updateSavedStatus(payload.run_id || "", payload.status || ""));
     } catch (error) {
-      sendError(response, 500, error.message);
+      sendError(response, errorStatus(error), error.message);
     }
     return true;
   }
@@ -201,7 +221,7 @@ export async function handle(request, response, route) {
     try {
       sendJson(response, await deleteSavedRun(savedRoute[1]));
     } catch (error) {
-      sendError(response, 500, error.message);
+      sendError(response, errorStatus(error), error.message);
     }
     return true;
   }
@@ -211,7 +231,7 @@ export async function handle(request, response, route) {
       const payload = await readJsonBody(request);
       sendJson(response, await deleteSavedRun(payload.run_id || ""));
     } catch (error) {
-      sendError(response, 500, error.message);
+      sendError(response, errorStatus(error), error.message);
     }
     return true;
   }

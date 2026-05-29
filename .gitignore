@@ -6,5 +6,6 @@ __pycache__/
 outputs/
 saved/
 approved/
+bank/
 server.out.log
 server.err.log

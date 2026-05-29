@@ -1,7 +1,7 @@
 import {access, cp, mkdir, readFile, writeFile} from "node:fs/promises";
 import path from "node:path";
 import {readIndex, writeIndex} from "../lib/filestore.js";
-import {sendError, sendJson} from "../lib/http.js";
+import {errorStatus, sendError, sendJson} from "../lib/http.js";
 import {APPROVED, SAVED, isValidRunId} from "../lib/paths.js";
 
 async function exportApprovedRuns() {
@@ -23,13 +23,15 @@ async function exportApprovedRuns() {
       manifest.push({
         run_id: item.run_id,
         saved_at: item.saved_at || null,
-        status_updated_at: item.status_updated_at || null,
+        status_updated_at: item.status_updated_at || item.approved_at || null,
+        approved_at: item.approved_at || null,
         mapel: metadata?.question?.mapel || null,
         topik: metadata?.question?.topik || null,
         level: metadata?.question?.level || null,
         jawaban: metadata?.question?.jawaban || null,
-        question_file: path.join(destinationDir, "soal.json"),
-        caption_file: path.join(destinationDir, "caption.txt"),
+        question_file: `${item.run_id}/soal.json`,
+        caption_file: `${item.run_id}/caption.txt`,
+        metadata_file: `${item.run_id}/metadata.json`,
         web_files: {
           metadata: `/approved/${exportId}/${item.run_id}/metadata.json`,
           question: `/approved/${exportId}/${item.run_id}/soal.json`,
@@ -73,7 +75,7 @@ export async function handle(request, response, route) {
   try {
     sendJson(response, await exportApprovedRuns());
   } catch (error) {
-    sendError(response, 500, error.message);
+    sendError(response, errorStatus(error), error.message);
   }
   return true;
 }

@@ -22,16 +22,9 @@ const debugText = document.querySelector("#debugText");
 let savedItems = [];
 let activeSubtest = "all";
 let activePreviewRunId = "";
-
-const SUBTESTS = [
-  "Penalaran Umum",
-  "Pengetahuan dan Pemahaman Umum",
-  "Pemahaman Bacaan dan Menulis",
-  "Pengetahuan Kuantitatif",
-  "Literasi Bahasa Indonesia",
-  "Literasi Bahasa Inggris",
-  "Penalaran Matematika",
-];
+let activePreviewStatus = "";
+let activePreviewSource = "";
+let subtests = [];
 
 function slugifySubtest(name) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -41,7 +34,7 @@ function subtestFromPath() {
   const parts = window.location.pathname.split("/").filter(Boolean);
   if (parts[0] !== "saved" || !parts[1]) return "all";
   const slug = parts[1];
-  const match = SUBTESTS.find((name) => slugifySubtest(name) === slug);
+  const match = subtests.find((name) => slugifySubtest(name) === slug);
   return match || "all";
 }
 
@@ -61,6 +54,14 @@ function statusLabel(status) {
   if (status === "approved") return "Approved";
   if (status === "rejected") return "Rejected";
   return "Saved";
+}
+
+function setPreviewStatus(status) {
+  activePreviewStatus = status || "";
+  const source = activePreviewSource || "-";
+  sourceLabel.textContent = activePreviewStatus
+    ? `${source} / ${statusLabel(activePreviewStatus)}`
+    : source;
 }
 
 function reviewNote(data) {
@@ -106,7 +107,7 @@ function filteredSavedItems() {
 
 function renderSubtestTabs() {
   subtestTabs.innerHTML = "";
-  const tabs = [{label: "Semua", value: "all", href: "/saved"}, ...SUBTESTS.map((name) => ({
+  const tabs = [{label: "Semua", value: "all", href: "/saved"}, ...subtests.map((name) => ({
     label: name,
     value: name,
     href: `/saved/${slugifySubtest(name)}`,
@@ -125,6 +126,17 @@ function renderSubtestTabs() {
     });
     subtestTabs.append(link);
   }
+}
+
+async function loadConfig() {
+  const response = await fetch("/config", {
+    headers: {"Accept": "application/json"},
+  });
+  const config = await response.json();
+  if (!response.ok) throw new Error(config.error || "Gagal memuat config.");
+  subtests = Object.keys(config.topics || {});
+  activeSubtest = subtestFromPath();
+  renderSubtestTabs();
 }
 
 function renderSavedList(items = filteredSavedItems()) {
@@ -159,6 +171,8 @@ function renderSavedList(items = filteredSavedItems()) {
     row.querySelector("strong").textContent = item.mapel ? `${item.mapel}: ${item.topik}` : item.run_id;
     row.querySelector("p").textContent = `${item.run_id} / ${item.source || "-"} / ${item.level || "-"}`;
     row.querySelector("span").textContent = statusLabel(item.status);
+    row.querySelector("[data-action='approved']").disabled = item.status === "approved";
+    row.querySelector("[data-action='rejected']").disabled = item.status === "rejected";
     row.addEventListener("click", () => loadSavedPreview(item.run_id));
     row.addEventListener("keydown", (event) => {
       if (event.key !== "Enter" && event.key !== " ") return;
@@ -213,7 +227,8 @@ async function loadSavedPreview(runId) {
   const caption = data.caption;
   const validation = data.validation;
   previewTitle.textContent = `${question.mapel}: ${question.topik}`;
-  sourceLabel.textContent = sourceText(data);
+  activePreviewSource = sourceText(data);
+  setPreviewStatus(savedItems.find((item) => item.run_id === runId)?.status || "saved");
   validationScore.textContent = `Skor ${validation.skor ?? "-"}`;
   runNote.textContent = reviewNote(data);
   questionText.textContent = question.soal;
@@ -238,6 +253,8 @@ async function loadSavedPreview(runId) {
 function clearPreviewIfDeleted(runId) {
   if (activePreviewRunId !== runId) return;
   activePreviewRunId = "";
+  activePreviewStatus = "";
+  activePreviewSource = "";
   previewTitle.textContent = "Pilih item saved";
   runNote.textContent = "Preview saved akan muncul di sini.";
   questionText.textContent = "Pilih item saved untuk melihat soal.";
@@ -269,6 +286,10 @@ async function updateSavedStatus(runId, status) {
   }
   setStatus(status === "approved" ? "Approved" : "Rejected");
   await loadSavedList();
+  if (activePreviewRunId === runId) {
+    setPreviewStatus(status);
+    runNote.textContent = `Status review sekarang ${statusLabel(status)}.`;
+  }
 }
 
 async function deleteSavedRun(runId) {
@@ -318,7 +339,7 @@ exportApprovedButton.addEventListener("click", async () => {
     setStatus("Exported");
     debugPanel.hidden = false;
     debugSource.textContent = "export";
-    debugText.textContent = JSON.stringify(data, null, 2);
+    debugText.textContent = `Export selesai: ${data.total} item.\n\n${JSON.stringify(data, null, 2)}`;
   } catch (error) {
     setStatus("Error");
     debugPanel.hidden = false;
@@ -343,12 +364,10 @@ copyCaptionButton.addEventListener("click", async () => {
   }
 });
 
-loadSavedList().catch((error) => {
-  setStatus("Error");
-  debugPanel.hidden = false;
-  debugSource.textContent = "saved";
-  debugText.textContent = error.stack || error.message;
-});
+async function init() {
+  await loadConfig();
+  await loadSavedList();
+}
 
 window.addEventListener("popstate", () => {
   activeSubtest = subtestFromPath();
@@ -356,5 +375,9 @@ window.addEventListener("popstate", () => {
   renderSavedList();
 });
 
-activeSubtest = subtestFromPath();
-renderSubtestTabs();
+init().catch((error) => {
+  setStatus("Error");
+  debugPanel.hidden = false;
+  debugSource.textContent = "saved";
+  debugText.textContent = error.stack || error.message;
+});

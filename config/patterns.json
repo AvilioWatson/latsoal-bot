@@ -1,0 +1,9 @@
+{
+  "Penalaran Umum": "penalaran_umum.json",
+  "Pengetahuan dan Pemahaman Umum": "pengetahuan_pemahaman_umum.json",
+  "Pemahaman Bacaan dan Menulis": "pemahaman_bacaan_menulis.json",
+  "Pengetahuan Kuantitatif": "pengetahuan_kuantitatif.json",
+  "Literasi Bahasa Indonesia": "literasi_bahasa_indonesia.json",
+  "Literasi Bahasa Inggris": "literasi_bahasa_inggris.json",
+  "Penalaran Matematika": "penalaran_matematika.json"
+}

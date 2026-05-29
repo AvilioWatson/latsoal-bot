@@ -1,57 +1,48 @@
-import {readJsonBody, sendError, sendJson} from "../lib/http.js";
+import {readFileSync} from "node:fs";
+import path from "node:path";
+import {errorStatus, readJsonBody, sendError, sendJson} from "../lib/http.js";
+import {ROOT} from "../lib/paths.js";
 import {runGenerator} from "../lib/runner.js";
 
-export const TOPICS = {
-  "Penalaran Umum": [
-    "Penalaran deduktif",
-    "Penalaran induktif",
-    "Analogi",
-    "Sebab akibat",
-    "Penalaran analitis",
-  ],
-  "Pengetahuan dan Pemahaman Umum": [
-    "Makna kata",
-    "Hubungan antarkalimat",
-    "Ide pokok",
-    "Simpulan teks",
-    "Kesesuaian pernyataan",
-  ],
-  "Pemahaman Bacaan dan Menulis": [
-    "Kalimat efektif",
-    "Ejaan",
-    "Kohesi dan koherensi",
-    "Paragraf padu",
-    "Perbaikan kalimat",
-  ],
-  "Pengetahuan Kuantitatif": [
-    "Aritmetika",
-    "Aljabar dasar",
-    "Perbandingan",
-    "Peluang",
-    "Statistika",
-  ],
-  "Literasi Bahasa Indonesia": [
-    "Pemahaman teks informatif",
-    "Pemahaman teks argumentatif",
-    "Simpulan bacaan",
-    "Tujuan penulis",
-    "Evaluasi pernyataan",
-  ],
-  "Literasi Bahasa Inggris": [
-    "Main idea",
-    "Inference",
-    "Vocabulary in context",
-    "Author purpose",
-    "Detail information",
-  ],
-  "Penalaran Matematika": [
-    "Data dan ketidakpastian",
-    "Bilangan",
-    "Aljabar",
-    "Geometri",
-    "Pemodelan matematika",
-  ],
-};
+export const TOPICS = JSON.parse(readFileSync(path.join(ROOT, "config", "topics.json"), "utf-8"));
+const LEVELS = new Set(["mudah", "sedang", "sulit"]);
+const MODES = new Set(["auto", "gemini", "draft"]);
+
+function requestError(status, message) {
+  const error = new Error(message);
+  error.status = status;
+  return error;
+}
+
+function normalizeGeneratePayload(payload) {
+  const raw = payload && typeof payload === "object" ? payload : {};
+  const mapel = raw.mapel || "Penalaran Umum";
+  if (!Object.hasOwn(TOPICS, mapel)) {
+    throw requestError(400, "Subtes tidak valid.");
+  }
+
+  const topik = raw.topik || TOPICS[mapel][0];
+  if (!TOPICS[mapel].includes(topik)) {
+    throw requestError(400, "Topik tidak tersedia untuk subtes terpilih.");
+  }
+
+  const level = raw.level || "sedang";
+  if (!LEVELS.has(level)) {
+    throw requestError(400, "Level tidak valid.");
+  }
+
+  const mode = raw.mode || "auto";
+  if (!MODES.has(mode)) {
+    throw requestError(400, "Mode generator tidak valid.");
+  }
+
+  const account = raw.account || "@namaakun";
+  if (typeof account !== "string" || account.length > 80) {
+    throw requestError(400, "Account harus berupa teks maksimal 80 karakter.");
+  }
+
+  return {mapel, topik, level, mode, account};
+}
 
 export async function handle(request, response, route) {
   if (request.method === "GET" && (route === "/api/config" || route === "/config")) {
@@ -62,12 +53,12 @@ export async function handle(request, response, route) {
   if (request.method === "POST" && (route === "/api/generate" || route === "/generate")) {
     try {
       const payload = await readJsonBody(request);
-      sendJson(response, await runGenerator(payload));
+      sendJson(response, await runGenerator(normalizeGeneratePayload(payload)));
     } catch (error) {
       if (error.payload) {
         sendJson(response, error.payload, 500);
       } else {
-        sendError(response, 500, error.message);
+        sendError(response, errorStatus(error), error.message);
       }
     }
     return true;

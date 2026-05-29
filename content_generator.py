@@ -11,9 +11,11 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent
-OUTPUT_DIR = ROOT / "outputs"
+DATA_ROOT = Path(os.getenv("LATSOAL_DATA_ROOT", ROOT)).resolve()
+OUTPUT_DIR = DATA_ROOT / "outputs"
 BANK_DIR = ROOT / "bank_soal" / "patterns"
-SAVED_DIR = ROOT / "saved"
+SAVED_DIR = DATA_ROOT / "saved"
+BANK_INDEX_PATH = DATA_ROOT / "bank" / "index.json"
 DEDUP_THRESHOLD = float(os.getenv("DEDUP_THRESHOLD", "0.82"))
 
 
@@ -71,68 +73,8 @@ GEMINI_CAPTION = os.getenv("GEMINI_CAPTION", "").lower() in {"1", "true", "yes"}
 GEMINI_USAGE = []
 
 
-MAPEL_TOPICS = {
-    "Penalaran Umum": [
-        "Penalaran deduktif",
-        "Penalaran induktif",
-        "Analogi",
-        "Sebab akibat",
-        "Penalaran analitis",
-    ],
-    "Pengetahuan dan Pemahaman Umum": [
-        "Makna kata",
-        "Hubungan antarkalimat",
-        "Ide pokok",
-        "Simpulan teks",
-        "Kesesuaian pernyataan",
-    ],
-    "Pemahaman Bacaan dan Menulis": [
-        "Kalimat efektif",
-        "Ejaan",
-        "Kohesi dan koherensi",
-        "Paragraf padu",
-        "Perbaikan kalimat",
-    ],
-    "Pengetahuan Kuantitatif": [
-        "Aritmetika",
-        "Aljabar dasar",
-        "Perbandingan",
-        "Peluang",
-        "Statistika",
-    ],
-    "Literasi Bahasa Indonesia": [
-        "Pemahaman teks informatif",
-        "Pemahaman teks argumentatif",
-        "Simpulan bacaan",
-        "Tujuan penulis",
-        "Evaluasi pernyataan",
-    ],
-    "Literasi Bahasa Inggris": [
-        "Main idea",
-        "Inference",
-        "Vocabulary in context",
-        "Author purpose",
-        "Detail information",
-    ],
-    "Penalaran Matematika": [
-        "Data dan ketidakpastian",
-        "Bilangan",
-        "Aljabar",
-        "Geometri",
-        "Pemodelan matematika",
-    ],
-}
-
-
-PATTERN_FILES = {
-    "Penalaran Umum": "penalaran_umum.json",
-    "Pengetahuan dan Pemahaman Umum": "pengetahuan_pemahaman_umum.json",
-    "Pemahaman Bacaan dan Menulis": "pemahaman_bacaan_menulis.json",
-    "Pengetahuan Kuantitatif": "pengetahuan_kuantitatif.json",
-    "Literasi Bahasa Indonesia": "literasi_bahasa_indonesia.json",
-    "Literasi Bahasa Inggris": "literasi_bahasa_inggris.json",
-    "Penalaran Matematika": "penalaran_matematika.json",
-}
+MAPEL_TOPICS = json.loads((ROOT / "config" / "topics.json").read_text(encoding="utf-8"))
+PATTERN_FILES = json.loads((ROOT / "config" / "patterns.json").read_text(encoding="utf-8"))
 
 
 QUESTION_SCHEMA = {
@@ -271,11 +213,10 @@ def check_duplicate(question):
         "reason": "",
     }
 
-    index_path = SAVED_DIR / "index.json"
-    if not index_path.exists():
+    if not BANK_INDEX_PATH.exists():
         return best
     try:
-        index = json.loads(index_path.read_text(encoding="utf-8"))
+        index = json.loads(BANK_INDEX_PATH.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return best
 

@@ -1,0 +1,167 @@
+# API Contract
+
+Base URL lokal:
+
+```text
+http://127.0.0.1:8765
+```
+
+Semua response JSON memakai `Content-Type: application/json; charset=utf-8`.
+Response file/HTML dan JSON menyertakan header `X-Content-Type-Options: nosniff` dan `Referrer-Policy: same-origin`.
+
+## Pages
+
+| Method | Path | Description |
+| --- | --- | --- |
+| `GET` | `/` | Halaman Generator. |
+| `GET` | `/saved` | Halaman Bank Review jika browser meminta HTML. |
+| `GET` | `/saved.html` | Alias halaman Bank Review. |
+| `GET` | `/saved/<subtes-slug>` | Halaman Bank Review terfilter subtes. |
+| `GET` | `/stats` | Halaman Stats jika browser meminta HTML. |
+
+## Config
+
+### `GET /config`
+
+Alias: `GET /api/config`
+
+Response:
+
+```json
+{
+  "topics": {
+    "Penalaran Umum": ["Penalaran deduktif"]
+  }
+}
+```
+
+## Generate
+
+### `POST /generate`
+
+Alias: `POST /api/generate`
+
+Request:
+
+```json
+{
+  "mapel": "Penalaran Umum",
+  "topik": "Penalaran deduktif",
+  "level": "mudah",
+  "mode": "draft",
+  "account": "@namaakun"
+}
+```
+
+Validation:
+
+- `mapel` harus ada di `config/topics.json`.
+- `topik` harus tersedia untuk `mapel`.
+- `level` harus `mudah`, `sedang`, atau `sulit`.
+- `mode` harus `auto`, `gemini`, atau `draft`.
+- `account` maksimal 80 karakter.
+
+Success response menyertakan `run_id`, `question`, `caption`, `validation`, `metadata`, dan `web_files`.
+
+## Bank Review
+
+### `POST /saved`
+
+Alias: `POST /api/save`
+
+Request:
+
+```json
+{"run_id": "20260529-123456"}
+```
+
+Menyalin `outputs/<run-id>/` ke `saved/<run-id>/` dan menambah entry ke `bank/index.json`.
+
+### `GET /saved`
+
+Alias: `GET /api/saved`
+
+Jika request menerima JSON, response:
+
+```json
+{
+  "items": []
+}
+```
+
+### `GET /saved/<run-id>`
+
+Alias: `GET /api/saved/<run-id>`
+
+Mengembalikan metadata saved beserta `web_files`.
+
+### `POST /saved/<run-id>/status`
+
+Alias: `POST /api/saved/status`
+
+Request:
+
+```json
+{"status": "approved"}
+```
+
+Status valid: `saved`, `approved`, `rejected`.
+Response menyertakan `status_updated_at`; `approved_at` atau `rejected_at` diisi sesuai status.
+
+### `DELETE /saved/<run-id>`
+
+Alias: `POST /saved/<run-id>/delete`, `POST /api/saved/delete`
+
+Menghapus entry index dan folder `saved/<run-id>/`.
+
+## Export
+
+### `POST /export`
+
+Alias: `POST /api/export/approved`
+
+Menyalin semua item `approved` ke `approved/<export-id>/` dan membuat `manifest.json`.
+Path file di manifest relatif terhadap folder export.
+
+## Stats
+
+### `GET /stats`
+
+Jika request menerima JSON, response berisi agregat:
+
+- `total`
+- `by_status`
+- `by_subtes`
+- `by_source`
+- `by_level`
+- `last_7_days`
+- `duplicate_rate`
+- `export_batches`
+- `pending_export`
+- `warnings`
+
+## Health
+
+### `GET /health`
+
+Response:
+
+```json
+{"ok": true, "app": "utbk-content-desk"}
+```
+
+## Errors
+
+Error JSON memakai bentuk:
+
+```json
+{"error": "Pesan error"}
+```
+
+Status penting:
+
+- `400`: input JSON atau field request tidak valid.
+- `403`: path static asset keluar dari mount.
+- `404`: route/file/run tidak ditemukan.
+- `413`: body request terlalu besar.
+- `500`: kegagalan internal atau generator gagal tanpa status khusus.

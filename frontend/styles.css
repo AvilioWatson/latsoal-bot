@@ -741,10 +741,15 @@ select option {
 }
 
 .saved-actions a:hover,
-.saved-actions button:hover {
+.saved-actions button:hover:not(:disabled) {
   color: var(--text);
   border-color: var(--border2);
   background: var(--surface3);
+}
+
+.saved-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.38;
 }
 
 .saved-actions button[data-delete="true"] {
