@@ -182,7 +182,9 @@ function renderSavedList(items = filteredSavedItems()) {
 }
 
 async function loadSavedList() {
-  const response = await fetch("/api/saved");
+  const response = await fetch("/saved", {
+    headers: {"Accept": "application/json"},
+  });
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || "Gagal memuat saved.");
   savedItems = data.items || [];
@@ -195,7 +197,9 @@ async function loadSavedPreview(runId) {
   const previewPanel = document.querySelector(".saved-preview");
   previewPanel?.classList.remove("is-loaded");
   previewPanel?.classList.add("is-loading");
-  const response = await fetch(`/api/saved/${runId}`);
+  const response = await fetch(`/saved/${runId}`, {
+    headers: {"Accept": "application/json"},
+  });
   const data = await response.json();
   if (!response.ok) {
     setStatus("Error");
@@ -250,10 +254,10 @@ function clearPreviewIfDeleted(runId) {
 
 async function updateSavedStatus(runId, status) {
   setStatus("Updating");
-  const response = await fetch("/api/saved/status", {
+  const response = await fetch(`/saved/${runId}/status`, {
     method: "POST",
     headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({run_id: runId, status}),
+    body: JSON.stringify({status}),
   });
   const data = await response.json();
   if (!response.ok) {
@@ -274,10 +278,9 @@ async function deleteSavedRun(runId) {
   if (!ok) return;
 
   setStatus("Deleting");
-  const response = await fetch("/api/saved/delete", {
-    method: "POST",
+  const response = await fetch(`/saved/${runId}`, {
+    method: "DELETE",
     headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({run_id: runId}),
   });
   const data = await response.json();
   if (!response.ok) {
@@ -309,7 +312,7 @@ exportApprovedButton.addEventListener("click", async () => {
   exportApprovedButton.disabled = true;
   exportApprovedButton.textContent = "Exporting";
   try {
-    const response = await fetch("/api/export/approved", {method: "POST"});
+    const response = await fetch("/export", {method: "POST"});
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Export gagal.");
     setStatus("Exported");

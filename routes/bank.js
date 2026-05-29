@@ -121,6 +121,17 @@ async function sendSavedMetadata(response, runId) {
   sendJson(response, metadata);
 }
 
+function wantsJson(request) {
+  const accept = request.headers.accept || "";
+  return accept.includes("application/json") || !accept.includes("text/html");
+}
+
+function savedRunRoute(route) {
+  const parts = route.split("/").filter(Boolean);
+  if (parts[0] !== "saved" || parts.length < 2) return null;
+  return isValidRunId(parts[1]) ? parts : null;
+}
+
 export async function handle(request, response, route) {
   if (request.method === "POST" && (route === "/api/save" || route === "/saved")) {
     try {
@@ -132,9 +143,22 @@ export async function handle(request, response, route) {
     return true;
   }
 
-  if (request.method === "GET" && route === "/api/saved") {
+  if (
+    request.method === "GET"
+    && (route === "/api/saved" || (route === "/saved" && wantsJson(request)))
+  ) {
     try {
       sendJson(response, {items: await listSavedRuns()});
+    } catch (error) {
+      sendError(response, 500, error.message);
+    }
+    return true;
+  }
+
+  const savedRoute = savedRunRoute(route);
+  if (request.method === "GET" && savedRoute?.length === 2 && wantsJson(request)) {
+    try {
+      await sendSavedMetadata(response, savedRoute[1]);
     } catch (error) {
       sendError(response, 500, error.message);
     }
@@ -150,10 +174,32 @@ export async function handle(request, response, route) {
     return true;
   }
 
+  if (request.method === "POST" && savedRoute?.length === 3 && savedRoute[2] === "status") {
+    try {
+      const payload = await readJsonBody(request);
+      sendJson(response, await updateSavedStatus(savedRoute[1], payload.status || ""));
+    } catch (error) {
+      sendError(response, 500, error.message);
+    }
+    return true;
+  }
+
   if (request.method === "POST" && route === "/api/saved/status") {
     try {
       const payload = await readJsonBody(request);
       sendJson(response, await updateSavedStatus(payload.run_id || "", payload.status || ""));
+    } catch (error) {
+      sendError(response, 500, error.message);
+    }
+    return true;
+  }
+
+  if (
+    (request.method === "DELETE" && savedRoute?.length === 2)
+    || (request.method === "POST" && savedRoute?.length === 3 && savedRoute[2] === "delete")
+  ) {
+    try {
+      sendJson(response, await deleteSavedRun(savedRoute[1]));
     } catch (error) {
       sendError(response, 500, error.message);
     }

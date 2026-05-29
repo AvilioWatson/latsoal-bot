@@ -1,6 +1,6 @@
 import {access, cp, mkdir, readFile, writeFile} from "node:fs/promises";
 import path from "node:path";
-import {readIndex} from "../lib/filestore.js";
+import {readIndex, writeIndex} from "../lib/filestore.js";
 import {sendError, sendJson} from "../lib/http.js";
 import {APPROVED, SAVED, isValidRunId} from "../lib/paths.js";
 
@@ -8,6 +8,7 @@ async function exportApprovedRuns() {
   const index = await readIndex();
   const approved = index.filter((item) => item.status === "approved" && isValidRunId(item.run_id));
   const exportId = new Date().toISOString().replace(/[:.]/g, "-");
+  const exportedAt = new Date().toISOString();
   const targetDir = path.join(APPROVED, exportId);
   await mkdir(targetDir, {recursive: true});
 
@@ -42,10 +43,19 @@ async function exportApprovedRuns() {
 
   await writeFile(path.join(targetDir, "manifest.json"), JSON.stringify({
     export_id: exportId,
-    created_at: new Date().toISOString(),
+    created_at: exportedAt,
     total: manifest.length,
     items: manifest,
   }, null, 2), "utf-8");
+
+  const exportedRunIds = new Set(manifest.map((item) => item.run_id));
+  if (exportedRunIds.size > 0) {
+    await writeIndex(index.map((item) => (
+      exportedRunIds.has(item.run_id)
+        ? {...item, exported_at: exportedAt, export_batch_id: exportId}
+        : item
+    )));
+  }
 
   return {
     export_id: exportId,

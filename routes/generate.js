@@ -54,7 +54,7 @@ export const TOPICS = {
 };
 
 export async function handle(request, response, route) {
-  if (request.method === "GET" && route === "/api/config") {
+  if (request.method === "GET" && (route === "/api/config" || route === "/config")) {
     sendJson(response, {topics: TOPICS});
     return true;
   }

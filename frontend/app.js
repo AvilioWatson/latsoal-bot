@@ -91,7 +91,9 @@ function fillTopics() {
 }
 
 async function loadConfig() {
-  const response = await fetch("/api/config");
+  const response = await fetch("/config", {
+    headers: {"Accept": "application/json"},
+  });
   const config = await response.json();
   topicsByMapel = config.topics;
   mapelSelect.innerHTML = "";
@@ -142,7 +144,7 @@ form.addEventListener("submit", async (event) => {
 
   const payload = Object.fromEntries(new FormData(form).entries());
   try {
-    const response = await fetch("/api/generate", {
+    const response = await fetch("/generate", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify(payload),
@@ -169,7 +171,7 @@ saveButton.addEventListener("click", async () => {
   saveButton.disabled = true;
   saveButton.textContent = "Menyimpan";
   try {
-    const response = await fetch("/api/save", {
+    const response = await fetch("/saved", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({run_id: currentRunId}),
