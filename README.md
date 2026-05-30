@@ -2,17 +2,18 @@
 
 Web lokal untuk membuat, meninjau, menyimpan, dan mengekspor konten latihan soal UTBK/SNBT. Aplikasi ini dibuat untuk workflow gratis dan manual-first: generator bisa memakai Gemini jika tersedia, tetapi tetap punya fallback lokal agar alur kerja tidak berhenti saat API limit.
 
-## Portfolio Highlights
+## Portfolio Notes
 
-Project ini menunjukkan kemampuan membangun tool end-to-end untuk workflow konten edukasi:
+Project ini saya buat sebagai tool lokal untuk membantu produksi konten latihan soal UTBK/SNBT sebelum diunggah ke Instagram. Fokusnya bukan hanya membuat soal, tetapi juga memastikan soal bisa dicek, disimpan, dipilih, dan diekspor dengan rapi.
 
-- Web app lokal untuk generate, review, approve/reject, dan export soal UTBK/SNBT.
-- Integrasi LLM opsional dengan fallback lokal deterministik agar workflow tetap berjalan saat API error atau quota habis.
-- Validator lokal untuk struktur soal, opsi jawaban, caption, hashtag, skor kualitas, dan deteksi masalah dasar.
-- Dedup soal berbasis kemiripan teks terhadap bank review lokal.
-- Pemisahan data runtime dari source code lewat `LATSOAL_DATA_ROOT`.
-- Quality gate otomatis untuk syntax check, unit test Node/Python, JSON validation, secret scan, line ending check, dan smoke test generator.
-- GitHub Actions CI untuk menjalankan quality gate pada push dan pull request.
+Yang dikerjakan:
+
+- Membuat web lokal untuk generate, preview, simpan, review, approve/reject, dan export soal.
+- Menghubungkan server Node.js dengan generator Python tanpa framework backend tambahan.
+- Menambahkan fallback lokal saat Gemini error, quota habis, atau response tidak valid.
+- Membuat validator untuk mengecek struktur soal, pilihan jawaban, caption, hashtag, dan potensi duplikasi.
+- Menyediakan Bank Review agar soal yang bagus bisa dipisahkan dari draft yang masih perlu dicek.
+- Menambahkan test dan quality check otomatis agar perubahan lebih aman sebelum dipakai produksi konten.
 
 ## Tech Stack
 
@@ -27,9 +28,9 @@ Project ini menunjukkan kemampuan membangun tool end-to-end untuk workflow konte
 Contoh ringkasan untuk CV:
 
 ```text
-Built a local UTBK/SNBT content generation desk using Node.js, Python, and vanilla JavaScript, with LLM-based question generation, deterministic fallback, validation, deduplication, review workflow, and export tooling.
+Built a local content desk for preparing UTBK/SNBT practice questions for Instagram, using Node.js, Python, and vanilla JavaScript.
 
-Implemented automated quality checks with Node/Python tests, JSON validation, secret scanning, runtime data audit, smoke testing, and GitHub Actions CI.
+Implemented question generation, review workflow, validation, deduplication, caption support, export tooling, automated tests, and GitHub Actions CI.
 ```
 
 ## Fitur Utama
