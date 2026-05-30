@@ -2,6 +2,36 @@
 
 Web lokal untuk membuat, meninjau, menyimpan, dan mengekspor konten latihan soal UTBK/SNBT. Aplikasi ini dibuat untuk workflow gratis dan manual-first: generator bisa memakai Gemini jika tersedia, tetapi tetap punya fallback lokal agar alur kerja tidak berhenti saat API limit.
 
+## Portfolio Highlights
+
+Project ini menunjukkan kemampuan membangun tool end-to-end untuk workflow konten edukasi:
+
+- Web app lokal untuk generate, review, approve/reject, dan export soal UTBK/SNBT.
+- Integrasi LLM opsional dengan fallback lokal deterministik agar workflow tetap berjalan saat API error atau quota habis.
+- Validator lokal untuk struktur soal, opsi jawaban, caption, hashtag, skor kualitas, dan deteksi masalah dasar.
+- Dedup soal berbasis kemiripan teks terhadap bank review lokal.
+- Pemisahan data runtime dari source code lewat `LATSOAL_DATA_ROOT`.
+- Quality gate otomatis untuk syntax check, unit test Node/Python, JSON validation, secret scan, line ending check, dan smoke test generator.
+- GitHub Actions CI untuk menjalankan quality gate pada push dan pull request.
+
+## Tech Stack
+
+- Node.js built-in HTTP server untuk backend lokal.
+- Python untuk generator konten, validasi, dedup, dan fallback lokal.
+- Vanilla JavaScript, HTML, dan CSS untuk frontend.
+- JSON sebagai konfigurasi topik, pattern soal, metadata, dan manifest export.
+- GitHub Actions untuk continuous integration.
+
+## CV Summary
+
+Contoh ringkasan untuk CV:
+
+```text
+Built a local UTBK/SNBT content generation desk using Node.js, Python, and vanilla JavaScript, with LLM-based question generation, deterministic fallback, validation, deduplication, review workflow, and export tooling.
+
+Implemented automated quality checks with Node/Python tests, JSON validation, secret scanning, runtime data audit, smoke testing, and GitHub Actions CI.
+```
+
 ## Fitur Utama
 
 - Generate soal UTBK/SNBT dari browser.
