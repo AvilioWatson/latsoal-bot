@@ -88,7 +88,7 @@ function renderImages(data) {
   if (images.length === 0) {
     const empty = document.createElement("p");
     empty.className = "body-copy";
-    empty.textContent = "Gambar 4:5 akan muncul di sini.";
+    empty.textContent = "Gambar 1000x1000 akan muncul di sini.";
     imagePreviewList.append(empty);
     return;
   }

@@ -16,6 +16,8 @@ const validationScore = document.querySelector("#validationScore");
 const metadataLink = document.querySelector("#metadataLink");
 const imagePreviewList = document.querySelector("#imagePreviewList");
 const imageCount = document.querySelector("#imageCount");
+const generateImageButton = document.querySelector("#generateImageButton");
+const deleteImageButton = document.querySelector("#deleteImageButton");
 const sourceLabel = document.querySelector("#sourceLabel");
 const debugPanel = document.querySelector("#debugPanel");
 const debugSource = document.querySelector("#debugSource");
@@ -103,7 +105,7 @@ function renderImages(data) {
   if (images.length === 0) {
     const empty = document.createElement("p");
     empty.className = "body-copy";
-    empty.textContent = "Gambar 4:5 akan muncul di sini.";
+    empty.textContent = "Gambar 1000x1000 akan muncul di sini.";
     imagePreviewList.append(empty);
     return;
   }
@@ -259,6 +261,8 @@ async function loadSavedPreview(runId) {
   validationScore.textContent = `Skor ${validation.skor ?? "-"}`;
   runNote.textContent = reviewNote(data);
   renderImages(data);
+  generateImageButton.disabled = false;
+  deleteImageButton.disabled = !(data.web_files?.images || []).length;
   questionText.textContent = question.soal;
   choicesList.innerHTML = "";
   for (const [key, value] of Object.entries(question.pilihan)) {
@@ -292,7 +296,9 @@ function clearPreviewIfDeleted(runId) {
   validationScore.textContent = "Skor belum tersedia";
   sourceLabel.textContent = "-";
   imageCount.textContent = "0 page";
-  imagePreviewList.innerHTML = '<p class="body-copy">Gambar 4:5 akan muncul di sini.</p>';
+  imagePreviewList.innerHTML = '<p class="body-copy">Gambar 1000x1000 akan muncul di sini.</p>';
+  generateImageButton.disabled = true;
+  deleteImageButton.disabled = true;
   metadataLink.hidden = true;
   metadataLink.href = "#";
   copyCaptionButton.disabled = true;
@@ -347,6 +353,60 @@ async function deleteSavedRun(runId) {
   await loadSavedList();
 }
 
+async function generateSavedImages() {
+  if (!activePreviewRunId) return;
+  generateImageButton.disabled = true;
+  generateImageButton.textContent = "Generating";
+  setStatus("Rendering");
+  try {
+    const response = await fetch(`/saved/${activePreviewRunId}/images`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Generate gambar gagal.");
+    renderImages(data);
+    deleteImageButton.disabled = !(data.web_files?.images || []).length;
+    setStatus("Rendered");
+    await loadSavedList();
+  } catch (error) {
+    setStatus("Error");
+    debugPanel.hidden = false;
+    debugSource.textContent = "saved/images";
+    debugText.textContent = error.stack || error.message;
+  } finally {
+    generateImageButton.disabled = false;
+    generateImageButton.textContent = "Generate";
+  }
+}
+
+async function deleteSavedImages() {
+  if (!activePreviewRunId) return;
+  deleteImageButton.disabled = true;
+  deleteImageButton.textContent = "Menghapus";
+  setStatus("Deleting");
+  try {
+    const response = await fetch(`/saved/${activePreviewRunId}/images`, {
+      method: "DELETE",
+      headers: {"Content-Type": "application/json"},
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Hapus gambar gagal.");
+    renderImages(data);
+    deleteImageButton.disabled = true;
+    setStatus("Deleted");
+    await loadSavedList();
+  } catch (error) {
+    setStatus("Error");
+    debugPanel.hidden = false;
+    debugSource.textContent = "saved/images";
+    debugText.textContent = error.stack || error.message;
+  } finally {
+    deleteImageButton.textContent = "Hapus gambar";
+    generateImageButton.disabled = false;
+  }
+}
+
 refreshSavedButton.addEventListener("click", () => {
   loadSavedList().catch((error) => {
     setStatus("Error");
@@ -355,6 +415,9 @@ refreshSavedButton.addEventListener("click", () => {
     debugText.textContent = error.stack || error.message;
   });
 });
+
+generateImageButton.addEventListener("click", generateSavedImages);
+deleteImageButton.addEventListener("click", deleteSavedImages);
 
 savedSearch.addEventListener("input", () => renderSavedList());
 savedStatusFilter.addEventListener("change", () => renderSavedList());

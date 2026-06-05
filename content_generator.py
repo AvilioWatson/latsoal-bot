@@ -360,12 +360,19 @@ def render_quiz_images(question, run_dir):
             badge_fill = colors["bg"]
             badge_outline = colors["line"]
             badge_text = "#26405a"
-            draw.rounded_rectangle((104, y + 16, 164, y + 70), radius=4, fill=badge_fill, outline=badge_outline, width=2)
-            draw.text((124, y + 26), key, font=fonts["body"], fill=badge_text)
-            text_y = y + 33
+
+            badge_top = y + (block_h - 54) // 2  # 54 = tinggi badge (70 - 16)
+            draw.rounded_rectangle((104, badge_top, 164, badge_top + 54), radius=4, fill=badge_fill, outline=badge_outline, width=2)
+            draw.text((124, badge_top + 10), key, font=fonts["body"], fill=badge_text)
+
+            line_h = _line_height(draw, fonts["body"]) + 8
+
+            total_text_h = len(lines) * line_h - 8  # kurangi gap terakhir
+            text_y = y + (block_h - total_text_h) // 2  # center dalam blok
             for line in lines:
                 draw.text((190, text_y), line, font=fonts["body"], fill=colors["ink"])
-                text_y += _line_height(draw, fonts["body"]) + 8
+                text_y += line_h
+
             y += block_h + 14
 
         draw.text((72, 942), account, font=fonts["small"], fill="#9ca3af")
@@ -1162,6 +1169,26 @@ def generate_content(mapel, topic, level, mode="auto", account="@namaakun"):
     return metadata
 
 
+def render_images_for_metadata(metadata_path):
+    metadata_path = Path(metadata_path).resolve()
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    run_dir = metadata_path.parent
+    question = metadata.get("question") or {}
+    if not question:
+        raise ValueError("Metadata tidak memiliki question.")
+    image_paths = render_quiz_images(question, run_dir)
+    metadata.setdefault("files", {})
+    metadata["files"]["image"] = str(image_paths[0]) if image_paths else None
+    metadata["files"]["images"] = [str(path) for path in image_paths]
+    metadata["image_generated_at"] = dt.datetime.now().isoformat(timespec="seconds")
+    metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {
+        "ok": True,
+        "run_id": metadata.get("run_id") or run_dir.name,
+        "files": metadata["files"],
+    }
+
+
 def main():
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
@@ -1173,8 +1200,12 @@ def main():
     parser.add_argument("--level", default="sedang", choices=["mudah", "sedang", "sulit"])
     parser.add_argument("--mode", default="auto", choices=["auto", "gemini", "draft"])
     parser.add_argument("--account", default="@namaakun")
+    parser.add_argument("--render-images", default="")
     try:
         args = parser.parse_args()
+        if args.render_images:
+            json_stdout(render_images_for_metadata(args.render_images))
+            return
         topic = args.topik or MAPEL_TOPICS[args.mapel][0]
         mode = "auto" if args.mode == "gemini" else args.mode
         metadata = generate_content(args.mapel, topic, args.level, mode, args.account)

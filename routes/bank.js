@@ -1,4 +1,5 @@
-import {access, cp, mkdir, readFile, rm} from "node:fs/promises";
+import {spawn} from "node:child_process";
+import {access, cp, mkdir, readFile, rm, writeFile} from "node:fs/promises";
 import path from "node:path";
 import {
   addEntry,
@@ -8,7 +9,9 @@ import {
   updateEntry,
 } from "../lib/filestore.js";
 import {errorStatus, readJsonBody, sendError, sendJson} from "../lib/http.js";
-import {OUTPUTS, SAVED, buildWebFiles, isValidRunId, safeJoin} from "../lib/paths.js";
+import {OUTPUTS, ROOT, SAVED, buildWebFiles, isValidRunId, safeJoin} from "../lib/paths.js";
+
+const DEFAULT_PYTHON = process.env.PYTHON || "python";
 
 function requestError(status, message) {
   const error = new Error(message);
@@ -126,6 +129,108 @@ async function deleteSavedRun(runId) {
   };
 }
 
+function runImageRenderer(metadataPath) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(DEFAULT_PYTHON, [
+      "content_generator.py",
+      "--render-images",
+      metadataPath,
+    ], {
+      cwd: ROOT,
+      env: process.env,
+      windowsHide: true,
+    });
+
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf-8");
+    child.stderr.setEncoding("utf-8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      let parsed = null;
+      try {
+        parsed = JSON.parse(stdout);
+      } catch {
+        reject(new Error(stderr || "Renderer gambar tidak mengembalikan JSON valid."));
+        return;
+      }
+      if (code !== 0 || parsed.ok === false) {
+        reject(new Error(parsed.detail || stderr || "Render gambar gagal."));
+        return;
+      }
+      resolve(parsed);
+    });
+  });
+}
+
+async function generateSavedImages(runId) {
+  if (!isValidRunId(runId)) {
+    throw requestError(400, "Run ID tidak valid.");
+  }
+  const runDir = safeJoin(SAVED, runId);
+  if (!runDir) {
+    throw requestError(400, "Path run tidak valid.");
+  }
+  const metadataPath = path.join(runDir, "metadata.json");
+  try {
+    await access(metadataPath);
+  } catch {
+    throw requestError(404, "Saved run tidak ditemukan.");
+  }
+
+  const result = await runImageRenderer(metadataPath);
+  return {
+    run_id: runId,
+    files: result.files,
+    web_files: buildWebFiles("/saved", runId, result.files),
+  };
+}
+
+async function deleteSavedImages(runId) {
+  if (!isValidRunId(runId)) {
+    throw requestError(400, "Run ID tidak valid.");
+  }
+  const runDir = safeJoin(SAVED, runId);
+  if (!runDir) {
+    throw requestError(400, "Path run tidak valid.");
+  }
+  const metadataPath = path.join(runDir, "metadata.json");
+  let metadata;
+  try {
+    metadata = JSON.parse(await readFile(metadataPath, "utf-8"));
+  } catch {
+    throw requestError(404, "Saved run tidak ditemukan.");
+  }
+
+  const imageFiles = new Set([
+    metadata?.files?.image,
+    ...(Array.isArray(metadata?.files?.images) ? metadata.files.images : []),
+  ].filter(Boolean));
+  for (const imageFile of imageFiles) {
+    const target = safeJoin(runDir, path.basename(String(imageFile)));
+    if (target) {
+      await rm(target, {force: true});
+    }
+  }
+  metadata.files = metadata.files || {};
+  delete metadata.files.image;
+  metadata.files.images = [];
+  metadata.image_deleted_at = new Date().toISOString();
+  await writeFile(metadataPath, JSON.stringify(metadata, null, 2), "utf-8");
+
+  return {
+    run_id: runId,
+    files: metadata.files,
+    web_files: buildWebFiles("/saved", runId, metadata.files),
+  };
+}
+
 async function sendSavedMetadata(response, runId) {
   if (!isValidRunId(runId)) {
     throw requestError(400, "Run ID tidak valid.");
@@ -198,6 +303,27 @@ export async function handle(request, response, route) {
     try {
       const payload = await readJsonBody(request);
       sendJson(response, await updateSavedStatus(savedRoute[1], payload.status || ""));
+    } catch (error) {
+      sendError(response, errorStatus(error), error.message);
+    }
+    return true;
+  }
+
+  if (request.method === "POST" && savedRoute?.length === 3 && savedRoute[2] === "images") {
+    try {
+      sendJson(response, await generateSavedImages(savedRoute[1]));
+    } catch (error) {
+      sendError(response, errorStatus(error), error.message);
+    }
+    return true;
+  }
+
+  if (
+    (request.method === "DELETE" && savedRoute?.length === 3 && savedRoute[2] === "images")
+    || (request.method === "POST" && savedRoute?.length === 3 && savedRoute[2] === "delete-images")
+  ) {
+    try {
+      sendJson(response, await deleteSavedImages(savedRoute[1]));
     } catch (error) {
       sendError(response, errorStatus(error), error.message);
     }
