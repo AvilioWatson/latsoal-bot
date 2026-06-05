@@ -185,7 +185,36 @@ def _load_font(size, bold=False, family="sans"):
     except ImportError:
         return None
 
-    if family == "serif":
+    if family == "lora":
+        font_names = [
+            "Lora-Bold.ttf" if bold else "Lora-Regular.ttf",
+            "Lora-Bold.otf" if bold else "Lora-Regular.otf",
+            "georgiab.ttf" if bold else "georgia.ttf",
+            "timesbd.ttf" if bold else "times.ttf",
+        ]
+    elif family == "playfair":
+        font_names = [
+            "PlayfairDisplay-Bold.ttf" if bold else "PlayfairDisplay-Regular.ttf",
+            "PlayfairDisplay-Bold.otf" if bold else "PlayfairDisplay-Regular.otf",
+            "georgiab.ttf" if bold else "georgia.ttf",
+            "timesbd.ttf" if bold else "times.ttf",
+        ]
+    elif family == "inter":
+        font_names = [
+            "Inter-Bold.ttf" if bold else "Inter-Regular.ttf",
+            "Inter_18pt-Bold.ttf" if bold else "Inter_18pt-Regular.ttf",
+            "arialbd.ttf" if bold else "arial.ttf",
+            "segoeuib.ttf" if bold else "segoeui.ttf",
+        ]
+    elif family == "logo":
+        font_names = [
+            "Arial Black.ttf",
+            "ariblk.ttf",
+            "Inter-ExtraBold.ttf",
+            "Inter_18pt-ExtraBold.ttf",
+            "arialbd.ttf",
+        ]
+    elif family == "serif":
         font_names = [
             "georgiab.ttf" if bold else "georgia.ttf",
             "timesbd.ttf" if bold else "times.ttf",
@@ -198,6 +227,7 @@ def _load_font(size, bold=False, family="sans"):
             "calibrib.ttf" if bold else "calibri.ttf",
         ]
     search_dirs = [
+        ROOT / "assets" / "fonts",
         Path(os.getenv("WINDIR", "C:/Windows")) / "Fonts",
         ROOT,
     ]
@@ -260,17 +290,76 @@ def _format_question_text(text):
     return re.sub(r"\n{3,}", "\n\n", formatted).strip()
 
 
+def _wrap_question_paragraphs(draw, text, font, max_width):
+    formatted = _format_question_text(text)
+    paragraphs = []
+    for paragraph in re.split(r"\n{2,}|\n", formatted):
+        paragraph = paragraph.strip()
+        if paragraph:
+            paragraphs.append(_wrap_text(draw, paragraph, font, max_width))
+    return paragraphs or [[""]]
+
+
+def _flatten_paragraphs(paragraphs):
+    lines = []
+    for paragraph in paragraphs:
+        lines.extend(paragraph)
+    return _trim_blank_lines(lines)
+
+
+def _paginate_paragraph_lines(paragraphs, first_capacity, next_capacity, paragraph_gap=0):
+    pages = []
+    current = []
+    current_count = 0
+
+    def capacity_for_next_page():
+        return first_capacity if not pages else next_capacity
+
+    for paragraph in paragraphs:
+        paragraph_count = len(paragraph)
+        gap = paragraph_gap if current else 0
+        capacity = capacity_for_next_page()
+
+        if current and current_count + gap + paragraph_count > capacity:
+            pages.append(_trim_blank_lines(current))
+            current = []
+            current_count = 0
+            gap = 0
+            capacity = capacity_for_next_page()
+
+        if paragraph_count > capacity:
+            if current:
+                pages.append(_trim_blank_lines(current))
+                current = []
+                current_count = 0
+            for index in range(0, paragraph_count, capacity):
+                chunk = paragraph[index:index + capacity]
+                if index + capacity >= paragraph_count:
+                    current = chunk
+                    current_count = len(chunk)
+                else:
+                    pages.append(_trim_blank_lines(chunk))
+            continue
+
+        if gap > 1:
+            current.extend([""] * gap)
+            current_count += gap
+        current.extend(paragraph)
+        current_count += paragraph_count
+
+    if current:
+        pages.append(_trim_blank_lines(current))
+    return [page for page in pages if page]
+
+
 def _draw_justified_line(draw, x, y, line, font, fill, max_width, justify=True):
     words = str(line).split()
-    if not justify or len(words) < 2 or re.match(r"^\d+\.", str(line).strip()):
+    if not justify or len(words) < 2:
         draw.text((x, y), line, font=font, fill=fill)
         return
     words_width = sum(_text_width(draw, word, font) for word in words)
     gap_count = len(words) - 1
     gap_width = max(4, (max_width - words_width) / gap_count)
-    if gap_width > 24:
-        draw.text((x, y), line, font=font, fill=fill)
-        return
     cursor_x = x
     for index, word in enumerate(words):
         draw.text((cursor_x, y), word, font=font, fill=fill)
@@ -284,7 +373,8 @@ def _chunks(items, size):
 
 
 def _paginate_quiz(draw, question, fonts):
-    q_lines = _wrap_text(draw, _format_question_text(question.get("soal", "")), fonts["question"], 790)
+    q_paragraphs = _wrap_question_paragraphs(draw, question.get("soal", ""), fonts["question"], 790)
+    q_lines = _flatten_paragraphs(q_paragraphs)
     choices = question.get("pilihan", {})
     choice_page_limit = 460 if len(q_lines) <= 5 else 742
     choice_pages = []
@@ -309,7 +399,7 @@ def _paginate_quiz(draw, question, fonts):
         for choice_page in choice_pages[1:]:
             pages.append({"question_lines": [], "choices": choice_page})
     else:
-        for q_chunk in _chunks(q_lines, 10):
+        for q_chunk in _paginate_paragraph_lines(q_paragraphs, 10, 10):
             pages.append({"question_lines": q_chunk, "choices": []})
         for choice_page in choice_pages:
             pages.append({"question_lines": [], "choices": choice_page})
@@ -382,11 +472,70 @@ def _count_quiz_image_pages(question):
 
     width = height = 1000
     fonts = {
-        "question": _load_font(30, family="serif"),
-        "body": _load_font(30, family="serif"),
+        "question": _load_font(30, family="lora"),
+        "body": _load_font(30, family="lora"),
     }
     probe = Image.new("RGB", (width, height), "#f5f0e8")
     return len(_paginate_quiz(ImageDraw.Draw(probe), question, fonts))
+
+
+def render_thumbnail_image(question, run_dir):
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError:
+        return None
+
+    width = height = 1000
+    colors = {
+        "bg": "#f5f0e8",
+        "panel": "#ede8df",
+        "ink": "#2a2118",
+        "muted": "#9c8f7e",
+        "line": "#d4cdc2",
+        "accent": "#26405a",
+    }
+    fonts = {
+        "category": _load_font(62, family="playfair"),
+        "title": _load_font(34, family="lora"),
+        "small": _load_font(24, family="lora"),
+    }
+
+    image = Image.new("RGB", (width, height), colors["bg"])
+    draw = ImageDraw.Draw(image)
+    logo = _load_quiz_logo()
+    account = question.get("akun", "@namaakun")
+    subtest = str(question.get("mapel", "Latihan UTBK"))
+    subtopic = str(question.get("topik") or question.get("mapel", "Subtopik"))
+
+    draw.rectangle((0, 0, width, height), fill=colors["bg"])
+    if logo:
+        image.paste(logo, (928 - logo.width, 68), logo)
+
+    draw.line((72, 210, 928, 210), fill=colors["line"], width=2)
+    draw.line((72, 790, 928, 790), fill=colors["line"], width=2)
+    draw.rounded_rectangle((72, 264, 928, 736), radius=8, fill=colors["panel"], outline=colors["line"], width=2)
+
+    subtest_lines = _wrap_text(draw, subtest, fonts["category"], 724)[:2]
+    subtopic_lines = _wrap_text(draw, subtopic, fonts["title"], 724)[:2]
+    subtest_h = _lines_visual_height(draw, subtest_lines, fonts["category"], gap=12)
+    subtopic_h = _lines_visual_height(draw, subtopic_lines, fonts["title"], gap=10)
+    total_title_h = subtest_h + 34 + subtopic_h
+    text_y = 500 - total_title_h // 2
+    for line in subtest_lines:
+        line_w = _text_width(draw, line, fonts["category"])
+        draw.text(((width - line_w) / 2, text_y), line, font=fonts["category"], fill=colors["ink"])
+        text_y += _line_height(draw, fonts["category"]) + 12
+    text_y += 22
+    for line in subtopic_lines:
+        line_w = _text_width(draw, line, fonts["title"])
+        draw.text(((width - line_w) / 2, text_y), line, font=fonts["title"], fill=colors["muted"])
+        text_y += _line_height(draw, fonts["title"]) + 10
+
+    draw.text((72, 942), account, font=fonts["small"], fill="#9ca3af")
+    output_path = run_dir / "thumbnail.png"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    image.save(output_path, format="PNG", optimize=True)
+    return output_path
 
 
 def render_quiz_images(question, run_dir, page_offset=0, total_pages=None):
@@ -408,12 +557,12 @@ def render_quiz_images(question, run_dir, page_offset=0, total_pages=None):
         "white": "#f5f0e8",    # "putih" di sini tetap krem
     }
     fonts = {
-        "category": _load_font(25, family="serif"),
-        "title": _load_font(36, family="serif"),
-        "question": _load_font(30, family="serif"),
-        "body": _load_font(30, family="serif"),
-        "body_bold": _load_font(30, bold=True, family="serif"),
-        "small": _load_font(24, family="serif"),
+        "category": _load_font(25, family="lora"),
+        "title": _load_font(36, bold=True, family="playfair"),
+        "question": _load_font(30, family="lora"),
+        "body": _load_font(30, family="lora"),
+        "body_bold": _load_font(30, bold=True, family="playfair"),
+        "small": _load_font(24, family="lora"),
     }
 
     probe = Image.new("RGB", (width, height), colors["bg"])
@@ -433,7 +582,7 @@ def render_quiz_images(question, run_dir, page_offset=0, total_pages=None):
             image.paste(logo, (928 - logo.width, 68), logo)
         category = str(question.get("mapel", "Kuis")).upper()
         title = str(question.get("topik") or question.get("mapel", "Pengetahuan Umum"))
-        draw.text((72, 78), category[:42], font=fonts["category"], fill=colors["muted"])
+        _draw_tracking_text(draw, 72, 78, category[:42], fonts["category"], colors["muted"], tracking=2)
         draw.text((72, 118), title[:44], font=fonts["title"], fill=colors["ink"])
 
         has_question = bool(page["question_lines"])
@@ -500,10 +649,20 @@ def render_quiz_images(question, run_dir, page_offset=0, total_pages=None):
 
             total_text_h = _lines_visual_height(draw, lines, fonts["body"], gap=8)
             text_y = y + (block_h - total_text_h) // 2
-            for line in lines:
+            text_w = 700
+            for line_index, line in enumerate(lines):
                 line_bbox = _text_bbox(draw, line, fonts["body"])
                 line_h = line_bbox[3] - line_bbox[1]
-                draw.text((190, text_y - line_bbox[1]), line, font=fonts["body"], fill=colors["ink"])
+                _draw_justified_line(
+                    draw,
+                    190,
+                    text_y - line_bbox[1],
+                    line,
+                    fonts["body"],
+                    colors["ink"],
+                    text_w,
+                    justify=line_index < len(lines) - 1,
+                )
                 text_y += line_h + 8
 
             y += block_h + GAP
@@ -527,6 +686,9 @@ def _format_explanation_text(text, max_paragraph_chars=230):
     if not raw:
         return ""
 
+    raw = re.sub(r"(?m)^\s*[-–—•]\s*", "", raw)
+    raw = re.sub(r"\s+[-–—•]\s+(?=[A-ZA-ZÀ-ÖØ-ÝA-Z0-9])", " ", raw)
+    raw = re.sub(r"\s+[-–—•]\s*(?=$|[.!?])", "", raw)
     raw = re.sub(r"\s+(Oleh karena itu,)", r"\n\1", raw)
     raw = re.sub(r"\s+(Maka,)", r"\n\1", raw)
     raw = re.sub(r"\s+(Pilihan [A-E]\b)", r"\n\1", raw)
@@ -622,7 +784,7 @@ def _paginate_explanation_pages(draw, question, fonts):
                     pages.append(_trim_blank_lines(chunk))
             continue
 
-        if gap:
+        if gap > 1:
             current.append("")
             current_count += 1
         current.extend(paragraph_lines)
@@ -640,7 +802,7 @@ def _count_explanation_image_pages(question):
         return 0
 
     width = height = 1000
-    fonts = {"body": _load_font(29, family="serif")}
+    fonts = {"body": _load_font(29, family="lora")}
     probe = Image.new("RGB", (width, height), "#f5f0e8")
     return len(_paginate_explanation_pages(ImageDraw.Draw(probe), question, fonts))
 
@@ -655,16 +817,17 @@ def render_explanation_images(question, run_dir, page_offset=0, total_pages=None
     colors = {
         "bg": "#f5f0e8",
         "panel": "#ede8df",
+        "answer_panel": "#e0d9cb",
         "ink": "#2a2118",
         "muted": "#9c8f7e",
         "line": "#d4cdc2",
     }
     fonts = {
-        "category": _load_font(25, family="serif"),
-        "title": _load_font(36, family="serif"),
-        "body": _load_font(29, family="serif"),
-        "body_bold": _load_font(29, bold=True, family="serif"),
-        "small": _load_font(24, family="serif"),
+        "category": _load_font(25, family="lora"),
+        "title": _load_font(36, bold=True, family="playfair"),
+        "body": _load_font(29, family="lora"),
+        "body_bold": _load_font(29, bold=True, family="playfair"),
+        "small": _load_font(24, family="lora"),
     }
 
     explanation = str(question.get("pembahasan") or "").strip()
@@ -691,13 +854,21 @@ def render_explanation_images(question, run_dir, page_offset=0, total_pages=None
         draw.rectangle((0, 0, width, height), fill=colors["bg"])
         if logo:
             image.paste(logo, (928 - logo.width, 68), logo)
-        draw.text((72, 78), str(question.get("mapel", "Kuis")).upper()[:42], font=fonts["category"], fill=colors["muted"])
+        _draw_tracking_text(
+            draw,
+            72,
+            78,
+            str(question.get("mapel", "Kuis")).upper()[:42],
+            fonts["category"],
+            colors["muted"],
+            tracking=2,
+        )
         draw.text((72, 118), "Pembahasan", font=fonts["title"], fill=colors["ink"])
 
         panel_top = 210
         if page_index == 1:
             answer_box = (72, panel_top, 928, panel_top + 104)
-            draw.rounded_rectangle(answer_box, radius=7, fill=colors["panel"], outline=colors["line"], width=2)
+            draw.rounded_rectangle(answer_box, radius=7, fill=colors["answer_panel"], outline=colors["line"], width=2)
             badge = (104, panel_top + 25, 164, panel_top + 79)
             draw.rounded_rectangle(badge, radius=4, fill=colors["bg"], outline=colors["line"], width=2)
             if answer_key:
@@ -707,9 +878,9 @@ def render_explanation_images(question, run_dir, page_offset=0, total_pages=None
 
             answer_label = "Jawaban"
             if answer_key and answer_text:
-                answer_label = f"Jawaban: {answer_key}. {answer_text}"
+                answer_label = f"{answer_key}. {answer_text}"
             elif answer_key:
-                answer_label = f"Jawaban: {answer_key}"
+                answer_label = f"{answer_key}"
             answer_lines = _wrap_text(draw, answer_label, fonts["body"], 690)
             answer_h = _lines_visual_height(draw, answer_lines[:2], fonts["body"], gap=8)
             answer_y = panel_top + (104 - answer_h) // 2
@@ -723,9 +894,18 @@ def render_explanation_images(question, run_dir, page_offset=0, total_pages=None
         panel_bottom = min(876, panel_top + content_h + 92)
         draw.rounded_rectangle((72, panel_top, 928, panel_bottom), radius=7, fill=colors["panel"], outline=colors["line"], width=2)
         text_y = panel_top + 46
-        for line in lines:
+        for line_index, line in enumerate(lines):
             if line:
-                draw.text((126, text_y), line, font=fonts["body"], fill=colors["ink"])
+                _draw_justified_line(
+                    draw,
+                    126,
+                    text_y,
+                    line,
+                    fonts["body"],
+                    colors["ink"],
+                    748,
+                    justify=line_index < len(lines) - 1,
+                )
             text_y += line_h
 
         draw.text((72, 942), account, font=fonts["small"], fill="#9ca3af")
@@ -739,6 +919,21 @@ def render_explanation_images(question, run_dir, page_offset=0, total_pages=None
         image.save(output_path, format="JPEG", quality=95, subsampling=0, optimize=True)
         output_paths.append(output_path)
 
+    return output_paths
+
+
+def render_numbered_jpg_images(image_paths, run_dir):
+    try:
+        from PIL import Image
+    except ImportError:
+        return []
+
+    output_paths = []
+    for index, source_path in enumerate([path for path in image_paths if path], start=1):
+        output_path = run_dir / f"{index}.jpg"
+        with Image.open(source_path) as image:
+            image.convert("RGB").save(output_path, format="JPEG", quality=95, subsampling=0, optimize=True)
+        output_paths.append(output_path)
     return output_paths
 
 
@@ -978,10 +1173,10 @@ def build_validation_prompt(question):
 def build_caption_prompt(question):
     return (
         "Kamu adalah copywriter konten edukasi Instagram untuk akun latihan soal UTBK. "
-        "Buat caption 100 sampai 150 kata, ada hook, CTA jawab di komentar, "
-        "motivasi singkat, dan hashtag relevan. "
+        "Buat caption sangat singkat, hanya dua baris: baris pertama subtopik/subtes, "
+        "baris kedua judul submateri/topik. Jangan tambah hook, CTA, motivasi, atau jawaban. "
         "Wajib pakai konteks UTBK 2026. Jangan memakai tahun 2024 atau 2025. "
-        "Hashtag wajib diawali tanda # dan wajib memuat #UTBK2026, #LatsoalUTBK, "
+        "Hashtag wajib diawali tanda # dan wajib memuat #UTBK, #LatsoalUTBK, "
         "#BelajarUTBK, dan #SoalUTBK. Output JSON valid.\n\n"
         f"{json.dumps(question, ensure_ascii=False)}\n\n"
         'Kembalikan JSON: {"caption": "", "hashtag": []}'
@@ -1288,8 +1483,8 @@ def validate_caption(caption, answer):
     if len(caption_text.split()) > 180:
         issues.append("Caption terlalu panjang.")
         score_penalty += 10
-    if len(caption_text.split()) < 35:
-        issues.append("Caption terlalu pendek.")
+    if len(caption_text.strip()) < 3:
+        issues.append("Caption kosong.")
         score_penalty += 10
     return {
         "lolos": score_penalty == 0,
@@ -1355,14 +1550,7 @@ def local_validation(question, caption=None):
 
 
 def draft_caption(question):
-    concept = question.get("konsep_kunci") or question.get("topik")
-    caption = (
-        f"Latihan {question['mapel']} hari ini: {question['topik']}.\n\n"
-        f"Topik ini sering menguji ketelitian membaca pola dan hubungan informasi. "
-        f"Kerjakan dulu sebelum melihat pembahasan, lalu cek apakah pilihanmu sudah sejalan dengan konsep {concept}.\n\n"
-        f"Menurutmu jawabannya apa? Tulis A, B, C, D, atau E di komentar. "
-        "Konsisten latihan kecil seperti ini akan membuatmu lebih siap menghadapi UTBK 2026."
-    )
+    caption = f"{question['mapel']}\n{question['topik']}"
     return {
         "caption": caption,
         "hashtag": [
@@ -1378,6 +1566,27 @@ def draft_caption(question):
             "#TipsUTBK",
         ],
     }
+
+
+def normalize_caption(question, caption):
+    normalized = dict(caption or {})
+    short = draft_caption(question)
+    normalized["caption"] = short["caption"]
+    hashtags = normalized.get("hashtag")
+    if not isinstance(hashtags, list) or not hashtags:
+        hashtags = short["hashtag"]
+    required = short["hashtag"][:4]
+    merged = []
+    for tag in [*required, *hashtags]:
+        tag = str(tag).strip()
+        if not tag:
+            continue
+        if not tag.startswith("#"):
+            tag = f"#{tag}"
+        if tag not in merged:
+            merged.append(tag)
+    normalized["hashtag"] = merged
+    return normalized
 
 
 def generate_content(mapel, topic, level, mode="auto", account="@namaakun"):
@@ -1451,18 +1660,29 @@ def generate_content(mapel, topic, level, mode="auto", account="@namaakun"):
         caption = draft_caption(question)
         validation = local_validation(question, caption)
 
+    caption = normalize_caption(question, caption)
     if not GEMINI_VALIDATE or source in {"draft", "fallback"}:
         validation = local_validation(question, caption)
     question["akun"] = account
-    total_image_pages = _count_quiz_image_pages(question) + _count_explanation_image_pages(question)
-    image_paths = render_quiz_images(question, run_dir, total_pages=total_image_pages)
+    numbered_pages = _count_quiz_image_pages(question) + _count_explanation_image_pages(question)
+    thumbnail_path = render_thumbnail_image(question, run_dir)
+    thumbnail_paths = [thumbnail_path] if thumbnail_path else []
+    image_paths = render_quiz_images(
+        question,
+        run_dir,
+        page_offset=0,
+        total_pages=numbered_pages,
+    )
     explanation_paths = render_explanation_images(
         question,
         run_dir,
         page_offset=len(image_paths),
-        total_pages=total_image_pages,
+        total_pages=numbered_pages,
     )
-    all_image_paths = image_paths + explanation_paths
+    all_image_paths = thumbnail_paths + image_paths + explanation_paths
+    numbered_image_paths = render_numbered_jpg_images(all_image_paths, run_dir)
+    explanation_start = len(thumbnail_paths) + len(image_paths)
+    numbered_explanation_paths = numbered_image_paths[explanation_start:]
     dedup = check_duplicate(question)
     review_status = "needs_review" if "question" in fallbacks else "ready"
     if errors:
@@ -1511,10 +1731,11 @@ def generate_content(mapel, topic, level, mode="auto", account="@namaakun"):
         "files": {
             "question": str(run_dir / "soal.json"),
             "caption": str(run_dir / "caption.txt"),
-            "image": str(image_paths[0]) if image_paths else None,
-            "images": [str(path) for path in all_image_paths],
-            "explanation": str(explanation_paths[0]) if explanation_paths else None,
-            "explanations": [str(path) for path in explanation_paths],
+            "image": str(numbered_image_paths[0]) if numbered_image_paths else None,
+            "images": [str(path) for path in numbered_image_paths],
+            "thumbnail": str(numbered_image_paths[0]) if numbered_image_paths else None,
+            "explanation": str(numbered_explanation_paths[0]) if numbered_explanation_paths else None,
+            "explanations": [str(path) for path in numbered_explanation_paths],
         },
     }
 
@@ -1539,20 +1760,31 @@ def render_images_for_metadata(metadata_path):
     question = metadata.get("question") or {}
     if not question:
         raise ValueError("Metadata tidak memiliki question.")
-    total_image_pages = _count_quiz_image_pages(question) + _count_explanation_image_pages(question)
-    image_paths = render_quiz_images(question, run_dir, total_pages=total_image_pages)
+    numbered_pages = _count_quiz_image_pages(question) + _count_explanation_image_pages(question)
+    thumbnail_path = render_thumbnail_image(question, run_dir)
+    thumbnail_paths = [thumbnail_path] if thumbnail_path else []
+    image_paths = render_quiz_images(
+        question,
+        run_dir,
+        page_offset=0,
+        total_pages=numbered_pages,
+    )
     explanation_paths = render_explanation_images(
         question,
         run_dir,
         page_offset=len(image_paths),
-        total_pages=total_image_pages,
+        total_pages=numbered_pages,
     )
-    all_image_paths = image_paths + explanation_paths
+    all_image_paths = thumbnail_paths + image_paths + explanation_paths
+    numbered_image_paths = render_numbered_jpg_images(all_image_paths, run_dir)
+    explanation_start = len(thumbnail_paths) + len(image_paths)
+    numbered_explanation_paths = numbered_image_paths[explanation_start:]
     metadata.setdefault("files", {})
-    metadata["files"]["image"] = str(image_paths[0]) if image_paths else None
-    metadata["files"]["images"] = [str(path) for path in all_image_paths]
-    metadata["files"]["explanation"] = str(explanation_paths[0]) if explanation_paths else None
-    metadata["files"]["explanations"] = [str(path) for path in explanation_paths]
+    metadata["files"]["image"] = str(numbered_image_paths[0]) if numbered_image_paths else None
+    metadata["files"]["images"] = [str(path) for path in numbered_image_paths]
+    metadata["files"]["thumbnail"] = str(numbered_image_paths[0]) if numbered_image_paths else None
+    metadata["files"]["explanation"] = str(numbered_explanation_paths[0]) if numbered_explanation_paths else None
+    metadata["files"]["explanations"] = [str(path) for path in numbered_explanation_paths]
     metadata["image_generated_at"] = dt.datetime.now().isoformat(timespec="seconds")
     metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
     return {

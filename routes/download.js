@@ -37,15 +37,9 @@ async function buildRunZip(scope, runId) {
     throw error;
   }
 
-  const preferred = new Map(names.map((name) => [name, name]));
-  const orderedNames = [
-    "metadata.json",
-    "soal.json",
-    "caption.txt",
-    ...names.filter((name) => /^post-\d+\.png$/i.test(name)).sort(),
-    ...names.filter((name) => /^pembahasan-\d+\.jpe?g$/i.test(name)).sort(),
-    ...names.filter((name) => !/^(metadata\.json|soal\.json|caption\.txt|post-\d+\.png|pembahasan-\d+\.jpe?g)$/i.test(name)).sort(),
-  ].filter((name, index, list) => preferred.has(name) && list.indexOf(name) === index);
+  const orderedNames = names
+    .filter((name) => /^\d+\.jpe?g$/i.test(name))
+    .sort((left, right) => Number.parseInt(left, 10) - Number.parseInt(right, 10));
 
   const entries = [];
   for (const name of orderedNames) {
@@ -61,7 +55,7 @@ async function buildRunZip(scope, runId) {
   }
 
   if (entries.length === 0) {
-    const error = new Error("Folder run kosong.");
+    const error = new Error("Folder run belum memiliki JPG bernomor.");
     error.status = 404;
     throw error;
   }

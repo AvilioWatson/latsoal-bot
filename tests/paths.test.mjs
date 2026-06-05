@@ -36,16 +36,20 @@ test("buildWebFiles returns stable metadata, question, and caption routes", () =
 test("buildWebFiles maps generated image files when present", () => {
   const webFiles = buildWebFiles("/outputs", "20260529-123456", {
     images: [
-      "C:\\repo\\outputs\\20260529-123456\\post-1.png",
-      "C:\\repo\\outputs\\20260529-123456\\post-2.png",
-      "C:\\repo\\outputs\\20260529-123456\\pembahasan-1.jpg",
+      "C:\\repo\\outputs\\20260529-123456\\1.jpg",
+      "C:\\repo\\outputs\\20260529-123456\\2.jpg",
+      "C:\\repo\\outputs\\20260529-123456\\3.jpg",
+      "C:\\repo\\outputs\\20260529-123456\\4.jpg",
     ],
-    explanation: "C:\\repo\\outputs\\20260529-123456\\pembahasan-1.jpg",
+    thumbnail: "C:\\repo\\outputs\\20260529-123456\\1.jpg",
+    explanation: "C:\\repo\\outputs\\20260529-123456\\4.jpg",
   });
   assert.deepEqual(webFiles.images, [
-    "/outputs/20260529-123456/post-1.png",
-    "/outputs/20260529-123456/post-2.png",
-    "/outputs/20260529-123456/pembahasan-1.jpg",
+    "/outputs/20260529-123456/1.jpg",
+    "/outputs/20260529-123456/2.jpg",
+    "/outputs/20260529-123456/3.jpg",
+    "/outputs/20260529-123456/4.jpg",
   ]);
-  assert.equal(webFiles.explanation, "/outputs/20260529-123456/pembahasan-1.jpg");
+  assert.equal(webFiles.thumbnail, "/outputs/20260529-123456/1.jpg");
+  assert.equal(webFiles.explanation, "/outputs/20260529-123456/4.jpg");
 });

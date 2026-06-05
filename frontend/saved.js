@@ -192,6 +192,7 @@ function renderSavedList(items = filteredSavedItems()) {
       <div class="saved-actions">
         <button type="button" data-action="approved">Approve</button>
         <button type="button" data-action="rejected">Reject</button>
+        <button type="button" data-uploaded="true">Sudah diupload</button>
         <button type="button" data-delete="true">Hapus</button>
       </div>
     `;
@@ -199,10 +200,11 @@ function renderSavedList(items = filteredSavedItems()) {
     row.setAttribute("role", "button");
     row.setAttribute("aria-label", `Preview ${item.mapel || item.run_id}`);
     row.querySelector("strong").textContent = item.mapel ? `${item.mapel}: ${item.topik}` : item.run_id;
-    row.querySelector("p").textContent = `${item.run_id} / ${item.source || "-"} / ${item.level || "-"}`;
+    row.querySelector("p").textContent = `${item.run_id} / ${item.source || "-"} / ${item.level || "-"}${item.uploaded_at ? " / uploaded" : ""}`;
     row.querySelector("span").textContent = statusLabel(item.status);
     row.querySelector("[data-action='approved']").disabled = item.status === "approved";
     row.querySelector("[data-action='rejected']").disabled = item.status === "rejected";
+    row.querySelector("[data-uploaded='true']").disabled = Boolean(item.uploaded_at);
     row.addEventListener("click", () => loadSavedPreview(item.run_id));
     row.addEventListener("keydown", (event) => {
       if (event.key !== "Enter" && event.key !== " ") return;
@@ -212,6 +214,10 @@ function renderSavedList(items = filteredSavedItems()) {
     row.querySelector("[data-delete='true']").addEventListener("click", (event) => {
       event.stopPropagation();
       deleteSavedRun(item.run_id);
+    });
+    row.querySelector("[data-uploaded='true']").addEventListener("click", (event) => {
+      event.stopPropagation();
+      markUploaded(item.run_id);
     });
     row.querySelectorAll("button").forEach((button) => {
       if (button.dataset.action) {
@@ -330,6 +336,27 @@ async function updateSavedStatus(runId, status) {
   if (activePreviewRunId === runId) {
     setPreviewStatus(status);
     runNote.textContent = `Status review sekarang ${statusLabel(status)}.`;
+  }
+}
+
+async function markUploaded(runId) {
+  setStatus("Updating");
+  const response = await fetch(`/saved/${runId}/uploaded`, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    setStatus("Error");
+    debugPanel.hidden = false;
+    debugSource.textContent = "saved/uploaded";
+    debugText.textContent = data.error || "Update upload gagal.";
+    return;
+  }
+  setStatus("Uploaded");
+  await loadSavedList();
+  if (activePreviewRunId === runId) {
+    runNote.textContent = `Sudah diupload pada ${new Date(data.uploaded_at).toLocaleString("id-ID")}.`;
   }
 }
 

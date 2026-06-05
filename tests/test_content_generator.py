@@ -84,9 +84,14 @@ class ContentGeneratorTest(unittest.TestCase):
             self.assertTrue((run_dir / "metadata.json").exists())
             self.assertTrue((run_dir / "soal.json").exists())
             self.assertTrue((run_dir / "caption.txt").exists())
+            self.assertTrue((run_dir / "thumbnail.png").exists())
             self.assertTrue((run_dir / "post-1.png").exists())
             self.assertTrue((run_dir / "pembahasan-1.jpg").exists())
+            self.assertTrue((run_dir / "1.jpg").exists())
             self.assertTrue(result["files"]["images"])
+            self.assertTrue(all(Path(path).suffix.lower() == ".jpg" for path in result["files"]["images"]))
+            self.assertTrue(Path(result["files"]["images"][0]).name == "1.jpg")
+            self.assertTrue(result["files"]["thumbnail"])
             self.assertTrue(result["files"]["explanations"])
 
     def test_generate_content_draft_covers_every_default_subtest(self):

@@ -1,5 +1,5 @@
 import {spawn} from "node:child_process";
-import {access, cp, mkdir, readFile, rm, writeFile} from "node:fs/promises";
+import {access, cp, mkdir, readFile, readdir, rm, writeFile} from "node:fs/promises";
 import path from "node:path";
 import {
   addEntry,
@@ -69,6 +69,7 @@ async function listSavedRuns() {
     items.push({
       run_id: item.run_id,
       saved_at: item.saved_at || null,
+      uploaded_at: item.uploaded_at || null,
       status: item.status || "saved",
       source: metadata?.source || null,
       review_status: metadata?.review_status || null,
@@ -107,6 +108,27 @@ async function updateSavedStatus(runId, status) {
     status_updated_at: now,
     approved_at: status === "approved" ? now : null,
     rejected_at: status === "rejected" ? now : null,
+  });
+}
+
+async function markSavedUploaded(runId) {
+  if (!isValidRunId(runId)) {
+    throw requestError(400, "Run ID tidak valid.");
+  }
+
+  const target = safeJoin(SAVED, runId);
+  if (!target) {
+    throw requestError(400, "Path run tidak valid.");
+  }
+  try {
+    await access(path.join(target, "metadata.json"));
+  } catch {
+    throw requestError(404, "Saved run tidak ditemukan.");
+  }
+
+  const now = new Date().toISOString();
+  return updateEntry(runId, {
+    uploaded_at: now,
   });
 }
 
@@ -209,11 +231,17 @@ async function deleteSavedImages(runId) {
   }
 
   const imageFiles = new Set([
+    metadata?.files?.thumbnail,
     metadata?.files?.image,
     metadata?.files?.explanation,
     ...(Array.isArray(metadata?.files?.images) ? metadata.files.images : []),
     ...(Array.isArray(metadata?.files?.explanations) ? metadata.files.explanations : []),
   ].filter(Boolean));
+  for (const name of await readdir(runDir)) {
+    if (/^(?:\d+\.jpe?g|thumbnail\.png|post-\d+\.png|pembahasan-\d+\.jpe?g)$/i.test(name)) {
+      imageFiles.add(name);
+    }
+  }
   for (const imageFile of imageFiles) {
     const target = safeJoin(runDir, path.basename(String(imageFile)));
     if (target) {
@@ -221,6 +249,7 @@ async function deleteSavedImages(runId) {
     }
   }
   metadata.files = metadata.files || {};
+  delete metadata.files.thumbnail;
   delete metadata.files.image;
   delete metadata.files.explanation;
   metadata.files.images = [];
@@ -313,6 +342,15 @@ export async function handle(request, response, route) {
     return true;
   }
 
+  if (request.method === "POST" && savedRoute?.length === 3 && savedRoute[2] === "uploaded") {
+    try {
+      sendJson(response, await markSavedUploaded(savedRoute[1]));
+    } catch (error) {
+      sendError(response, errorStatus(error), error.message);
+    }
+    return true;
+  }
+
   if (request.method === "POST" && savedRoute?.length === 3 && savedRoute[2] === "images") {
     try {
       sendJson(response, await generateSavedImages(savedRoute[1]));
@@ -360,6 +398,16 @@ export async function handle(request, response, route) {
     try {
       const payload = await readJsonBody(request);
       sendJson(response, await deleteSavedRun(payload.run_id || ""));
+    } catch (error) {
+      sendError(response, errorStatus(error), error.message);
+    }
+    return true;
+  }
+
+  if (request.method === "POST" && route === "/api/saved/uploaded") {
+    try {
+      const payload = await readJsonBody(request);
+      sendJson(response, await markSavedUploaded(payload.run_id || ""));
     } catch (error) {
       sendError(response, errorStatus(error), error.message);
     }

@@ -108,6 +108,12 @@ Request:
 Status valid: `saved`, `approved`, `rejected`.
 Response menyertakan `status_updated_at`; `approved_at` atau `rejected_at` diisi sesuai status.
 
+### `POST /saved/<run-id>/uploaded`
+
+Alias: `POST /api/saved/uploaded`
+
+Menandai item saved sebagai sudah diupload. Response menyertakan `uploaded_at`.
+
 ### `DELETE /saved/<run-id>`
 
 Alias: `POST /saved/<run-id>/delete`, `POST /api/saved/delete`
@@ -127,11 +133,11 @@ Path file di manifest relatif terhadap folder export.
 
 ### `GET /download/outputs/<run-id>`
 
-Mengunduh folder hasil generate sebagai ZIP. Isi ZIP berada di folder `<run-id>/`.
+Mengunduh hasil generate sebagai ZIP. Isi ZIP hanya file JPG bernomor di folder `<run-id>/`, misalnya `1.jpg`, `2.jpg`, dan seterusnya.
 
 ### `GET /download/saved/<run-id>`
 
-Mengunduh folder saved sebagai ZIP. Isi ZIP berada di folder `<run-id>/`.
+Mengunduh hasil saved sebagai ZIP. Isi ZIP hanya file JPG bernomor di folder `<run-id>/`, misalnya `1.jpg`, `2.jpg`, dan seterusnya.
 
 ## Stats
 

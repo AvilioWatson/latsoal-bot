@@ -40,12 +40,14 @@ Implemented question generation, review workflow, validation, deduplication, cap
 - Pilih subtes, topik, level, mode konten, dan akun/brand caption.
 - Preview soal, pilihan jawaban, caption, metadata, dan error/fallback.
 - Generate gambar post soal 1000x1000 dan JPG pembahasan otomatis.
+- Tambahkan thumbnail pembuka 1000x1000 yang berisi judul subtes dan subtopik.
 - Preview dan download semua file run sebagai ZIP berisi satu folder.
 - Simpan soal yang dianggap bagus ke Bank Review.
 - Bank Review terpisah dari halaman generator.
 - Bank Review bisa dibuka per subtes.
 - Generate ulang atau hapus gambar dari item saved.
 - Approve atau reject soal saved.
+- Tandai soal saved yang sudah diupload.
 - Export semua item approved ke folder `approved/`.
 - Dedup lokal terhadap soal yang sudah tersimpan.
 - Validator lokal untuk mengecek struktur soal, opsi jawaban, caption, hashtag, dan potensi masalah dasar.
@@ -85,6 +87,7 @@ Halaman untuk meninjau semua soal yang sudah disimpan. Di halaman ini kamu bisa:
 - buka metadata JSON;
 - download folder saved sebagai ZIP;
 - approve, reject, atau hapus soal saved;
+- tandai soal yang sudah diupload;
 - export semua soal approved.
 
 ### Bank Review per Subtes
@@ -304,8 +307,12 @@ Isi umumnya:
 ```text
 caption.txt
 metadata.json
-pembahasan-1.jpg
+1.jpg
+2.jpg
+3.jpg
+thumbnail.png
 post-1.png
+pembahasan-1.jpg
 soal.json
 ```
 
@@ -313,20 +320,21 @@ Keterangan:
 
 - `caption.txt`: caption final.
 - `metadata.json`: catatan source, fallback, error, validator, dedup, usage token, dan daftar file gambar.
-- `post-*.png`: gambar kuis 1000x1000 untuk Instagram. Soal panjang otomatis dipecah menjadi beberapa gambar.
-- `pembahasan-*.jpg`: gambar pembahasan 1000x1000. Pembahasan panjang otomatis dipecah per paragraf, dengan nomor halaman mengikuti total semua gambar dalam run.
+- `1.jpg`, `2.jpg`, `3.jpg`, dst: gambar final yang dipakai preview dan download, sudah berurutan dari thumbnail sampai pembahasan.
+- `thumbnail.png`: slide pembuka 1000x1000 yang berisi subtes dan subtopik, memakai gaya visual yang konsisten dengan slide berikutnya.
+- `post-*.png` dan `pembahasan-*.jpg`: file render intermediate sebelum dikonversi menjadi JPG bernomor.
 - `soal.json`: data soal mentah.
 
-Metadata gambar menyimpan file utama di `files.image`, semua gambar di `files.images`, dan gambar pembahasan di `files.explanation` / `files.explanations`.
+Metadata gambar menyimpan file JPG bernomor di `files.image`, `files.images`, `files.thumbnail`, dan `files.explanation` / `files.explanations`.
 
-Tombol `Download folder` mengunduh seluruh isi run sebagai ZIP:
+Tombol `Download folder` mengunduh ZIP yang hanya berisi JPG bernomor:
 
 ```text
 GET /download/outputs/<run-id>
 GET /download/saved/<run-id>
 ```
 
-Isi ZIP berada di folder `<run-id>/`, sehingga mudah diekstrak tanpa file tercecer.
+Isi ZIP berada di folder `<run-id>/`, misalnya `<run-id>/1.jpg`, `<run-id>/2.jpg`, dan seterusnya.
 
 Saat tombol simpan dipakai, output terpilih dicopy ke:
 
@@ -352,7 +360,9 @@ Workflow review memakai status di Bank Review:
 
 Tombol `Export approved` hanya menyalin item berstatus `Approved` ke folder `approved/<export-id>/`.
 
-Di Bank Review, tombol `Generate` pada panel gambar menjalankan ulang renderer dari `metadata.json`. Tombol `Hapus gambar` menghapus `post-*.png` dan `pembahasan-*.jpg` dari item saved tanpa menghapus data soal, caption, atau metadata utama.
+Tombol `Sudah diupload` menandai item dengan `uploaded_at` tanpa mengubah status review, sehingga catatan upload tetap terpisah dari alur approve/reject/export.
+
+Di Bank Review, tombol `Generate` pada panel gambar menjalankan ulang renderer dari `metadata.json`. Tombol `Hapus gambar` menghapus `1.jpg`, `2.jpg`, dst serta file render intermediate dari item saved tanpa menghapus data soal, caption, atau metadata utama.
 
 ## Struktur Subtes
 
@@ -445,7 +455,7 @@ Web akan menampilkan error quota dan generator akan memakai fallback jika memung
 
 Cek folder `outputs/<run-id>/` atau `saved/<run-id>/`. Pastikan `soal.json`, `caption.txt`, dan `metadata.json` tersedia.
 
-Jika metadata ada tetapi gambar hilang di Bank Review, buka item tersebut lalu tekan tombol `Generate` pada panel gambar untuk membuat ulang `post-*.png` dan `pembahasan-*.jpg`.
+Jika metadata ada tetapi gambar hilang di Bank Review, buka item tersebut lalu tekan tombol `Generate` pada panel gambar untuk membuat ulang JPG bernomor.
 
 ### Download folder gagal
 

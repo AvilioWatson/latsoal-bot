@@ -164,6 +164,7 @@ test("bank review API can save, approve, export, and delete in an isolated data 
     body = await response.json();
     assert.equal(body.items.length, 1);
     assert.equal(body.items[0].status, "saved");
+    assert.equal(body.items[0].uploaded_at, null);
 
     response = await fetch(`${baseUrl}/saved/${RUN_ID}/status`, {
       method: "POST",
@@ -183,6 +184,17 @@ test("bank review API can save, approve, export, and delete in an isolated data 
     });
     assert.equal(response.status, 400);
     assert.match((await response.json()).error, /Status tidak valid/);
+
+    response = await fetch(`${baseUrl}/saved/${RUN_ID}/uploaded`, {method: "POST"});
+    assert.equal(response.status, 200);
+    body = await response.json();
+    assert.match(body.uploaded_at, /^\d{4}-\d{2}-\d{2}T/);
+    assert.equal(body.status, "approved");
+
+    response = await fetch(`${baseUrl}/saved`, {headers: {Accept: "application/json"}});
+    assert.equal(response.status, 200);
+    body = await response.json();
+    assert.match(body.items[0].uploaded_at, /^\d{4}-\d{2}-\d{2}T/);
 
     response = await fetch(`${baseUrl}/export`, {method: "POST"});
     assert.equal(response.status, 200);
