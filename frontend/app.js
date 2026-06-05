@@ -11,6 +11,8 @@ const captionText = document.querySelector("#captionText");
 const hashtagText = document.querySelector("#hashtagText");
 const validationScore = document.querySelector("#validationScore");
 const metadataLink = document.querySelector("#metadataLink");
+const imagePreviewList = document.querySelector("#imagePreviewList");
+const imageCount = document.querySelector("#imageCount");
 const saveButton = document.querySelector("#saveButton");
 const runNote = document.querySelector("#runNote");
 const debugPanel = document.querySelector("#debugPanel");
@@ -79,6 +81,31 @@ function renderDebug(data) {
   }, null, 2);
 }
 
+function renderImages(data) {
+  const images = data.web_files?.images || [];
+  imageCount.textContent = `${images.length} page`;
+  imagePreviewList.innerHTML = "";
+  if (images.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "body-copy";
+    empty.textContent = "Gambar 4:5 akan muncul di sini.";
+    imagePreviewList.append(empty);
+    return;
+  }
+  images.forEach((src, index) => {
+    const link = document.createElement("a");
+    link.href = src;
+    link.target = "_blank";
+    link.rel = "noopener";
+    const image = document.createElement("img");
+    image.className = "post-preview";
+    image.src = `${src}?t=${Date.now()}`;
+    image.alt = `Preview gambar ${index + 1}`;
+    link.append(image);
+    imagePreviewList.append(link);
+  });
+}
+
 function fillTopics() {
   const topics = topicsByMapel[mapelSelect.value] || [];
   topicSelect.innerHTML = "";
@@ -116,6 +143,7 @@ function renderResult(data) {
   validationScore.textContent = `Skor ${validation.skor ?? "-"}`;
   runNote.textContent = reviewNote(data);
   renderDebug(data);
+  renderImages(data);
   questionText.textContent = question.soal;
 
   choicesList.innerHTML = "";

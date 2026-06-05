@@ -4,6 +4,10 @@ import {readIndex, writeIndex} from "../lib/filestore.js";
 import {errorStatus, sendError, sendJson} from "../lib/http.js";
 import {APPROVED, SAVED, isValidRunId} from "../lib/paths.js";
 
+function artifactName(file) {
+  return String(file).split(/[\\/]/).pop();
+}
+
 async function exportApprovedRuns() {
   const index = await readIndex();
   const approved = index.filter((item) => item.status === "approved" && isValidRunId(item.run_id));
@@ -31,11 +35,17 @@ async function exportApprovedRuns() {
         jawaban: metadata?.question?.jawaban || null,
         question_file: `${item.run_id}/soal.json`,
         caption_file: `${item.run_id}/caption.txt`,
+        image_files: Array.isArray(metadata?.files?.images)
+          ? metadata.files.images.map((file) => `${item.run_id}/${artifactName(file)}`)
+          : [],
         metadata_file: `${item.run_id}/metadata.json`,
         web_files: {
           metadata: `/approved/${exportId}/${item.run_id}/metadata.json`,
           question: `/approved/${exportId}/${item.run_id}/soal.json`,
           caption: `/approved/${exportId}/${item.run_id}/caption.txt`,
+          images: Array.isArray(metadata?.files?.images)
+            ? metadata.files.images.map((file) => `/approved/${exportId}/${item.run_id}/${artifactName(file)}`)
+            : [],
         },
       });
     } catch {

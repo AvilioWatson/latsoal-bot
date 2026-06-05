@@ -406,6 +406,30 @@ select option {
   transition: border-color 180ms ease, transform 180ms ease, background 180ms ease;
 }
 
+.image-block {
+  grid-row: span 2;
+}
+
+.post-preview-list {
+  display: grid;
+  gap: 14px;
+}
+
+.post-preview-list a {
+  display: block;
+}
+
+.post-preview {
+  display: block;
+  width: 100%;
+  max-width: 420px;
+  aspect-ratio: 1;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface2);
+  object-fit: contain;
+}
+
 .saved-preview.is-loading .detail-block {
   opacity: 0.72;
   transform: translateY(2px);
@@ -822,6 +846,10 @@ select option {
   .control-panel {
     border-right: 0;
     border-bottom: 1px solid var(--border);
+  }
+
+  .image-block {
+    grid-row: auto;
   }
 }
 

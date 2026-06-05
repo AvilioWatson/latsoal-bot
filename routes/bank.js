@@ -47,7 +47,7 @@ async function saveRun(runId) {
     run_id: runId,
     saved_at: savedAt,
     saved_path: target,
-    web_files: buildWebFiles("/saved", runId),
+    web_files: buildWebFiles("/saved", runId, metadata.files),
   };
 }
 
@@ -73,7 +73,7 @@ async function listSavedRuns() {
       topik: metadata?.question?.topik || null,
       level: metadata?.question?.level || null,
       jawaban: metadata?.question?.jawaban || null,
-      web_files: buildWebFiles("/saved", item.run_id),
+      web_files: buildWebFiles("/saved", item.run_id, metadata?.files),
     });
   }
   return items;
@@ -137,7 +137,7 @@ async function sendSavedMetadata(response, runId) {
   } catch {
     throw requestError(404, "Saved run tidak ditemukan.");
   }
-  metadata.web_files = buildWebFiles("/saved", runId);
+  metadata.web_files = buildWebFiles("/saved", runId, metadata.files);
   sendJson(response, metadata);
 }
 

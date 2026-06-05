@@ -32,3 +32,15 @@ test("buildWebFiles returns stable metadata, question, and caption routes", () =
     metadata: "/outputs/20260529-123456/metadata.json",
   });
 });
+
+test("buildWebFiles maps generated image files when present", () => {
+  assert.deepEqual(buildWebFiles("/outputs", "20260529-123456", {
+    images: [
+      "C:\\repo\\outputs\\20260529-123456\\post-1.png",
+      "C:\\repo\\outputs\\20260529-123456\\post-2.png",
+    ],
+  }).images, [
+    "/outputs/20260529-123456/post-1.png",
+    "/outputs/20260529-123456/post-2.png",
+  ]);
+});

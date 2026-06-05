@@ -14,6 +14,8 @@ const captionText = document.querySelector("#captionText");
 const hashtagText = document.querySelector("#hashtagText");
 const validationScore = document.querySelector("#validationScore");
 const metadataLink = document.querySelector("#metadataLink");
+const imagePreviewList = document.querySelector("#imagePreviewList");
+const imageCount = document.querySelector("#imageCount");
 const sourceLabel = document.querySelector("#sourceLabel");
 const debugPanel = document.querySelector("#debugPanel");
 const debugSource = document.querySelector("#debugSource");
@@ -92,6 +94,31 @@ function renderDebug(data) {
     ai_usage: data.ai_usage,
     model: data.model,
   }, null, 2);
+}
+
+function renderImages(data) {
+  const images = data.web_files?.images || [];
+  imageCount.textContent = `${images.length} page`;
+  imagePreviewList.innerHTML = "";
+  if (images.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "body-copy";
+    empty.textContent = "Gambar 4:5 akan muncul di sini.";
+    imagePreviewList.append(empty);
+    return;
+  }
+  images.forEach((src, index) => {
+    const link = document.createElement("a");
+    link.href = src;
+    link.target = "_blank";
+    link.rel = "noopener";
+    const image = document.createElement("img");
+    image.className = "post-preview";
+    image.src = `${src}?t=${Date.now()}`;
+    image.alt = `Preview gambar saved ${index + 1}`;
+    link.append(image);
+    imagePreviewList.append(link);
+  });
 }
 
 function filteredSavedItems() {
@@ -231,6 +258,7 @@ async function loadSavedPreview(runId) {
   setPreviewStatus(savedItems.find((item) => item.run_id === runId)?.status || "saved");
   validationScore.textContent = `Skor ${validation.skor ?? "-"}`;
   runNote.textContent = reviewNote(data);
+  renderImages(data);
   questionText.textContent = question.soal;
   choicesList.innerHTML = "";
   for (const [key, value] of Object.entries(question.pilihan)) {
@@ -263,6 +291,8 @@ function clearPreviewIfDeleted(runId) {
   hashtagText.textContent = "";
   validationScore.textContent = "Skor belum tersedia";
   sourceLabel.textContent = "-";
+  imageCount.textContent = "0 page";
+  imagePreviewList.innerHTML = '<p class="body-copy">Gambar 4:5 akan muncul di sini.</p>';
   metadataLink.hidden = true;
   metadataLink.href = "#";
   copyCaptionButton.disabled = true;

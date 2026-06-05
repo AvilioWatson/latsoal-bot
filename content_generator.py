@@ -177,6 +177,211 @@ def clean_error_message(exc):
     return text[:240]
 
 
+def _load_font(size, bold=False, family="sans"):
+    try:
+        from PIL import ImageFont
+    except ImportError:
+        return None
+
+    if family == "serif":
+        font_names = [
+            "georgiab.ttf" if bold else "georgia.ttf",
+            "timesbd.ttf" if bold else "times.ttf",
+            "cambriaz.ttf" if bold else "cambria.ttf",
+        ]
+    else:
+        font_names = [
+            "arialbd.ttf" if bold else "arial.ttf",
+            "segoeuib.ttf" if bold else "segoeui.ttf",
+            "calibrib.ttf" if bold else "calibri.ttf",
+        ]
+    search_dirs = [
+        Path(os.getenv("WINDIR", "C:/Windows")) / "Fonts",
+        ROOT,
+    ]
+    for directory in search_dirs:
+        for name in font_names:
+            path = directory / name
+            if path.exists():
+                return ImageFont.truetype(str(path), size=size)
+    return ImageFont.load_default()
+
+
+def _text_width(draw, text, font):
+    bbox = draw.textbbox((0, 0), str(text), font=font)
+    return bbox[2] - bbox[0]
+
+
+def _line_height(draw, font):
+    bbox = draw.textbbox((0, 0), "Ag", font=font)
+    return bbox[3] - bbox[1]
+
+
+def _wrap_text(draw, text, font, max_width):
+    words = str(text).replace("\n", " ").split()
+    lines = []
+    current = ""
+    for word in words:
+        candidate = f"{current} {word}".strip()
+        if current and _text_width(draw, candidate, font) > max_width:
+            lines.append(current)
+            current = word
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    return lines or [""]
+
+
+def _draw_justified_line(draw, x, y, line, font, fill, max_width, justify=True):
+    words = str(line).split()
+    if not justify or len(words) < 2:
+        draw.text((x, y), line, font=font, fill=fill)
+        return
+    words_width = sum(_text_width(draw, word, font) for word in words)
+    gap_count = len(words) - 1
+    gap_width = max(4, (max_width - words_width) / gap_count)
+    cursor_x = x
+    for index, word in enumerate(words):
+        draw.text((cursor_x, y), word, font=font, fill=fill)
+        cursor_x += _text_width(draw, word, font)
+        if index < gap_count:
+            cursor_x += gap_width
+
+
+def _chunks(items, size):
+    return [items[index:index + size] for index in range(0, len(items), size)]
+
+
+def _paginate_quiz(draw, question, fonts):
+    q_lines = _wrap_text(draw, question.get("soal", ""), fonts["question"], 790)
+    q_pages = _chunks(q_lines, 5)
+    choices = question.get("pilihan", {})
+    choice_pages = []
+    current = []
+    used = 0
+    for key in ["A", "B", "C", "D", "E"]:
+        lines = _wrap_text(draw, choices.get(key, ""), fonts["body"], 650)
+        block_h = max(78, len(lines) * (_line_height(draw, fonts["body"]) + 8) + 28)
+        if current and used + block_h + 14 > 460:
+            choice_pages.append(current)
+            current = []
+            used = 0
+        current.append((key, lines, block_h))
+        used += block_h + 14
+    if current:
+        choice_pages.append(current)
+
+    pages = []
+    for index, q_chunk in enumerate(q_pages):
+        pages.append({"question_lines": q_chunk, "choices": choice_pages[0] if index == len(q_pages) - 1 and choice_pages else []})
+    if len(choice_pages) > 1:
+        for choice_page in choice_pages[1:]:
+            pages.append({"question_lines": [], "choices": choice_page})
+    return pages or [{"question_lines": [""], "choices": []}]
+
+
+def render_quiz_images(question, run_dir):
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError:
+        return []
+
+    width = height = 1000
+    colors = {
+        "bg": "#ffffff",
+        "panel": "#f7f7f7",
+        "panel2": "#f1f1f1",
+        "ink": "#050505",
+        "muted": "#7f8790",
+        "quiet": "#c8c8c8",
+        "line": "#dddddd",
+        "dark": "#111111",
+        "white": "#ffffff",
+    }
+    fonts = {
+        "category": _load_font(25, family="serif"),
+        "title": _load_font(36, family="serif"),
+        "question": _load_font(30, family="serif"),
+        "body": _load_font(30, family="serif"),
+        "body_bold": _load_font(30, bold=True, family="serif"),
+        "small": _load_font(24, family="serif"),
+    }
+
+    probe = Image.new("RGB", (width, height), colors["bg"])
+    probe_draw = ImageDraw.Draw(probe)
+    pages = _paginate_quiz(probe_draw, question, fonts)
+    output_paths = []
+
+    for page_index, page in enumerate(pages, start=1):
+        image = Image.new("RGB", (width, height), colors["bg"])
+        draw = ImageDraw.Draw(image)
+        account = question.get("akun", "@namaakun")
+
+        draw.rounded_rectangle((16, 18, 984, 982), radius=8, fill=colors["bg"], outline=colors["line"], width=2)
+        category = str(question.get("mapel", "Kuis")).upper()
+        title = str(question.get("topik") or question.get("mapel", "Pengetahuan Umum"))
+        if page_index > 1:
+            title = f"{title} ({page_index}/{len(pages)})"
+        draw.text((72, 78), category[:42], font=fonts["category"], fill=colors["muted"])
+        draw.text((72, 118), title[:44], font=fonts["title"], fill=colors["ink"])
+
+        question_box = (72, 188, 928, 440)
+        draw.rounded_rectangle(question_box, radius=7, fill=colors["panel"], outline=colors["line"], width=2)
+        q_lines = page["question_lines"] or ["Lanjutan pilihan jawaban"]
+        q_line_h = _line_height(draw, fonts["question"]) + 16
+        q_total_h = len(q_lines) * q_line_h
+        q_y = question_box[1] + max(34, (question_box[3] - question_box[1] - q_total_h) // 2)
+        text_x = question_box[0] + 54
+        text_w = question_box[2] - question_box[0] - 108
+        for line_index, line in enumerate(q_lines):
+            _draw_justified_line(
+                draw,
+                text_x,
+                q_y,
+                line,
+                fonts["question"],
+                colors["ink"],
+                text_w,
+                justify=line_index < len(q_lines) - 1,
+            )
+            q_y += q_line_h
+
+        total_h = sum(block_h for _, _, block_h in page["choices"])
+        total_h += 14 * (len(page["choices"]) - 1)
+        area_top = 468
+        area_bottom = 930
+        area_h = area_bottom - area_top
+        y = area_top + (area_h - total_h) // 2 if page["choices"] else area_top
+        for key, lines, block_h in page["choices"]:
+            fill = colors["bg"]
+            outline = colors["line"]
+            draw.rounded_rectangle((72, y, 928, y + block_h), radius=7, fill=fill, outline=outline, width=2)
+            badge_fill = colors["bg"]
+            badge_outline = colors["line"]
+            badge_text = "#26405a"
+            draw.rounded_rectangle((104, y + 16, 164, y + 70), radius=4, fill=badge_fill, outline=badge_outline, width=2)
+            draw.text((124, y + 26), key, font=fonts["body"], fill=badge_text)
+            text_y = y + 33
+            for line in lines:
+                draw.text((190, text_y), line, font=fonts["body"], fill=colors["ink"])
+                text_y += _line_height(draw, fonts["body"]) + 8
+            y += block_h + 14
+
+        draw.text((72, 942), account, font=fonts["small"], fill="#9ca3af")
+        if len(pages) > 1:
+            page_text = f"{page_index}/{len(pages)}"
+            page_w = _text_width(draw, page_text, fonts["small"])
+            draw.text((928 - page_w, 942), page_text, font=fonts["small"], fill=colors["muted"])
+
+        output_path = run_dir / f"post-{page_index}.png"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        image.save(output_path, format="PNG", optimize=True)
+        output_paths.append(output_path)
+
+    return output_paths
+
+
 STOPWORDS = {
     "yang", "dan", "di", "ke", "dari", "dengan", "untuk", "pada", "adalah",
     "atau", "dalam", "ini", "itu", "sebagai", "maka", "jika", "akan",
@@ -889,6 +1094,7 @@ def generate_content(mapel, topic, level, mode="auto", account="@namaakun"):
     if not GEMINI_VALIDATE or source in {"draft", "fallback"}:
         validation = local_validation(question, caption)
     question["akun"] = account
+    image_paths = render_quiz_images(question, run_dir)
     dedup = check_duplicate(question)
     review_status = "needs_review" if "question" in fallbacks else "ready"
     if errors:
@@ -937,6 +1143,8 @@ def generate_content(mapel, topic, level, mode="auto", account="@namaakun"):
         "files": {
             "question": str(run_dir / "soal.json"),
             "caption": str(run_dir / "caption.txt"),
+            "image": str(image_paths[0]) if image_paths else None,
+            "images": [str(path) for path in image_paths],
         },
     }
 
