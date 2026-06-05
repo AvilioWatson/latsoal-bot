@@ -11,6 +11,7 @@ Yang dikerjakan:
 - Membuat web lokal untuk generate, preview, simpan, review, approve/reject, dan export soal.
 - Menghubungkan server Node.js dengan generator Python tanpa framework backend tambahan.
 - Menambahkan fallback lokal saat Gemini error, quota habis, atau response tidak valid.
+- Membuat renderer gambar 1000x1000 untuk post soal dan JPG pembahasan siap upload.
 - Membuat validator untuk mengecek struktur soal, pilihan jawaban, caption, hashtag, dan potensi duplikasi.
 - Menyediakan Bank Review agar soal yang bagus bisa dipisahkan dari draft yang masih perlu dicek.
 - Menambahkan test dan quality check otomatis agar perubahan lebih aman sebelum dipakai produksi konten.
@@ -30,7 +31,7 @@ Contoh ringkasan untuk CV:
 ```text
 Built a local content desk for preparing UTBK/SNBT practice questions for Instagram, using Node.js, Python, and vanilla JavaScript.
 
-Implemented question generation, review workflow, validation, deduplication, caption support, export tooling, automated tests, and GitHub Actions CI.
+Implemented question generation, review workflow, validation, deduplication, caption support, image rendering, ZIP download/export tooling, automated tests, and GitHub Actions CI.
 ```
 
 ## Fitur Utama
@@ -38,9 +39,12 @@ Implemented question generation, review workflow, validation, deduplication, cap
 - Generate soal UTBK/SNBT dari browser.
 - Pilih subtes, topik, level, mode konten, dan akun/brand caption.
 - Preview soal, pilihan jawaban, caption, metadata, dan error/fallback.
+- Generate gambar post soal 1000x1000 dan JPG pembahasan otomatis.
+- Preview dan download semua file run sebagai ZIP berisi satu folder.
 - Simpan soal yang dianggap bagus ke Bank Review.
 - Bank Review terpisah dari halaman generator.
 - Bank Review bisa dibuka per subtes.
+- Generate ulang atau hapus gambar dari item saved.
 - Approve atau reject soal saved.
 - Export semua item approved ke folder `approved/`.
 - Dedup lokal terhadap soal yang sudah tersimpan.
@@ -60,8 +64,9 @@ Halaman utama untuk membuat konten baru. Di halaman ini kamu bisa:
 - memilih topik;
 - memilih level;
 - generate soal;
-- melihat preview soal dan caption;
+- melihat preview gambar, soal, dan caption;
 - melihat error/fallback jika ada;
+- download folder hasil generate sebagai ZIP;
 - menyimpan hasil yang bagus ke Bank Review.
 
 ### Bank Review
@@ -74,9 +79,11 @@ Halaman untuk meninjau semua soal yang sudah disimpan. Di halaman ini kamu bisa:
 
 - mencari soal berdasarkan subtes, topik, level, run id, atau source;
 - filter berdasarkan status `Saved`, `Approved`, atau `Rejected`;
-- preview soal, pilihan jawaban, caption, dan metadata;
+- preview gambar, soal, pilihan jawaban, caption, dan metadata;
+- generate ulang gambar atau hapus gambar dari item saved;
 - copy caption;
 - buka metadata JSON;
+- download folder saved sebagai ZIP;
 - approve, reject, atau hapus soal saved;
 - export semua soal approved.
 
@@ -205,7 +212,7 @@ Alur dasar saat tombol generate ditekan:
 
 1. Browser mengirim pilihan subtes, topik, level, mode, dan akun ke `server.js`.
 2. `server.js` menjalankan `content_generator.py`.
-3. Python membuat soal, caption, dan metadata.
+3. Python membuat soal, caption, metadata, gambar soal, dan gambar pembahasan.
 4. Hasil disimpan ke folder `outputs/<run-id>/`.
 5. Browser menampilkan preview dari output tersebut.
 6. Jika pengguna menekan tombol simpan, output dicopy ke `saved/<run-id>/`.
@@ -297,16 +304,29 @@ Isi umumnya:
 ```text
 caption.txt
 metadata.json
+pembahasan-1.jpg
+post-1.png
 soal.json
 ```
 
 Keterangan:
 
 - `caption.txt`: caption final.
-- `metadata.json`: catatan source, fallback, error, validator, dedup, dan usage token.
+- `metadata.json`: catatan source, fallback, error, validator, dedup, usage token, dan daftar file gambar.
+- `post-*.png`: gambar kuis 1000x1000 untuk Instagram. Soal panjang otomatis dipecah menjadi beberapa gambar.
+- `pembahasan-*.jpg`: gambar pembahasan 1000x1000. Pembahasan panjang otomatis dipecah per paragraf, dengan nomor halaman mengikuti total semua gambar dalam run.
 - `soal.json`: data soal mentah.
 
-Generator ini hanya fokus membuat data soal. Konversi `soal.json` menjadi PNG/SVG dilakukan oleh sistem terpisah.
+Metadata gambar menyimpan file utama di `files.image`, semua gambar di `files.images`, dan gambar pembahasan di `files.explanation` / `files.explanations`.
+
+Tombol `Download folder` mengunduh seluruh isi run sebagai ZIP:
+
+```text
+GET /download/outputs/<run-id>
+GET /download/saved/<run-id>
+```
+
+Isi ZIP berada di folder `<run-id>/`, sehingga mudah diekstrak tanpa file tercecer.
 
 Saat tombol simpan dipakai, output terpilih dicopy ke:
 
@@ -331,6 +351,8 @@ Workflow review memakai status di Bank Review:
 - `Rejected`: item disimpan sebagai arsip review, tetapi tidak ikut export.
 
 Tombol `Export approved` hanya menyalin item berstatus `Approved` ke folder `approved/<export-id>/`.
+
+Di Bank Review, tombol `Generate` pada panel gambar menjalankan ulang renderer dari `metadata.json`. Tombol `Hapus gambar` menghapus `post-*.png` dan `pembahasan-*.jpg` dari item saved tanpa menghapus data soal, caption, atau metadata utama.
 
 ## Struktur Subtes
 
@@ -422,6 +444,12 @@ Web akan menampilkan error quota dan generator akan memakai fallback jika memung
 ### Preview tidak muncul
 
 Cek folder `outputs/<run-id>/` atau `saved/<run-id>/`. Pastikan `soal.json`, `caption.txt`, dan `metadata.json` tersedia.
+
+Jika metadata ada tetapi gambar hilang di Bank Review, buka item tersebut lalu tekan tombol `Generate` pada panel gambar untuk membuat ulang `post-*.png` dan `pembahasan-*.jpg`.
+
+### Download folder gagal
+
+Pastikan run id masih ada di `outputs/<run-id>/` atau `saved/<run-id>/`. Endpoint download hanya menerima run id format timestamp seperti `20260605-230100`.
 
 ### API key bocor
 

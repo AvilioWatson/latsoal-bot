@@ -320,6 +320,9 @@ select option {
 }
 
 .secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: 34px;
   border: 1px solid var(--border2);
   border-radius: var(--radius-sm);
@@ -328,6 +331,10 @@ select option {
   background: var(--surface2);
   font-size: 13px;
   font-weight: 500;
+}
+
+.link-button {
+  text-decoration: none;
 }
 
 .secondary:hover:not(:disabled) {

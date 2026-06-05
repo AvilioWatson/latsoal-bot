@@ -14,6 +14,7 @@ const captionText = document.querySelector("#captionText");
 const hashtagText = document.querySelector("#hashtagText");
 const validationScore = document.querySelector("#validationScore");
 const metadataLink = document.querySelector("#metadataLink");
+const downloadAllLink = document.querySelector("#downloadAllLink");
 const imagePreviewList = document.querySelector("#imagePreviewList");
 const imageCount = document.querySelector("#imageCount");
 const generateImageButton = document.querySelector("#generateImageButton");
@@ -276,6 +277,8 @@ async function loadSavedPreview(runId) {
   copyCaptionButton.disabled = false;
   metadataLink.href = data.web_files.metadata;
   metadataLink.hidden = false;
+  downloadAllLink.href = `/download/saved/${runId}`;
+  downloadAllLink.hidden = false;
   renderDebug(data);
   setStatus(data.source === "gemini" ? "Gemini" : data.source === "fallback" ? "Fallback" : "Draft");
   previewPanel?.classList.remove("is-loading");
@@ -301,6 +304,8 @@ function clearPreviewIfDeleted(runId) {
   deleteImageButton.disabled = true;
   metadataLink.hidden = true;
   metadataLink.href = "#";
+  downloadAllLink.hidden = true;
+  downloadAllLink.href = "#";
   copyCaptionButton.disabled = true;
   debugPanel.hidden = true;
 }

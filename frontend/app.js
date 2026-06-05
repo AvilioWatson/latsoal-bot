@@ -11,6 +11,7 @@ const captionText = document.querySelector("#captionText");
 const hashtagText = document.querySelector("#hashtagText");
 const validationScore = document.querySelector("#validationScore");
 const metadataLink = document.querySelector("#metadataLink");
+const downloadAllLink = document.querySelector("#downloadAllLink");
 const imagePreviewList = document.querySelector("#imagePreviewList");
 const imageCount = document.querySelector("#imageCount");
 const saveButton = document.querySelector("#saveButton");
@@ -159,6 +160,8 @@ function renderResult(data) {
   copyCaptionButton.disabled = false;
   metadataLink.href = data.web_files.metadata;
   metadataLink.hidden = false;
+  downloadAllLink.href = `/download/outputs/${data.run_id}`;
+  downloadAllLink.hidden = false;
   saveButton.disabled = false;
   saveButton.textContent = "Simpan";
 }

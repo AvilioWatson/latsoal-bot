@@ -123,6 +123,16 @@ Alias: `POST /api/export/approved`
 Menyalin semua item `approved` ke `approved/<export-id>/` dan membuat `manifest.json`.
 Path file di manifest relatif terhadap folder export.
 
+## Download
+
+### `GET /download/outputs/<run-id>`
+
+Mengunduh folder hasil generate sebagai ZIP. Isi ZIP berada di folder `<run-id>/`.
+
+### `GET /download/saved/<run-id>`
+
+Mengunduh folder saved sebagai ZIP. Isi ZIP berada di folder `<run-id>/`.
+
 ## Stats
 
 ### `GET /stats`

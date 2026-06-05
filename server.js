@@ -5,6 +5,7 @@ import {readIndex} from "./lib/filestore.js";
 import {sendError, sendFile, sendJson} from "./lib/http.js";
 import {APPROVED, FRONTEND, OUTPUTS, ROOT, SAVED, safeJoin} from "./lib/paths.js";
 import {handle as handleBank} from "./routes/bank.js";
+import {handle as handleDownload} from "./routes/download.js";
 import {handle as handleExport} from "./routes/export.js";
 import {handle as handleGenerate, TOPICS} from "./routes/generate.js";
 import {sendStatsJson, sendStatsPage} from "./routes/stats.js";
@@ -84,6 +85,7 @@ async function handleRequest(request, response) {
 
   const handled = await handleGenerate(request, response, route)
     || await handleBank(request, response, route)
+    || await handleDownload(request, response, route)
     || await handleExport(request, response, route)
     || await handleStats(request, response, route)
     || await handleStaticPage(request, response, route)
