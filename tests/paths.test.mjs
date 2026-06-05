@@ -34,13 +34,18 @@ test("buildWebFiles returns stable metadata, question, and caption routes", () =
 });
 
 test("buildWebFiles maps generated image files when present", () => {
-  assert.deepEqual(buildWebFiles("/outputs", "20260529-123456", {
+  const webFiles = buildWebFiles("/outputs", "20260529-123456", {
     images: [
       "C:\\repo\\outputs\\20260529-123456\\post-1.png",
       "C:\\repo\\outputs\\20260529-123456\\post-2.png",
+      "C:\\repo\\outputs\\20260529-123456\\pembahasan-1.jpg",
     ],
-  }).images, [
+    explanation: "C:\\repo\\outputs\\20260529-123456\\pembahasan-1.jpg",
+  });
+  assert.deepEqual(webFiles.images, [
     "/outputs/20260529-123456/post-1.png",
     "/outputs/20260529-123456/post-2.png",
+    "/outputs/20260529-123456/pembahasan-1.jpg",
   ]);
+  assert.equal(webFiles.explanation, "/outputs/20260529-123456/pembahasan-1.jpg");
 });

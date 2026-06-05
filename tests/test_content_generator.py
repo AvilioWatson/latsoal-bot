@@ -85,7 +85,9 @@ class ContentGeneratorTest(unittest.TestCase):
             self.assertTrue((run_dir / "soal.json").exists())
             self.assertTrue((run_dir / "caption.txt").exists())
             self.assertTrue((run_dir / "post-1.png").exists())
+            self.assertTrue((run_dir / "pembahasan-1.jpg").exists())
             self.assertTrue(result["files"]["images"])
+            self.assertTrue(result["files"]["explanations"])
 
     def test_generate_content_draft_covers_every_default_subtest(self):
         with tempfile.TemporaryDirectory() as tmp:

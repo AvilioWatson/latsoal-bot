@@ -210,7 +210,9 @@ async function deleteSavedImages(runId) {
 
   const imageFiles = new Set([
     metadata?.files?.image,
+    metadata?.files?.explanation,
     ...(Array.isArray(metadata?.files?.images) ? metadata.files.images : []),
+    ...(Array.isArray(metadata?.files?.explanations) ? metadata.files.explanations : []),
   ].filter(Boolean));
   for (const imageFile of imageFiles) {
     const target = safeJoin(runDir, path.basename(String(imageFile)));
@@ -220,7 +222,9 @@ async function deleteSavedImages(runId) {
   }
   metadata.files = metadata.files || {};
   delete metadata.files.image;
+  delete metadata.files.explanation;
   metadata.files.images = [];
+  metadata.files.explanations = [];
   metadata.image_deleted_at = new Date().toISOString();
   await writeFile(metadataPath, JSON.stringify(metadata, null, 2), "utf-8");
 
