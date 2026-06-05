@@ -485,7 +485,7 @@ def render_thumbnail_image(question, run_dir):
     except ImportError:
         return None
 
-    width = height = 1000
+    width = height = 1080
     colors = {
         "bg": "#f5f0e8",
         "panel": "#ede8df",
@@ -495,43 +495,46 @@ def render_thumbnail_image(question, run_dir):
         "accent": "#26405a",
     }
     fonts = {
-        "category": _load_font(62, family="playfair"),
-        "title": _load_font(34, family="lora"),
-        "small": _load_font(24, family="lora"),
+        "category": _load_font(46, family="playfair"),
+        "title": _load_font(28, family="lora"),
+        "small": _load_font(18, family="lora"),
     }
 
     image = Image.new("RGB", (width, height), colors["bg"])
     draw = ImageDraw.Draw(image)
     logo = _load_quiz_logo()
-    account = question.get("akun", "@namaakun")
+    account = str(question.get("akun", "@utbk_neareducation") or "@utbk_neareducation")
+    if not account.startswith("@"):
+        account = f"@{account}"
     subtest = str(question.get("mapel", "Latihan UTBK"))
     subtopic = str(question.get("topik") or question.get("mapel", "Subtopik"))
 
     draw.rectangle((0, 0, width, height), fill=colors["bg"])
+    left = 78
+    right = width - 78
+    center_y = height // 2
     if logo:
-        image.paste(logo, (928 - logo.width, 68), logo)
+        image.paste(logo, (right - logo.width - 28, 96), logo)
 
-    draw.line((72, 210, 928, 210), fill=colors["line"], width=2)
-    draw.line((72, 790, 928, 790), fill=colors["line"], width=2)
-    draw.rounded_rectangle((72, 264, 928, 736), radius=8, fill=colors["panel"], outline=colors["line"], width=2)
-
-    subtest_lines = _wrap_text(draw, subtest, fonts["category"], 724)[:2]
-    subtopic_lines = _wrap_text(draw, subtopic, fonts["title"], 724)[:2]
-    subtest_h = _lines_visual_height(draw, subtest_lines, fonts["category"], gap=12)
-    subtopic_h = _lines_visual_height(draw, subtopic_lines, fonts["title"], gap=10)
-    total_title_h = subtest_h + 34 + subtopic_h
-    text_y = 500 - total_title_h // 2
+    draw.line((left, 270, right, 270), fill=colors["line"], width=2)
+    draw.line((left, 810, right, 810), fill=colors["line"], width=2)
+    subtest_lines = _wrap_text(draw, subtest, fonts["category"], 760)[:2]
+    subtopic_lines = _wrap_text(draw, subtopic, fonts["title"], 760)[:2]
+    subtest_h = _lines_visual_height(draw, subtest_lines, fonts["category"], gap=10)
+    subtopic_h = _lines_visual_height(draw, subtopic_lines, fonts["title"], gap=8)
+    total_title_h = subtest_h + 24 + subtopic_h
+    text_y = center_y - total_title_h // 2
     for line in subtest_lines:
         line_w = _text_width(draw, line, fonts["category"])
         draw.text(((width - line_w) / 2, text_y), line, font=fonts["category"], fill=colors["ink"])
-        text_y += _line_height(draw, fonts["category"]) + 12
-    text_y += 22
+        text_y += _line_height(draw, fonts["category"]) + 10
+    text_y += 14
     for line in subtopic_lines:
         line_w = _text_width(draw, line, fonts["title"])
         draw.text(((width - line_w) / 2, text_y), line, font=fonts["title"], fill=colors["muted"])
-        text_y += _line_height(draw, fonts["title"]) + 10
+        text_y += _line_height(draw, fonts["title"]) + 8
 
-    draw.text((72, 942), account, font=fonts["small"], fill="#9ca3af")
+    draw.text((left + 70, height - 45), account, font=fonts["small"], fill="#9ca3af")
     output_path = run_dir / "thumbnail.png"
     output_path.parent.mkdir(parents=True, exist_ok=True)
     image.save(output_path, format="PNG", optimize=True)

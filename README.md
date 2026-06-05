@@ -40,7 +40,7 @@ Implemented question generation, review workflow, validation, deduplication, cap
 - Pilih subtes, topik, level, mode konten, dan akun/brand caption.
 - Preview soal, pilihan jawaban, caption, metadata, dan error/fallback.
 - Generate gambar post soal 1000x1000 dan JPG pembahasan otomatis.
-- Tambahkan thumbnail pembuka 1000x1000 yang berisi judul subtes dan subtopik.
+- Tambahkan thumbnail pembuka 1080x1080 yang berisi judul subtes dan subtopik.
 - Preview dan download semua file run sebagai ZIP berisi satu folder.
 - Simpan soal yang dianggap bagus ke Bank Review.
 - Bank Review terpisah dari halaman generator.
@@ -321,7 +321,7 @@ Keterangan:
 - `caption.txt`: caption final.
 - `metadata.json`: catatan source, fallback, error, validator, dedup, usage token, dan daftar file gambar.
 - `1.jpg`, `2.jpg`, `3.jpg`, dst: gambar final yang dipakai preview dan download, sudah berurutan dari thumbnail sampai pembahasan.
-- `thumbnail.png`: slide pembuka 1000x1000 yang berisi subtes dan subtopik, memakai gaya visual yang konsisten dengan slide berikutnya.
+- `thumbnail.png`: slide pembuka 1080x1080 yang berisi subtes dan subtopik, memakai gaya visual yang konsisten dengan slide berikutnya.
 - `post-*.png` dan `pembahasan-*.jpg`: file render intermediate sebelum dikonversi menjadi JPG bernomor.
 - `soal.json`: data soal mentah.
 

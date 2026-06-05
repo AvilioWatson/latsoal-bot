@@ -88,6 +88,11 @@ class ContentGeneratorTest(unittest.TestCase):
             self.assertTrue((run_dir / "post-1.png").exists())
             self.assertTrue((run_dir / "pembahasan-1.jpg").exists())
             self.assertTrue((run_dir / "1.jpg").exists())
+            from PIL import Image
+            with Image.open(run_dir / "thumbnail.png") as image:
+                self.assertEqual(image.size, (1080, 1080))
+            with Image.open(run_dir / "1.jpg") as image:
+                self.assertEqual(image.size, (1080, 1080))
             self.assertTrue(result["files"]["images"])
             self.assertTrue(all(Path(path).suffix.lower() == ".jpg" for path in result["files"]["images"]))
             self.assertTrue(Path(result["files"]["images"][0]).name == "1.jpg")
