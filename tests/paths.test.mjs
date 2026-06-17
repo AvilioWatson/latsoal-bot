@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import path from "node:path";
 import test from "node:test";
-import {buildWebFiles, isValidRunId, safeJoin} from "../lib/paths.js";
+import {buildStoragePath, buildWebFiles, isValidRunId, safeJoin, subtestCode} from "../lib/paths.js";
 
 test("safeJoin allows paths inside the base directory", () => {
   const base = path.resolve("tmp-base");
@@ -34,7 +34,7 @@ test("buildWebFiles returns stable metadata, question, and caption routes", () =
 });
 
 test("buildWebFiles maps generated image files when present", () => {
-  const webFiles = buildWebFiles("/outputs", "20260529-123456", {
+  const webFiles = buildWebFiles("/outputs", "PK/fungsi-kuadrat/20260529-123456", {
     images: [
       "C:\\repo\\outputs\\20260529-123456\\1.jpg",
       "C:\\repo\\outputs\\20260529-123456\\2.jpg",
@@ -45,11 +45,19 @@ test("buildWebFiles maps generated image files when present", () => {
     explanation: "C:\\repo\\outputs\\20260529-123456\\4.jpg",
   });
   assert.deepEqual(webFiles.images, [
-    "/outputs/20260529-123456/1.jpg",
-    "/outputs/20260529-123456/2.jpg",
-    "/outputs/20260529-123456/3.jpg",
-    "/outputs/20260529-123456/4.jpg",
+    "/outputs/PK/fungsi-kuadrat/20260529-123456/1.jpg",
+    "/outputs/PK/fungsi-kuadrat/20260529-123456/2.jpg",
+    "/outputs/PK/fungsi-kuadrat/20260529-123456/3.jpg",
+    "/outputs/PK/fungsi-kuadrat/20260529-123456/4.jpg",
   ]);
-  assert.equal(webFiles.thumbnail, "/outputs/20260529-123456/1.jpg");
-  assert.equal(webFiles.explanation, "/outputs/20260529-123456/4.jpg");
+  assert.equal(webFiles.thumbnail, "/outputs/PK/fungsi-kuadrat/20260529-123456/1.jpg");
+  assert.equal(webFiles.explanation, "/outputs/PK/fungsi-kuadrat/20260529-123456/4.jpg");
+});
+
+test("buildStoragePath groups question artifacts by subtest code and topic", () => {
+  assert.equal(subtestCode("Pengetahuan Kuantitatif"), "PK");
+  assert.equal(
+    buildStoragePath({mapel: "Pengetahuan Kuantitatif", topik: "Aljabar Linear"}, "20260529-123456"),
+    "PK/aljabar-linear/20260529-123456",
+  );
 });

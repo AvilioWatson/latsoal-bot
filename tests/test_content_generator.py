@@ -8,6 +8,7 @@ from pathlib import Path
 
 def load_generator(data_root):
     os.environ["LATSOAL_DATA_ROOT"] = str(data_root)
+    os.environ["LATSOAL_RENDER_ENGINE"] = "pil"
     os.environ.pop("GEMINI_API_KEY", None)
     import content_generator
     return importlib.reload(content_generator)
@@ -80,7 +81,7 @@ class ContentGeneratorTest(unittest.TestCase):
             self.assertTrue(result["ok"])
             self.assertEqual(result["source"], "draft")
             self.assertEqual(result["question"]["akun"], "@quality")
-            run_dir = data_root / "outputs" / result["run_id"]
+            run_dir = data_root / "outputs" / result["storage_path"]
             self.assertTrue((run_dir / "metadata.json").exists())
             self.assertTrue((run_dir / "soal.json").exists())
             self.assertTrue((run_dir / "caption.txt").exists())
@@ -113,7 +114,7 @@ class ContentGeneratorTest(unittest.TestCase):
                         mode="draft",
                         account="@quality",
                     )
-                    run_dir = data_root / "outputs" / result["run_id"]
+                    run_dir = data_root / "outputs" / result["storage_path"]
                     metadata = json.loads((run_dir / "metadata.json").read_text(encoding="utf-8"))
                     question = json.loads((run_dir / "soal.json").read_text(encoding="utf-8"))
                     caption_text = (run_dir / "caption.txt").read_text(encoding="utf-8")
@@ -127,6 +128,112 @@ class ContentGeneratorTest(unittest.TestCase):
                     self.assertEqual(sorted(result["question"]["pilihan"].keys()), ["A", "B", "C", "D", "E"])
                     self.assertIn(result["question"]["jawaban"], result["question"]["pilihan"])
                     self.assertIn("#UTBK2026", caption_text)
+
+    def test_normalize_question_removes_parenthetical_hint_in_linear_question(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            generator = load_generator(Path(tmp))
+            question = {
+                "mapel": "Pengetahuan Kuantitatif",
+                "topik": "Aljabar dasar",
+                "level": "sedang",
+                "soal": "Tentukan nilai x dari persamaan linear 2x + 3 = 11 (gunakan operasi invers).",
+            }
+
+            normalized = generator.normalize_question(question)
+
+            self.assertEqual(
+                normalized["soal"],
+                "Tentukan nilai x dari persamaan linear 2x + 3 = 11.",
+            )
+
+    def test_normalize_question_keeps_math_parentheses(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            generator = load_generator(Path(tmp))
+            question = {
+                "mapel": "Pengetahuan Kuantitatif",
+                "topik": "Aljabar dasar",
+                "level": "sedang",
+                "soal": "Bentuk setara dari y = (x - 1)^2 - 16 adalah garis melalui titik (0, 1).",
+            }
+
+            normalized = generator.normalize_question(question)
+
+            self.assertIn("(x - 1)^2", normalized["soal"])
+            self.assertIn("(0, 1)", normalized["soal"])
+
+    def test_latex_explanation_uses_consistent_cartesian_visual(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            generator = load_generator(Path(tmp))
+            question = {
+                "mapel": "Pengetahuan Kuantitatif",
+                "topik": "Pertidaksamaan Linear",
+                "level": "sedang",
+                "soal": "Pada bidang kartesius, daerah solusi memenuhi y >= 2x + 1.",
+                "pilihan": {
+                    "A": "Kuadran I saja",
+                    "B": "Kuadran II saja",
+                    "C": "Kuadran III saja",
+                    "D": "Kuadran IV saja",
+                    "E": "Semua kuadran memiliki solusi",
+                },
+                "jawaban": "E",
+                "pembahasan": (
+                    "Buat garis y >= 2x + 1 terlebih dahulu. "
+                    "Karena tanda pertidaksamaan memuat lebih besar sama dengan, "
+                    "daerah solusi berada pada sisi atas garis. "
+                    "Dari sketsa terlihat daerah solusi dapat menyentuh semua kuadran."
+                ),
+                "butuh_visual": True,
+                "akun": "@quality",
+            }
+
+            sources = generator._latex_explanation_sources(question)
+
+            self.assertTrue(sources)
+            self.assertNotIn("ILUSTRASI GRAFIK", sources[0])
+            self.assertIn("shadegreen, opacity=0.52, blend mode=multiply", sources[0])
+            self.assertIn("graphgreen", sources[0])
+            self.assertIn("{6}", sources[0])
+            self.assertIn("{-6}", sources[0])
+            visual = generator._cartesian_visual_code(question)
+            self.assertNotIn("fill=panel", visual)
+            self.assertNotIn("Sketsa bantu", visual)
+
+    def test_latex_quiz_keeps_visual_inside_question_flow(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            generator = load_generator(Path(tmp))
+            question = {
+                "mapel": "Pengetahuan Kuantitatif",
+                "topik": "Pertidaksamaan Linear",
+                "level": "sedang",
+                "soal": (
+                    "Diketahui daerah solusi pada bidang kartesius memenuhi "
+                    "y >= 2x + 1 dan y > 1/2x - 1. Perhatikan grafik berikut. "
+                    "Tentukan kuadran yang masih memiliki daerah solusi."
+                ),
+                "pilihan": {
+                    "A": "Kuadran I saja",
+                    "B": "Kuadran II saja",
+                    "C": "Kuadran III saja",
+                    "D": "Kuadran IV saja",
+                    "E": "Semua kuadran memiliki solusi",
+                },
+                "jawaban": "E",
+                "pembahasan": "Daerah solusi berada pada sisi atas kedua garis sehingga semua kuadran masih tersentuh.",
+                "butuh_visual": True,
+                "akun": "@quality",
+            }
+
+            sources = generator._latex_quiz_sources(question)
+            first_page = sources[0]
+
+            self.assertNotIn("ILUSTRASI GRAFIK", first_page)
+            self.assertLess(first_page.index("Diketahui"), first_page.index(r"\begin{scope}"))
+            self.assertLess(first_page.index(r"\end{scope}"), first_page.index("Tentukan"))
+            self.assertIn(r"\mbox{$y>1/2x-1$}", first_page)
+            self.assertNotIn("Sketsa bantu", first_page)
+            self.assertIn("{6}", first_page)
+            self.assertIn("{-6}", first_page)
 
 
 if __name__ == "__main__":

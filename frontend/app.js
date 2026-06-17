@@ -33,11 +33,15 @@ function sourceText(data) {
   if (data.source === "gemini" && (!data.fallbacks || data.fallbacks.length === 0)) {
     return "Gemini penuh";
   }
+  if (data.source === "kimi" && (!data.fallbacks || data.fallbacks.length === 0)) {
+    return "Kimi penuh";
+  }
   if (data.source === "fallback") {
     return "Fallback lokal";
   }
   if (data.fallbacks && data.fallbacks.length > 0) {
-    return `Gemini + fallback ${data.fallbacks.join(", ")}`;
+    const provider = data.provider === "kimi" || data.source === "kimi" ? "Kimi" : "Gemini";
+    return `${provider} + fallback ${data.fallbacks.join(", ")}`;
   }
   return data.source || "Draft lokal";
 }
@@ -47,7 +51,8 @@ function reviewNote(data) {
     return `Kemungkinan duplikat: similarity ${data.dedup.similarity} dengan ${data.dedup.matched_run_id}. Review sebelum dipakai.`;
   }
   if (data.review_status === "ready") {
-    return "Konten dari Gemini berhasil dibuat. Tetap lakukan review manual sebelum upload.";
+    const provider = data.source === "kimi" ? "Kimi" : "Gemini";
+    return `Konten dari ${provider} berhasil dibuat. Tetap lakukan review manual sebelum upload.`;
   }
   if (data.errors && data.errors.question) {
     return `Mode fallback aktif: ${data.errors.question}`;
@@ -78,6 +83,7 @@ function renderDebug(data) {
     errors,
     dedup: data.dedup,
     ai_usage: data.ai_usage,
+    provider: data.provider,
     model: data.model,
   }, null, 2);
 }
@@ -105,6 +111,16 @@ function renderImages(data) {
     link.append(image);
     imagePreviewList.append(link);
   });
+}
+
+function formatQuestionText(text) {
+  return String(text || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/\s+([1-9]\d?\.)\s+/g, "\n\n$1 ")
+    .replace(/\s+(Simpulan\b)/g, "\n\n$1")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 function fillTopics() {
@@ -145,7 +161,7 @@ function renderResult(data) {
   runNote.textContent = reviewNote(data);
   renderDebug(data);
   renderImages(data);
-  questionText.textContent = question.soal;
+  questionText.textContent = formatQuestionText(question.soal);
 
   choicesList.innerHTML = "";
   for (const [key, value] of Object.entries(question.pilihan)) {
@@ -185,7 +201,7 @@ form.addEventListener("submit", async (event) => {
       throw new Error(data.error || "Generate gagal.");
     }
     renderResult(data);
-    setStatus(data.source === "gemini" ? "Gemini" : data.source === "fallback" ? "Fallback" : "Draft");
+    setStatus(data.source === "gemini" ? "Gemini" : data.source === "kimi" ? "Kimi" : data.source === "fallback" ? "Fallback" : "Draft");
   } catch (error) {
     setStatus("Error");
     captionText.textContent = error.message;

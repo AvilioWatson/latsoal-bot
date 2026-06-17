@@ -9,7 +9,7 @@ import {
   updateEntry,
 } from "../lib/filestore.js";
 import {errorStatus, readJsonBody, sendError, sendJson} from "../lib/http.js";
-import {OUTPUTS, ROOT, SAVED, buildWebFiles, isValidRunId, safeJoin} from "../lib/paths.js";
+import {OUTPUTS, ROOT, SAVED, buildStoragePath, buildWebFiles, isValidRunId, pathFromIndexEntry, safeJoin} from "../lib/paths.js";
 
 const DEFAULT_PYTHON = process.env.PYTHON || "python";
 
@@ -19,38 +19,112 @@ function requestError(status, message) {
   return error;
 }
 
+function retargetMetadataFiles(metadata, targetDir) {
+  const artifactName = (file) => String(file || "").split(/[\\/]/).pop();
+  metadata.files = metadata.files || {};
+  metadata.files.question = path.join(targetDir, "soal.json");
+  metadata.files.caption = path.join(targetDir, "caption.txt");
+  for (const key of ["image", "thumbnail", "explanation"]) {
+    if (metadata.files[key]) metadata.files[key] = path.join(targetDir, artifactName(metadata.files[key]));
+  }
+  for (const key of ["images", "explanations"]) {
+    if (Array.isArray(metadata.files[key])) {
+      metadata.files[key] = metadata.files[key].map((file) => path.join(targetDir, artifactName(file)));
+    }
+  }
+  return metadata;
+}
+
+async function resolveSavedRun(runId) {
+  if (!isValidRunId(runId)) return null;
+  const index = await readIndex();
+  const entry = index.find((item) => item.run_id === runId);
+  const candidates = [];
+  if (entry) {
+    candidates.push(pathFromIndexEntry(entry, "saved"));
+  }
+  candidates.push(runId);
+  for (const candidate of candidates) {
+    const target = safeJoin(SAVED, candidate);
+    if (!target) continue;
+    try {
+      await access(path.join(target, "metadata.json"));
+      return {dir: target, artifactPath: candidate, entry};
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+async function resolveOutputRun(runId) {
+  if (!isValidRunId(runId)) return null;
+  const candidates = [runId];
+  async function collect(dir) {
+    let names;
+    try {
+      names = await readdir(dir, {withFileTypes: true});
+    } catch {
+      return;
+    }
+    for (const dirent of names) {
+      const target = path.join(dir, dirent.name);
+      if (!dirent.isDirectory()) continue;
+      if (dirent.name === runId) {
+        candidates.unshift(path.relative(OUTPUTS, target).replace(/\\/g, "/"));
+      } else {
+        await collect(target);
+      }
+    }
+  }
+  await collect(OUTPUTS);
+  for (const candidate of candidates) {
+    const target = safeJoin(OUTPUTS, candidate);
+    if (!target) continue;
+    try {
+      await access(path.join(target, "metadata.json"));
+      return {dir: target, artifactPath: candidate};
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
 async function saveRun(runId) {
   if (!isValidRunId(runId)) {
     throw requestError(400, "Run ID tidak valid.");
   }
 
-  const source = safeJoin(OUTPUTS, runId);
-  const target = safeJoin(SAVED, runId);
-  if (!source || !target) {
-    throw requestError(400, "Path run tidak valid.");
-  }
-
-  try {
-    await access(path.join(source, "metadata.json"));
-  } catch {
+  const sourceRun = await resolveOutputRun(runId);
+  if (!sourceRun) {
     throw requestError(404, "Output run tidak ditemukan.");
   }
+  const metadata = JSON.parse(await readFile(path.join(sourceRun.dir, "metadata.json"), "utf-8"));
+  const artifactPath = buildStoragePath(metadata.question || {}, runId);
+  const target = safeJoin(SAVED, artifactPath);
+  if (!target) {
+    throw requestError(400, "Path run tidak valid.");
+  }
   await mkdir(SAVED, {recursive: true});
-  await cp(source, target, {recursive: true, force: true});
+  await mkdir(path.dirname(target), {recursive: true});
+  await cp(sourceRun.dir, target, {recursive: true, force: true});
 
   const savedAt = new Date().toISOString();
-  const metadata = JSON.parse(await readFile(path.join(target, "metadata.json"), "utf-8"));
+  metadata.storage_path = artifactPath;
+  retargetMetadataFiles(metadata, target);
+  await writeFile(path.join(target, "metadata.json"), JSON.stringify(metadata, null, 2), "utf-8");
   await addEntry(createEntryFromMetadata(runId, metadata, {
     saved_at: savedAt,
     status: "saved",
-    path: `saved/${runId}`,
+    path: `saved/${artifactPath}`,
   }));
 
   return {
     run_id: runId,
     saved_at: savedAt,
     saved_path: target,
-    web_files: buildWebFiles("/saved", runId, metadata.files),
+    web_files: buildWebFiles("/saved", artifactPath, metadata.files),
   };
 }
 
@@ -59,7 +133,8 @@ async function listSavedRuns() {
   const items = [];
   for (const item of index) {
     if (!isValidRunId(item.run_id)) continue;
-    const metadataPath = path.join(SAVED, item.run_id, "metadata.json");
+    const artifactPath = pathFromIndexEntry(item, "saved");
+    const metadataPath = path.join(SAVED, artifactPath, "metadata.json");
     let metadata = null;
     try {
       metadata = JSON.parse(await readFile(metadataPath, "utf-8"));
@@ -77,7 +152,7 @@ async function listSavedRuns() {
       topik: metadata?.question?.topik || null,
       level: metadata?.question?.level || null,
       jawaban: metadata?.question?.jawaban || null,
-      web_files: buildWebFiles("/saved", item.run_id, metadata?.files),
+      web_files: buildWebFiles("/saved", artifactPath, metadata?.files),
     });
   }
   return items;
@@ -92,13 +167,8 @@ async function updateSavedStatus(runId, status) {
     throw requestError(400, "Status tidak valid.");
   }
 
-  const target = safeJoin(SAVED, runId);
-  if (!target) {
-    throw requestError(400, "Path run tidak valid.");
-  }
-  try {
-    await access(path.join(target, "metadata.json"));
-  } catch {
+  const resolved = await resolveSavedRun(runId);
+  if (!resolved) {
     throw requestError(404, "Saved run tidak ditemukan.");
   }
 
@@ -116,13 +186,8 @@ async function markSavedUploaded(runId) {
     throw requestError(400, "Run ID tidak valid.");
   }
 
-  const target = safeJoin(SAVED, runId);
-  if (!target) {
-    throw requestError(400, "Path run tidak valid.");
-  }
-  try {
-    await access(path.join(target, "metadata.json"));
-  } catch {
+  const resolved = await resolveSavedRun(runId);
+  if (!resolved) {
     throw requestError(404, "Saved run tidak ditemukan.");
   }
 
@@ -132,14 +197,30 @@ async function markSavedUploaded(runId) {
   });
 }
 
+async function unmarkSavedUploaded(runId) {
+  if (!isValidRunId(runId)) {
+    throw requestError(400, "Run ID tidak valid.");
+  }
+
+  const resolved = await resolveSavedRun(runId);
+  if (!resolved) {
+    throw requestError(404, "Saved run tidak ditemukan.");
+  }
+
+  return updateEntry(runId, {
+    uploaded_at: null,
+  });
+}
+
 async function deleteSavedRun(runId) {
   if (!isValidRunId(runId)) {
     throw requestError(400, "Run ID tidak valid.");
   }
 
-  const target = safeJoin(SAVED, runId);
+  const resolved = await resolveSavedRun(runId);
+  const target = resolved?.dir;
   if (!target) {
-    throw requestError(400, "Path run tidak valid.");
+    throw requestError(404, "Saved run tidak ditemukan.");
   }
 
   await removeEntry(runId);
@@ -195,9 +276,11 @@ async function generateSavedImages(runId) {
   if (!isValidRunId(runId)) {
     throw requestError(400, "Run ID tidak valid.");
   }
-  const runDir = safeJoin(SAVED, runId);
+  const resolved = await resolveSavedRun(runId);
+  const runDir = resolved?.dir;
+  const artifactPath = resolved?.artifactPath || runId;
   if (!runDir) {
-    throw requestError(400, "Path run tidak valid.");
+    throw requestError(404, "Saved run tidak ditemukan.");
   }
   const metadataPath = path.join(runDir, "metadata.json");
   try {
@@ -210,7 +293,7 @@ async function generateSavedImages(runId) {
   return {
     run_id: runId,
     files: result.files,
-    web_files: buildWebFiles("/saved", runId, result.files),
+    web_files: buildWebFiles("/saved", artifactPath, result.files),
   };
 }
 
@@ -218,9 +301,11 @@ async function deleteSavedImages(runId) {
   if (!isValidRunId(runId)) {
     throw requestError(400, "Run ID tidak valid.");
   }
-  const runDir = safeJoin(SAVED, runId);
+  const resolved = await resolveSavedRun(runId);
+  const runDir = resolved?.dir;
+  const artifactPath = resolved?.artifactPath || runId;
   if (!runDir) {
-    throw requestError(400, "Path run tidak valid.");
+    throw requestError(404, "Saved run tidak ditemukan.");
   }
   const metadataPath = path.join(runDir, "metadata.json");
   let metadata;
@@ -238,7 +323,7 @@ async function deleteSavedImages(runId) {
     ...(Array.isArray(metadata?.files?.explanations) ? metadata.files.explanations : []),
   ].filter(Boolean));
   for (const name of await readdir(runDir)) {
-    if (/^(?:\d+\.jpe?g|thumbnail\.png|post-\d+\.png|pembahasan-\d+\.jpe?g)$/i.test(name)) {
+    if (/^(?:\d+\.jpe?g|thumbnail\.(?:png|jpe?g|tex|pdf|aux|log)|post-\d+\.(?:png|jpe?g|tex|pdf|aux|log)|pembahasan-\d+\.(?:jpe?g|tex|pdf|aux|log))$/i.test(name)) {
       imageFiles.add(name);
     }
   }
@@ -260,7 +345,7 @@ async function deleteSavedImages(runId) {
   return {
     run_id: runId,
     files: metadata.files,
-    web_files: buildWebFiles("/saved", runId, metadata.files),
+    web_files: buildWebFiles("/saved", artifactPath, metadata.files),
   };
 }
 
@@ -268,14 +353,19 @@ async function sendSavedMetadata(response, runId) {
   if (!isValidRunId(runId)) {
     throw requestError(400, "Run ID tidak valid.");
   }
-  const runDir = path.join(SAVED, runId);
+  const resolved = await resolveSavedRun(runId);
+  const runDir = resolved?.dir;
+  const artifactPath = resolved?.artifactPath || runId;
+  if (!runDir) {
+    throw requestError(404, "Saved run tidak ditemukan.");
+  }
   let metadata;
   try {
     metadata = JSON.parse(await readFile(path.join(runDir, "metadata.json"), "utf-8"));
   } catch {
     throw requestError(404, "Saved run tidak ditemukan.");
   }
-  metadata.web_files = buildWebFiles("/saved", runId, metadata.files);
+  metadata.web_files = buildWebFiles("/saved", artifactPath, metadata.files);
   sendJson(response, metadata);
 }
 
@@ -351,6 +441,15 @@ export async function handle(request, response, route) {
     return true;
   }
 
+  if (request.method === "POST" && savedRoute?.length === 3 && savedRoute[2] === "unuploaded") {
+    try {
+      sendJson(response, await unmarkSavedUploaded(savedRoute[1]));
+    } catch (error) {
+      sendError(response, errorStatus(error), error.message);
+    }
+    return true;
+  }
+
   if (request.method === "POST" && savedRoute?.length === 3 && savedRoute[2] === "images") {
     try {
       sendJson(response, await generateSavedImages(savedRoute[1]));
@@ -408,6 +507,16 @@ export async function handle(request, response, route) {
     try {
       const payload = await readJsonBody(request);
       sendJson(response, await markSavedUploaded(payload.run_id || ""));
+    } catch (error) {
+      sendError(response, errorStatus(error), error.message);
+    }
+    return true;
+  }
+
+  if (request.method === "POST" && route === "/api/saved/unuploaded") {
+    try {
+      const payload = await readJsonBody(request);
+      sendJson(response, await unmarkSavedUploaded(payload.run_id || ""));
     } catch (error) {
       sendError(response, errorStatus(error), error.message);
     }

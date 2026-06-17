@@ -1,0 +1,16 @@
+.git
+.github
+.env
+approved
+bank
+outputs
+saved
+__pycache__
+*.pyc
+server.err.log
+server.out.log
+node_modules
+npm-debug.log
+Dockerfile
+docker-compose.yml
+LatsoalBot.exe

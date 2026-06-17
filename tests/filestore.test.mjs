@@ -113,5 +113,5 @@ test("createEntryFromMetadata preserves review patch fields", () => {
   assert.equal(entry.status, "approved");
   assert.equal(entry.status_updated_at, "2026-05-29T12:00:00.000Z");
   assert.equal(entry.approved_at, "2026-05-29T12:00:00.000Z");
-  assert.equal(entry.path, "saved/20990101-030303");
+  assert.equal(entry.path, "saved/PU/penalaran-deduktif/20990101-030303");
 });

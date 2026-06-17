@@ -50,8 +50,12 @@ function setStatus(text) {
 
 function sourceText(data) {
   if (data.source === "gemini" && (!data.fallbacks || data.fallbacks.length === 0)) return "Gemini penuh";
+  if (data.source === "kimi" && (!data.fallbacks || data.fallbacks.length === 0)) return "Kimi penuh";
   if (data.source === "fallback") return "Fallback lokal";
-  if (data.fallbacks && data.fallbacks.length > 0) return `Gemini + fallback ${data.fallbacks.join(", ")}`;
+  if (data.fallbacks && data.fallbacks.length > 0) {
+    const provider = data.provider === "kimi" || data.source === "kimi" ? "Kimi" : "Gemini";
+    return `${provider} + fallback ${data.fallbacks.join(", ")}`;
+  }
   return data.source || "Draft lokal";
 }
 
@@ -124,6 +128,16 @@ function renderImages(data) {
   });
 }
 
+function formatQuestionText(text) {
+  return String(text || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/\s+([1-9]\d?\.)\s+/g, "\n\n$1 ")
+    .replace(/\s+(Simpulan\b)/g, "\n\n$1")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 function filteredSavedItems() {
   const query = savedSearch.value.trim().toLowerCase();
   const status = savedStatusFilter.value;
@@ -193,6 +207,7 @@ function renderSavedList(items = filteredSavedItems()) {
         <button type="button" data-action="approved">Approve</button>
         <button type="button" data-action="rejected">Reject</button>
         <button type="button" data-uploaded="true">Sudah diupload</button>
+        <button type="button" data-unuploaded="true">Tidak jadi diupload</button>
         <button type="button" data-delete="true">Hapus</button>
       </div>
     `;
@@ -205,6 +220,7 @@ function renderSavedList(items = filteredSavedItems()) {
     row.querySelector("[data-action='approved']").disabled = item.status === "approved";
     row.querySelector("[data-action='rejected']").disabled = item.status === "rejected";
     row.querySelector("[data-uploaded='true']").disabled = Boolean(item.uploaded_at);
+    row.querySelector("[data-unuploaded='true']").disabled = !item.uploaded_at;
     row.addEventListener("click", () => loadSavedPreview(item.run_id));
     row.addEventListener("keydown", (event) => {
       if (event.key !== "Enter" && event.key !== " ") return;
@@ -218,6 +234,10 @@ function renderSavedList(items = filteredSavedItems()) {
     row.querySelector("[data-uploaded='true']").addEventListener("click", (event) => {
       event.stopPropagation();
       markUploaded(item.run_id);
+    });
+    row.querySelector("[data-unuploaded='true']").addEventListener("click", (event) => {
+      event.stopPropagation();
+      unmarkUploaded(item.run_id);
     });
     row.querySelectorAll("button").forEach((button) => {
       if (button.dataset.action) {
@@ -270,7 +290,7 @@ async function loadSavedPreview(runId) {
   renderImages(data);
   generateImageButton.disabled = false;
   deleteImageButton.disabled = !(data.web_files?.images || []).length;
-  questionText.textContent = question.soal;
+  questionText.textContent = formatQuestionText(question.soal);
   choicesList.innerHTML = "";
   for (const [key, value] of Object.entries(question.pilihan)) {
     const item = document.createElement("li");
@@ -357,6 +377,27 @@ async function markUploaded(runId) {
   await loadSavedList();
   if (activePreviewRunId === runId) {
     runNote.textContent = `Sudah diupload pada ${new Date(data.uploaded_at).toLocaleString("id-ID")}.`;
+  }
+}
+
+async function unmarkUploaded(runId) {
+  setStatus("Updating");
+  const response = await fetch(`/saved/${runId}/unuploaded`, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    setStatus("Error");
+    debugPanel.hidden = false;
+    debugSource.textContent = "saved/unuploaded";
+    debugText.textContent = data.error || "Pembatalan upload gagal.";
+    return;
+  }
+  setStatus("Not uploaded");
+  await loadSavedList();
+  if (activePreviewRunId === runId) {
+    runNote.textContent = "Status upload dibatalkan.";
   }
 }
 

@@ -1,0 +1,21 @@
+services:
+  latsoal-bot:
+    build: .
+    ports:
+      - "8765:8765"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8765
+      LATSOAL_DATA_ROOT: /data
+      LATSOAL_RENDER_ENGINE: latex
+      LATSOAL_LATEX_COMMAND: pdflatex
+      LATSOAL_PDF_CONVERTER: pdftoppm
+    volumes:
+      - latsoal-data:/data
+    restart: unless-stopped
+
+volumes:
+  latsoal-data:

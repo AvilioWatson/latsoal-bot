@@ -7,6 +7,7 @@ import {runGenerator} from "../lib/runner.js";
 export const TOPICS = JSON.parse(readFileSync(path.join(ROOT, "config", "topics.json"), "utf-8"));
 const LEVELS = new Set(["mudah", "sedang", "sulit"]);
 const MODES = new Set(["auto", "gemini", "draft"]);
+const PROVIDERS = new Set(["gemini", "kimi"]);
 
 function requestError(status, message) {
   const error = new Error(message);
@@ -36,12 +37,17 @@ function normalizeGeneratePayload(payload) {
     throw requestError(400, "Mode generator tidak valid.");
   }
 
-  const account = raw.account || "@namaakun";
+  const provider = raw.provider || "gemini";
+  if (!PROVIDERS.has(provider)) {
+    throw requestError(400, "Provider AI tidak valid.");
+  }
+
+  const account = raw.account || "@utbk_neareducation";
   if (typeof account !== "string" || account.length > 80) {
     throw requestError(400, "Account harus berupa teks maksimal 80 karakter.");
   }
 
-  return {mapel, topik, level, mode, account};
+  return {mapel, topik, level, mode, provider, account};
 }
 
 export async function handle(request, response, route) {

@@ -1,6 +1,6 @@
 # UTBK Content Desk
 
-Web lokal untuk membuat, meninjau, menyimpan, dan mengekspor konten latihan soal UTBK/SNBT. Aplikasi ini dibuat untuk workflow gratis dan manual-first: generator bisa memakai Gemini jika tersedia, tetapi tetap punya fallback lokal agar alur kerja tidak berhenti saat API limit.
+Web lokal untuk membuat, meninjau, menyimpan, dan mengekspor konten latihan soal UTBK/SNBT. Aplikasi ini dibuat untuk workflow gratis dan manual-first: generator bisa memakai Gemini atau Kimi jika tersedia, tetapi tetap punya fallback lokal agar alur kerja tidak berhenti saat API limit.
 
 ## Portfolio Notes
 
@@ -10,7 +10,7 @@ Yang dikerjakan:
 
 - Membuat web lokal untuk generate, preview, simpan, review, approve/reject, dan export soal.
 - Menghubungkan server Node.js dengan generator Python tanpa framework backend tambahan.
-- Menambahkan fallback lokal saat Gemini error, quota habis, atau response tidak valid.
+- Menambahkan fallback lokal saat provider AI error, quota habis, atau response tidak valid.
 - Membuat renderer gambar 1000x1000 untuk post soal dan JPG pembahasan siap upload.
 - Membuat validator untuk mengecek struktur soal, pilihan jawaban, caption, hashtag, dan potensi duplikasi.
 - Menyediakan Bank Review agar soal yang bagus bisa dipisahkan dari draft yang masih perlu dicek.
@@ -37,7 +37,7 @@ Implemented question generation, review workflow, validation, deduplication, cap
 ## Fitur Utama
 
 - Generate soal UTBK/SNBT dari browser.
-- Pilih subtes, topik, level, mode konten, dan akun/brand caption.
+- Pilih subtes, topik, level, mode konten, provider AI, dan akun/brand caption.
 - Preview soal, pilihan jawaban, caption, metadata, dan error/fallback.
 - Generate gambar post soal 1000x1000 dan JPG pembahasan otomatis.
 - Tambahkan thumbnail pembuka 1080x1080 yang berisi judul subtes dan subtopik.
@@ -120,12 +120,57 @@ Lalu buka:
 http://127.0.0.1:8765
 ```
 
+Alternatif di Windows, klik dua kali `LatsoalBot.exe` dari root project. Launcher ini menjalankan `node server.js`, menunggu server siap, lalu membuka browser ke alamat lokal di atas.
+
 Server memakai Node.js built-in HTTP server, tanpa Express dan tanpa dependency npm tambahan. Logic generator tetap berada di Python.
 
 Jika PowerShell memblokir `npm.ps1`, jalankan lewat:
 
 ```powershell
 npm.cmd start
+```
+
+## Menjalankan Dengan Docker
+
+Docker menjaga dependency Node.js, Python, LaTeX, dan PDF converter tetap di dalam container, sehingga environment laptop tidak perlu dipasangi toolchain LaTeX.
+
+Build dan jalankan:
+
+```powershell
+docker compose up --build
+```
+
+Lalu buka:
+
+```text
+http://127.0.0.1:8765
+```
+
+Compose memakai named volume `latsoal-data` untuk menyimpan:
+
+```text
+/data/outputs
+/data/saved
+/data/approved
+/data/bank
+```
+
+Jadi output generate tetap tersimpan walaupun container dibuat ulang. File `.env` tetap dipakai untuk API key dan konfigurasi provider AI.
+
+Perintah berguna:
+
+```powershell
+docker compose down
+docker compose logs -f
+docker compose exec latsoal-bot npm test
+```
+
+Di dalam container, renderer default adalah:
+
+```text
+LATSOAL_RENDER_ENGINE=latex
+LATSOAL_LATEX_COMMAND=pdflatex
+LATSOAL_PDF_CONVERTER=pdftoppm
 ```
 
 ## Check dan Smoke Test
@@ -173,21 +218,26 @@ Kontrak endpoint lokal tersedia di:
 API.md
 ```
 
-## Konfigurasi Gemini
+## Konfigurasi Provider AI
 
 Buat file `.env` di root project atau set environment variable di terminal:
 
 ```powershell
 $env:GEMINI_API_KEY="isi_api_key"
+$env:KIMI_API_KEY="isi_api_key_kimi"
 ```
 
 Opsional:
 
 ```powershell
+$env:AI_PROVIDER="gemini"
 $env:GEMINI_MODEL="gemini-3.5-flash"
+$env:KIMI_MODEL="moonshotai/kimi-k2.6"
 ```
 
-Jangan commit API key. File `.env`, `outputs/`, `saved/`, dan `approved/` harus tetap lokal.
+Di web, pilih `Gemini` atau `Kimi` pada kontrol Provider AI sebelum menekan Generate. Mode `Draft lokal` tetap tidak memakai API.
+
+Jangan commit API key. File `.env`, `outputs/`, `saved/`, dan `approved/` harus tetap lokal. Jika API key pernah terkirim di chat atau masuk log publik, rotate key tersebut dari dashboard penyedia API.
 
 ## Isolasi Data Lokal
 
@@ -213,24 +263,24 @@ Kode aplikasi tetap dibaca dari repo, tetapi output, saved item, approved export
 
 Alur dasar saat tombol generate ditekan:
 
-1. Browser mengirim pilihan subtes, topik, level, mode, dan akun ke `server.js`.
+1. Browser mengirim pilihan subtes, topik, level, mode, provider AI, dan akun ke `server.js`.
 2. `server.js` menjalankan `content_generator.py`.
 3. Python membuat soal, caption, metadata, gambar soal, dan gambar pembahasan.
-4. Hasil disimpan ke folder `outputs/<run-id>/`.
+4. Hasil disimpan ke folder `outputs/<kode-subtes>/<topik>/<run-id>/`.
 5. Browser menampilkan preview dari output tersebut.
-6. Jika pengguna menekan tombol simpan, output dicopy ke `saved/<run-id>/`.
+6. Jika pengguna menekan tombol simpan, output dicopy ke `saved/<kode-subtes>/<topik>/<run-id>/`.
 
 ## LLM dan Fallback Lokal
 
 Sistem ini masih bisa memakai LLM untuk membuat soal, tetapi tidak sepenuhnya bergantung pada LLM.
 
-Jika Gemini berhasil:
+Jika Gemini atau Kimi berhasil:
 
-- soal dibuat oleh Gemini;
-- metadata mencatat model dan estimasi token dari `usageMetadata`;
+- soal dibuat oleh provider AI terpilih;
+- metadata mencatat provider, model, dan estimasi token jika tersedia;
 - validator lokal tetap mengecek hasilnya.
 
-Jika Gemini gagal, quota habis, network error, atau JSON tidak valid:
+Jika provider AI gagal, quota habis, network error, atau JSON tidak valid:
 
 - generator masuk mode fallback lokal;
 - error ditampilkan di web;
@@ -299,7 +349,7 @@ saved/<run-id>/metadata.json
 Setiap run membuat folder:
 
 ```text
-outputs/<run-id>/
+outputs/<kode-subtes>/<topik>/<run-id>/
 ```
 
 Isi umumnya:
@@ -310,8 +360,14 @@ metadata.json
 1.jpg
 2.jpg
 3.jpg
-thumbnail.png
-post-1.png
+thumbnail.tex
+thumbnail.pdf
+thumbnail.jpg
+post-1.tex
+post-1.pdf
+post-1.jpg
+pembahasan-1.tex
+pembahasan-1.pdf
 pembahasan-1.jpg
 soal.json
 ```
@@ -321,11 +377,40 @@ Keterangan:
 - `caption.txt`: caption final.
 - `metadata.json`: catatan source, fallback, error, validator, dedup, usage token, dan daftar file gambar.
 - `1.jpg`, `2.jpg`, `3.jpg`, dst: gambar final yang dipakai preview dan download, sudah berurutan dari thumbnail sampai pembahasan.
-- `thumbnail.png`: slide pembuka 1080x1080 yang berisi subtes dan subtopik, memakai gaya visual yang konsisten dengan slide berikutnya.
-- `post-*.png` dan `pembahasan-*.jpg`: file render intermediate sebelum dikonversi menjadi JPG bernomor.
+- `thumbnail.tex`, `post-*.tex`, dan `pembahasan-*.tex`: sumber LaTeX/TikZ untuk setiap slide.
+- `thumbnail.pdf`, `post-*.pdf`, dan `pembahasan-*.pdf`: hasil compile LaTeX.
+- `thumbnail.jpg`, `post-*.jpg`, dan `pembahasan-*.jpg`: hasil convert PDF sebelum disalin menjadi JPG bernomor.
 - `soal.json`: data soal mentah.
 
 Metadata gambar menyimpan file JPG bernomor di `files.image`, `files.images`, `files.thumbnail`, dan `files.explanation` / `files.explanations`.
+
+Contoh struktur untuk Pengetahuan Kuantitatif topik fungsi kuadrat:
+
+```text
+saved/PK/fungsi-kuadrat/20260612-092806/
+```
+
+Renderer gambar default memakai flow:
+
+```text
+LaTeX/TikZ .tex -> PDF -> JPG
+```
+
+Dependency runtime yang dibutuhkan:
+
+- LaTeX compiler, default `pdflatex`.
+- PDF converter, salah satu dari ImageMagick `magick` atau Poppler `pdftoppm`.
+
+Konfigurasi terkait:
+
+```text
+LATSOAL_RENDER_ENGINE=latex
+LATSOAL_LATEX_COMMAND=pdflatex
+LATSOAL_PDF_CONVERTER=
+LATSOAL_RENDER_TIMEOUT_SECONDS=60
+```
+
+Jika mesin belum punya LaTeX/converter dan hanya ingin menjalankan test lokal, pakai `LATSOAL_RENDER_ENGINE=pil`. Mode ini fallback lama dan bukan flow utama web.
 
 Tombol `Download folder` mengunduh ZIP yang hanya berisi JPG bernomor:
 
@@ -339,7 +424,7 @@ Isi ZIP berada di folder `<run-id>/`, misalnya `<run-id>/1.jpg`, `<run-id>/2.jpg
 Saat tombol simpan dipakai, output terpilih dicopy ke:
 
 ```text
-saved/<run-id>/
+saved/<kode-subtes>/<topik>/<run-id>/
 ```
 
 Saat export approved dipakai, item approved dicopy ke:
@@ -360,7 +445,7 @@ Workflow review memakai status di Bank Review:
 
 Tombol `Export approved` hanya menyalin item berstatus `Approved` ke folder `approved/<export-id>/`.
 
-Tombol `Sudah diupload` menandai item dengan `uploaded_at` tanpa mengubah status review, sehingga catatan upload tetap terpisah dari alur approve/reject/export.
+Tombol `Sudah diupload` menandai item dengan `uploaded_at`, sedangkan `Tidak jadi diupload` mengosongkan tanda tersebut tanpa mengubah status review. Catatan upload tetap terpisah dari alur approve/reject/export.
 
 Di Bank Review, tombol `Generate` pada panel gambar menjalankan ulang renderer dari `metadata.json`. Tombol `Hapus gambar` menghapus `1.jpg`, `2.jpg`, dst serta file render intermediate dari item saved tanpa menghapus data soal, caption, atau metadata utama.
 
@@ -447,9 +532,9 @@ node server.js
 
 Jika masih error, pastikan file `server.js` terbaru sedang dijalankan.
 
-### Gemini quota habis
+### Kuota AI habis
 
-Web akan menampilkan error quota dan generator akan memakai fallback jika memungkinkan. Tunggu reset quota atau ganti model/key yang masih punya kuota.
+Web akan menampilkan error quota dan generator akan memakai fallback jika memungkinkan. Tunggu reset quota atau ganti provider, model, atau key yang masih punya kuota.
 
 ### Preview tidak muncul
 

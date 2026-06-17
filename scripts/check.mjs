@@ -303,7 +303,12 @@ const smoke = run(PYTHON, [
   "draft",
   "--account",
   "@check",
-]);
+], {
+  env: {
+    ...process.env,
+    LATSOAL_RENDER_ENGINE: "pil",
+  },
+});
 
 let payload;
 try {
@@ -313,6 +318,6 @@ try {
 }
 
 validateGeneratorOutput(payload);
-rmSync(path.join(ROOT, "outputs", payload.run_id), {recursive: true, force: true});
+rmSync(path.join(ROOT, "outputs", payload.storage_path || payload.run_id), {recursive: true, force: true});
 
 console.log(`ok generator smoke ${payload.run_id}`);

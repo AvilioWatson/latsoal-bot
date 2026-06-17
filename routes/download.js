@@ -1,7 +1,8 @@
 import {readdir, stat} from "node:fs/promises";
 import path from "node:path";
+import {readIndex} from "../lib/filestore.js";
 import {sendError} from "../lib/http.js";
-import {OUTPUTS, SAVED, isValidRunId, safeJoin} from "../lib/paths.js";
+import {OUTPUTS, SAVED, isValidRunId, pathFromIndexEntry, safeJoin} from "../lib/paths.js";
 import {createZipBuffer} from "../lib/zip.js";
 
 const DOWNLOAD_ROOTS = {
@@ -21,7 +22,33 @@ async function buildRunZip(scope, runId) {
     throw error;
   }
 
-  const runDir = safeJoin(base, runId);
+  let artifactPath = runId;
+  if (scope === "saved") {
+    const index = await readIndex();
+    const entry = index.find((item) => item.run_id === runId);
+    if (entry) artifactPath = pathFromIndexEntry(entry, "saved");
+  } else if (scope === "outputs") {
+    async function findOutputPath(dir) {
+      let names;
+      try {
+        names = await readdir(dir, {withFileTypes: true});
+      } catch {
+        return null;
+      }
+      for (const dirent of names) {
+        if (!dirent.isDirectory()) continue;
+        const target = path.join(dir, dirent.name);
+        if (dirent.name === runId) {
+          return path.relative(OUTPUTS, target).replace(/\\/g, "/");
+        }
+        const nested = await findOutputPath(target);
+        if (nested) return nested;
+      }
+      return null;
+    }
+    artifactPath = await findOutputPath(OUTPUTS) || runId;
+  }
+  const runDir = safeJoin(base, artifactPath);
   if (!runDir) {
     const error = new Error("Path download tidak valid.");
     error.status = 400;

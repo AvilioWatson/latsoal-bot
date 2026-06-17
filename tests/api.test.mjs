@@ -105,6 +105,10 @@ test("bank review API can save, approve, export, and delete in an isolated data 
     assert.equal(response.status, 200);
     assert.match(response.headers.get("content-type"), /text\/html/);
 
+    response = await fetch(`${baseUrl}/dashboard`);
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get("content-type"), /text\/html/);
+
     response = await fetch(`${baseUrl}/stats`, {headers: {Accept: "application/json"}});
     assert.equal(response.status, 200);
     body = await response.json();
@@ -195,6 +199,17 @@ test("bank review API can save, approve, export, and delete in an isolated data 
     assert.equal(response.status, 200);
     body = await response.json();
     assert.match(body.items[0].uploaded_at, /^\d{4}-\d{2}-\d{2}T/);
+
+    response = await fetch(`${baseUrl}/saved/${RUN_ID}/unuploaded`, {method: "POST"});
+    assert.equal(response.status, 200);
+    body = await response.json();
+    assert.equal(body.uploaded_at, null);
+    assert.equal(body.status, "approved");
+
+    response = await fetch(`${baseUrl}/saved`, {headers: {Accept: "application/json"}});
+    assert.equal(response.status, 200);
+    body = await response.json();
+    assert.equal(body.items[0].uploaded_at, null);
 
     response = await fetch(`${baseUrl}/export`, {method: "POST"});
     assert.equal(response.status, 200);

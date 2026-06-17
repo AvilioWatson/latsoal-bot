@@ -296,7 +296,7 @@ Ketentuan output grafik:
   - Biru utama: #1E88E5
   - Aksen: #FFC107
   - Teks: #212121
-- Tambahkan watermark kecil "@namaakun" di pojok kanan bawah
+- Tambahkan watermark kecil "@utbk_neareducation" di pojok kanan bawah
 - Simpan sebagai: output_grafik.png dengan DPI 150
 - Jangan tampilkan plt.show(), langsung save
 

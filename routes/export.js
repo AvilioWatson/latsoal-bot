@@ -2,7 +2,7 @@ import {access, cp, mkdir, readFile, writeFile} from "node:fs/promises";
 import path from "node:path";
 import {readIndex, writeIndex} from "../lib/filestore.js";
 import {errorStatus, sendError, sendJson} from "../lib/http.js";
-import {APPROVED, SAVED, isValidRunId} from "../lib/paths.js";
+import {APPROVED, SAVED, isValidRunId, pathFromIndexEntry} from "../lib/paths.js";
 
 function artifactName(file) {
   return String(file).split(/[\\/]/).pop();
@@ -18,7 +18,7 @@ async function exportApprovedRuns() {
 
   const manifest = [];
   for (const item of approved) {
-    const sourceDir = path.join(SAVED, item.run_id);
+    const sourceDir = path.join(SAVED, pathFromIndexEntry(item, "saved"));
     const destinationDir = path.join(targetDir, item.run_id);
     try {
       await access(path.join(sourceDir, "metadata.json"));

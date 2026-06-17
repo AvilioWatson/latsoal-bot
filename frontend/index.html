@@ -27,6 +27,7 @@
         </div>
       </div>
       <div class="top-actions">
+        <a class="nav-link" href="/dashboard">Dashboard</a>
         <a class="nav-link" href="/saved.html">Bank Review</a>
         <a class="nav-link" href="/stats">Stats</a>
         <div class="status-pill" id="sourceStatus">Siap</div>
@@ -64,9 +65,23 @@
             </select>
           </label>
 
+          <fieldset class="segmented-field">
+            <legend>Provider AI</legend>
+            <div class="segmented-control" role="radiogroup" aria-label="Provider AI">
+              <label>
+                <input type="radio" name="provider" value="gemini" checked>
+                <span>Gemini</span>
+              </label>
+              <label>
+                <input type="radio" name="provider" value="kimi">
+                <span>Kimi</span>
+              </label>
+            </div>
+          </fieldset>
+
           <label>
             Akun
-            <input name="account" value="@namaakun" autocomplete="off">
+            <input name="account" value="@utbk_neareducation" autocomplete="off">
           </label>
 
           <button class="primary" type="submit" id="generateButton">

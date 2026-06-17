@@ -49,7 +49,8 @@ Request:
   "topik": "Penalaran deduktif",
   "level": "mudah",
   "mode": "draft",
-  "account": "@namaakun"
+  "provider": "gemini",
+  "account": "@utbk_neareducation"
 }
 ```
 
@@ -59,6 +60,7 @@ Validation:
 - `topik` harus tersedia untuk `mapel`.
 - `level` harus `mudah`, `sedang`, atau `sulit`.
 - `mode` harus `auto`, `gemini`, atau `draft`.
+- `provider` harus `gemini` atau `kimi`.
 - `account` maksimal 80 karakter.
 
 Success response menyertakan `run_id`, `question`, `caption`, `validation`, `metadata`, dan `web_files`.
@@ -113,6 +115,12 @@ Response menyertakan `status_updated_at`; `approved_at` atau `rejected_at` diisi
 Alias: `POST /api/saved/uploaded`
 
 Menandai item saved sebagai sudah diupload. Response menyertakan `uploaded_at`.
+
+### `POST /saved/<run-id>/unuploaded`
+
+Alias: `POST /api/saved/unuploaded`
+
+Membatalkan tanda upload dengan mengosongkan `uploaded_at`, tanpa mengubah status review.
 
 ### `DELETE /saved/<run-id>`
 

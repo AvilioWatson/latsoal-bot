@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Dashboard Admin | UTBK Content Desk</title>
+    <meta name="description" content="Dashboard admin untuk memantau progres pembuatan dan upload bank soal.">
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="/assets/styles.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar-brand">
+        <div class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="2" y="2" width="5" height="5" rx="1.5" fill="#0c0c0e"/>
+            <rect x="9" y="2" width="5" height="5" rx="1.5" fill="#0c0c0e"/>
+            <rect x="2" y="9" width="5" height="5" rx="1.5" fill="#0c0c0e"/>
+            <rect x="9" y="9" width="5" height="5" rx="1.5" fill="rgba(12,12,14,0.4)"/>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <p class="eyebrow">UTBK Content Desk</p>
+          <h1>Dashboard Admin</h1>
+        </div>
+      </div>
+      <div class="top-actions">
+        <a class="nav-link" href="/">Generator</a>
+        <a class="nav-link" href="/saved">Bank Review</a>
+        <a class="nav-link" href="/stats">Stats</a>
+        <div class="status-pill" id="dashboardStatus">Memuat</div>
+      </div>
+    </header>
+
+    <main class="dashboard-page">
+      <section class="dashboard-hero">
+        <div>
+          <p class="eyebrow">Monitoring</p>
+          <h2>Progres Bank Soal</h2>
+          <p id="dashboardUpdatedAt" class="run-note">Data sedang dimuat.</p>
+        </div>
+        <button id="dashboardRefreshButton" class="secondary" type="button">Refresh</button>
+      </section>
+
+      <section class="dashboard-summary" id="dashboardSummary" aria-label="Ringkasan bank soal"></section>
+
+      <section class="dashboard-panel">
+        <div class="dashboard-panel-head">
+          <div>
+            <p class="eyebrow">Rekap</p>
+            <h2>Sub Tes dan Sub Topik</h2>
+          </div>
+          <div class="dashboard-filters">
+            <label>
+              Sub Tes
+              <select id="dashboardSubtestFilter"></select>
+            </label>
+            <label>
+              Status Upload
+              <select id="dashboardUploadFilter">
+                <option value="all">Semua</option>
+                <option value="uploaded">Sudah ada upload</option>
+                <option value="not-uploaded">Belum lengkap upload</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <div class="dashboard-table-wrap">
+          <table class="dashboard-table">
+            <thead>
+              <tr>
+                <th>Sub Tes</th>
+                <th>Sub Topik</th>
+                <th>Mudah</th>
+                <th>Sedang</th>
+                <th>Sulit</th>
+                <th>Total</th>
+                <th>Telah Diupload</th>
+              </tr>
+            </thead>
+            <tbody id="dashboardTableBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <span>UTBK Content Desk</span> &bull; &copy; 2026
+    </footer>
+
+    <script src="/assets/dashboard.js"></script>
+  </body>
+</html>

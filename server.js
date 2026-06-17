@@ -11,6 +11,7 @@ import {handle as handleGenerate, TOPICS} from "./routes/generate.js";
 import {sendStatsJson, sendStatsPage} from "./routes/stats.js";
 
 const PORT = Number(process.env.PORT || 8765);
+const HOST = process.env.HOST || "127.0.0.1";
 
 function slugifySubtest(name) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -29,6 +30,11 @@ async function handleStaticPage(request, response, route) {
     && (route === "/saved.html" || route === "/saved" || SAVED_PAGE_ROUTES.has(route))
   ) {
     await sendFile(response, path.join(FRONTEND, "saved.html"));
+    return true;
+  }
+
+  if (request.method === "GET" && (route === "/dashboard" || route === "/dashboard.html" || route === "/admin")) {
+    await sendFile(response, path.join(FRONTEND, "dashboard.html"));
     return true;
   }
 
@@ -103,9 +109,9 @@ const server = http.createServer((request, response) => {
   });
 });
 
-server.listen(PORT, "127.0.0.1", () => {
+server.listen(PORT, HOST, () => {
   readIndex().catch((error) => {
     console.error(`[INDEX] rebuild failed: ${error.message}`);
   });
-  console.log(`UTBK Content Desk: http://127.0.0.1:${PORT}`);
+  console.log(`UTBK Content Desk: http://${HOST}:${PORT}`);
 });

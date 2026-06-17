@@ -5,7 +5,10 @@ import json
 import os
 import random
 import re
+import shutil
+import subprocess
 import sys
+import textwrap
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -19,10 +22,37 @@ SAVED_DIR = DATA_ROOT / "saved"
 BANK_INDEX_PATH = DATA_ROOT / "bank" / "index.json"
 DEDUP_THRESHOLD = float(os.getenv("DEDUP_THRESHOLD", "0.82"))
 LOGO_PATH = ROOT / "assets" / "near_education_wordmark_v2.svg"
+RENDER_ENGINE = os.getenv("LATSOAL_RENDER_ENGINE", "latex").strip().lower()
+LATEX_COMMAND = os.getenv("LATSOAL_LATEX_COMMAND", "pdflatex").strip() or "pdflatex"
+PDF_CONVERTER = os.getenv("LATSOAL_PDF_CONVERTER", "").strip()
+RENDER_TIMEOUT_SECONDS = int(os.getenv("LATSOAL_RENDER_TIMEOUT_SECONDS", "60"))
+
+SUBTEST_CODES = {
+    "pengetahuan-kuantitatif": "PK",
+    "penalaran-matematika": "PM",
+    "penalaran-umum": "PU",
+    "pengetahuan-dan-pemahaman-umum": "PPU",
+    "pemahaman-bacaan-dan-menulis": "PBM",
+    "literasi-bahasa-indonesia": "LBI",
+    "literasi-bahasa-inggris": "LBE",
+}
 
 
 def json_stdout(payload):
     print(json.dumps(payload, ensure_ascii=False, indent=2))
+
+
+def slugify(value):
+    return re.sub(r"[^a-z0-9]+", "-", str(value or "").lower()).strip("-")
+
+
+def subtest_code(mapel):
+    slug = slugify(mapel)
+    return SUBTEST_CODES.get(slug, slug.upper() or "LAINNYA")
+
+
+def build_storage_path(question, run_id):
+    return Path(subtest_code(question.get("mapel"))) / slugify(question.get("topik") or "umum") / run_id
 
 
 def classify_error(exc):
@@ -68,8 +98,11 @@ def load_env_file():
 
 load_env_file()
 DEFAULT_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
+KIMI_MODEL = os.getenv("KIMI_MODEL", "moonshotai/kimi-k2.6")
+KIMI_API_URL = os.getenv("KIMI_API_URL", "https://integrate.api.nvidia.com/v1/chat/completions")
 MAX_GEMINI_RETRIES = int(os.getenv("GEMINI_RETRIES", "3"))
 GEMINI_MAX_OUTPUT_TOKENS = int(os.getenv("GEMINI_MAX_OUTPUT_TOKENS", "4096"))
+KIMI_MAX_OUTPUT_TOKENS = int(os.getenv("KIMI_MAX_OUTPUT_TOKENS", "16384"))
 GEMINI_VALIDATE = os.getenv("GEMINI_VALIDATE", "").lower() in {"1", "true", "yes"}
 GEMINI_CAPTION = os.getenv("GEMINI_CAPTION", "").lower() in {"1", "true", "yes"}
 GEMINI_USAGE = []
@@ -171,11 +204,13 @@ def _extract_json(text):
 def clean_error_message(exc):
     text = str(exc)
     if "429" in text or "RESOURCE_EXHAUSTED" in text:
-        return "Kuota Gemini habis untuk model/free tier saat ini."
+        return "Kuota AI habis untuk model/free tier saat ini."
     if "WinError 10013" in text or "urlopen error" in text:
-        return "Akses jaringan ke Gemini belum tersedia dari proses ini."
+        return "Akses jaringan ke provider AI belum tersedia dari proses ini."
     if "Gagal parse JSON Gemini" in text:
         return "Gemini mengembalikan JSON yang tidak valid."
+    if "Gagal parse JSON Kimi" in text:
+        return "Kimi mengembalikan JSON yang tidak valid."
     return text[:240]
 
 
@@ -214,6 +249,14 @@ def _load_font(size, bold=False, family="sans"):
             "Inter_18pt-ExtraBold.ttf",
             "arialbd.ttf",
         ]
+    elif family == "math":
+        font_names = [
+            "cambria.ttc",
+            "seguisym.ttf",
+            "segoeuisl.ttf",
+            "cambria.ttf",
+            "arial.ttf",
+        ]
     elif family == "serif":
         font_names = [
             "georgiab.ttf" if bold else "georgia.ttf",
@@ -239,9 +282,43 @@ def _load_font(size, bold=False, family="sans"):
     return ImageFont.load_default()
 
 
-def _text_width(draw, text, font):
+MATH_TEXT_CHARS = set("∩∪⊂⊆⊄⊈∅≠≤≥∈∉⇒→←↔×÷±√∞≈∑∏∆∠°")
+_MATH_FONT_CACHE = {}
+
+
+def _font_size(font):
+    return int(getattr(font, "size", 24) or 24)
+
+
+def _math_font_for(font):
+    size = _font_size(font)
+    if size not in _MATH_FONT_CACHE:
+        _MATH_FONT_CACHE[size] = _load_font(size, family="math")
+    return _MATH_FONT_CACHE[size]
+
+
+def _font_for_char(char, font):
+    return _math_font_for(font) if char in MATH_TEXT_CHARS else font
+
+
+def _plain_text_width(draw, text, font):
     bbox = draw.textbbox((0, 0), str(text), font=font)
     return bbox[2] - bbox[0]
+
+
+def _text_width(draw, text, font):
+    text = str(text)
+    if not any(char in MATH_TEXT_CHARS for char in text):
+        return _plain_text_width(draw, text, font)
+    return sum(_plain_text_width(draw, char, _font_for_char(char, font)) for char in text)
+
+
+def _draw_text_with_math(draw, x, y, text, font, fill):
+    cursor_x = x
+    for char in str(text):
+        char_font = _font_for_char(char, font)
+        draw.text((cursor_x, y), char, font=char_font, fill=fill)
+        cursor_x += _plain_text_width(draw, char, char_font)
 
 
 def _line_height(draw, font):
@@ -302,7 +379,9 @@ def _wrap_question_paragraphs(draw, text, font, max_width):
 
 def _flatten_paragraphs(paragraphs):
     lines = []
-    for paragraph in paragraphs:
+    for index, paragraph in enumerate(paragraphs):
+        if index:
+            lines.append("")
         lines.extend(paragraph)
     return _trim_blank_lines(lines)
 
@@ -355,14 +434,14 @@ def _paginate_paragraph_lines(paragraphs, first_capacity, next_capacity, paragra
 def _draw_justified_line(draw, x, y, line, font, fill, max_width, justify=True):
     words = str(line).split()
     if not justify or len(words) < 2:
-        draw.text((x, y), line, font=font, fill=fill)
+        _draw_text_with_math(draw, x, y, line, font, fill)
         return
     words_width = sum(_text_width(draw, word, font) for word in words)
     gap_count = len(words) - 1
     gap_width = max(4, (max_width - words_width) / gap_count)
     cursor_x = x
     for index, word in enumerate(words):
-        draw.text((cursor_x, y), word, font=font, fill=fill)
+        _draw_text_with_math(draw, cursor_x, y, word, font, fill)
         cursor_x += _text_width(draw, word, font)
         if index < gap_count:
             cursor_x += gap_width
@@ -399,7 +478,7 @@ def _paginate_quiz(draw, question, fonts):
         for choice_page in choice_pages[1:]:
             pages.append({"question_lines": [], "choices": choice_page})
     else:
-        for q_chunk in _paginate_paragraph_lines(q_paragraphs, 10, 10):
+        for q_chunk in _paginate_paragraph_lines(q_paragraphs, 10, 10, paragraph_gap=1):
             pages.append({"question_lines": q_chunk, "choices": []})
         for choice_page in choice_pages:
             pages.append({"question_lines": [], "choices": choice_page})
@@ -578,7 +657,7 @@ def render_quiz_images(question, run_dir, page_offset=0, total_pages=None):
     for page_index, page in enumerate(pages, start=1):
         image = Image.new("RGB", (width, height), colors["bg"])
         draw = ImageDraw.Draw(image)
-        account = question.get("akun", "@namaakun")
+        account = question.get("akun", "@utbk_neareducation")
 
         draw.rectangle((0, 0, width, height), fill=colors["bg"])
         if logo:
@@ -688,10 +767,16 @@ def _format_explanation_text(text, max_paragraph_chars=230):
     raw = str(text).replace("\r\n", "\n").replace("\r", "\n").strip()
     if not raw:
         return ""
+    symbol_replacements = {}
+    for symbol, replacement in symbol_replacements.items():
+        raw = raw.replace(symbol, replacement)
+    raw = re.sub(r"[ \t]{2,}", " ", raw)
+    raw = raw.replace(" - ", " __LATSOAL_MINUS__ ")
 
     raw = re.sub(r"(?m)^\s*[-–—•]\s*", "", raw)
     raw = re.sub(r"\s+[-–—•]\s+(?=[A-ZA-ZÀ-ÖØ-ÝA-Z0-9])", " ", raw)
     raw = re.sub(r"\s+[-–—•]\s*(?=$|[.!?])", "", raw)
+    raw = raw.replace(" __LATSOAL_MINUS__ ", " - ")
     raw = re.sub(r"\s+(Oleh karena itu,)", r"\n\1", raw)
     raw = re.sub(r"\s+(Maka,)", r"\n\1", raw)
     raw = re.sub(r"\s+(Pilihan [A-E]\b)", r"\n\1", raw)
@@ -787,7 +872,7 @@ def _paginate_explanation_pages(draw, question, fonts):
                     pages.append(_trim_blank_lines(chunk))
             continue
 
-        if gap > 1:
+        if gap:
             current.append("")
             current_count += 1
         current.extend(paragraph_lines)
@@ -852,7 +937,7 @@ def render_explanation_images(question, run_dir, page_offset=0, total_pages=None
     for page_index, lines in enumerate(pages, start=1):
         image = Image.new("RGB", (width, height), colors["bg"])
         draw = ImageDraw.Draw(image)
-        account = question.get("akun", "@namaakun")
+        account = question.get("akun", "@utbk_neareducation")
 
         draw.rectangle((0, 0, width, height), fill=colors["bg"])
         if logo:
@@ -889,7 +974,7 @@ def render_explanation_images(question, run_dir, page_offset=0, total_pages=None
             answer_y = panel_top + (104 - answer_h) // 2
             for answer_line in answer_lines[:2]:
                 line_bbox = _text_bbox(draw, answer_line, fonts["body"])
-                draw.text((190, answer_y - line_bbox[1]), answer_line, font=fonts["body"], fill=colors["ink"])
+                _draw_text_with_math(draw, 190, answer_y - line_bbox[1], answer_line, fonts["body"], colors["ink"])
                 answer_y += (line_bbox[3] - line_bbox[1]) + 8
             panel_top = 342
 
@@ -907,7 +992,7 @@ def render_explanation_images(question, run_dir, page_offset=0, total_pages=None
                     fonts["body"],
                     colors["ink"],
                     748,
-                    justify=line_index < len(lines) - 1,
+                    justify=line_index < len(lines) - 1 and lines[line_index + 1] != "",
                 )
             text_y += line_h
 
@@ -926,18 +1011,759 @@ def render_explanation_images(question, run_dir, page_offset=0, total_pages=None
 
 
 def render_numbered_jpg_images(image_paths, run_dir):
-    try:
-        from PIL import Image
-    except ImportError:
-        return []
-
     output_paths = []
     for index, source_path in enumerate([path for path in image_paths if path], start=1):
+        source_path = Path(source_path)
         output_path = run_dir / f"{index}.jpg"
-        with Image.open(source_path) as image:
-            image.convert("RGB").save(output_path, format="JPEG", quality=95, subsampling=0, optimize=True)
+        if source_path.suffix.lower() in {".jpg", ".jpeg"}:
+            shutil.copyfile(source_path, output_path)
+        else:
+            try:
+                from PIL import Image
+            except ImportError:
+                raise RuntimeError("Pillow dibutuhkan untuk menomori gambar non-JPG.")
+            with Image.open(source_path) as image:
+                image.convert("RGB").save(output_path, format="JPEG", quality=95, subsampling=0, optimize=True)
         output_paths.append(output_path)
     return output_paths
+
+
+def _wrap_plain_lines(text, width=62, max_lines=None):
+    lines = []
+    for paragraph in str(text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        paragraph = re.sub(r"\s+", " ", paragraph).strip()
+        if not paragraph:
+            if lines:
+                lines.append("")
+            continue
+        lines.extend(textwrap.wrap(paragraph, width=width, break_long_words=False, break_on_hyphens=False) or [""])
+    lines = _trim_blank_lines(lines) or [""]
+    return lines[:max_lines] if max_lines else lines
+
+
+def _chunk_lines(lines, size):
+    return [lines[index:index + size] for index in range(0, len(lines), size)] or [[""]]
+
+
+LATEX_SYMBOLS = {
+    "≤": r"$\leq$",
+    "≥": r"$\geq$",
+    "≠": r"$\neq$",
+    "×": r"$\times$",
+    "÷": r"$\div$",
+    "±": r"$\pm$",
+    "√": r"$\sqrt{\ }$",
+    "∞": r"$\infty$",
+    "≈": r"$\approx$",
+    "∩": r"$\cap$",
+    "∪": r"$\cup$",
+    "∈": r"$\in$",
+    "∉": r"$\notin$",
+    "∠": r"$\angle$",
+    "→": r"$\to$",
+    "⇒": r"$\Rightarrow$",
+    "°": r"$^\circ$",
+    "π": r"$\pi$",
+    "²": r"$^2$",
+    "³": r"$^3$",
+    "₀": "0",
+    "₁": "1",
+    "₂": "2",
+    "₃": "3",
+    "₄": "4",
+    "₅": "5",
+    "₆": "6",
+    "₇": "7",
+    "₈": "8",
+    "₉": "9",
+    "✓": r"\textit{benar}",
+    "✗": r"\textit{salah}",
+}
+
+LATEX_MATH_SYMBOLS = {
+    "≤": r"\leq",
+    "≥": r"\geq",
+    "≠": r"\neq",
+    "×": r"\times",
+    "÷": r"\div",
+    "±": r"\pm",
+    "∞": r"\infty",
+    "≈": r"\approx",
+    "∩": r"\cap",
+    "∪": r"\cup",
+    "∈": r"\in",
+    "∉": r"\notin",
+    "∠": r"\angle",
+    "→": r"\to",
+    "⇒": r"\Rightarrow",
+    "°": r"^\circ",
+    "π": r"\pi",
+    "²": r"^2",
+    "³": r"^3",
+}
+
+
+def _latex_escape(text):
+    replacements = {
+        "\\": r"\textbackslash{}",
+        "&": r"\&",
+        "%": r"\%",
+        "$": r"\$",
+        "#": r"\#",
+        "_": r"\_",
+        "{": r"\{",
+        "}": r"\}",
+        "[": r"{[}",
+        "]": r"{]}",
+        "~": r"\textasciitilde{}",
+        "^": r"\textasciicircum{}",
+    }
+    parts = []
+    for char in str(text or ""):
+        if char in LATEX_SYMBOLS:
+            parts.append(LATEX_SYMBOLS[char])
+        else:
+            parts.append(replacements.get(char, char))
+    return "".join(parts)
+
+
+def _latex_text_escape(text):
+    replacements = {
+        "\\": r"\textbackslash{}",
+        "&": r"\&",
+        "%": r"\%",
+        "$": r"\$",
+        "#": r"\#",
+        "_": r"\_",
+        "{": r"\{",
+        "}": r"\}",
+        "[": r"{[}",
+        "]": r"{]}",
+        "~": r"\textasciitilde{}",
+        "^": r"\textasciicircum{}",
+    }
+    parts = []
+    for char in str(text or ""):
+        if char in LATEX_SYMBOLS:
+            parts.append(LATEX_SYMBOLS[char])
+        else:
+            parts.append(replacements.get(char, char))
+    return "".join(parts)
+
+
+def _latex_math_escape(text):
+    value = str(text or "")
+    value = value.replace("\\", "")
+    value = re.sub(r"√\s*\(?([A-Za-z0-9]+)\)?", r"\\sqrt{\1}", value)
+    replacements = {
+        "&": r"\&",
+        "%": r"\%",
+        "#": r"\#",
+        "_": r"\_",
+        "{": r"\{",
+        "}": r"\}",
+    }
+    parts = []
+    for char in value:
+        if char in LATEX_MATH_SYMBOLS:
+            parts.append(LATEX_MATH_SYMBOLS[char])
+        elif char in replacements:
+            parts.append(replacements[char])
+        else:
+            parts.append(char)
+    return "".join(parts)
+
+
+MATH_TOKEN_RE = re.compile(
+    r"(?P<prefix>^|[\s({\[])"
+    r"(?P<body>[A-Za-z]?\(?[A-Za-z]\)?(?:\([A-Za-z0-9]+\))?[A-Za-z0-9π√∠°²³₀-₉+\-*/=<>≤≥≠.,]+)"
+)
+
+
+def _looks_like_math_token(token):
+    value = token.strip()
+    if not value or len(value) < 2:
+        return False
+    if value.lower() in {"dan", "atau", "jika", "maka", "dari", "yang"}:
+        return False
+    if any(char in value for char in "=<>≤≥≠√∠π²³^*/"):
+        return True
+    if re.search(r"\b[xyabckmn]\d+\b|\d+[xyabckmn]\b|[xyabckmn][+\-]\d", value, re.I):
+        return True
+    if re.search(r"f\(x\)|[xy]\([^)]+\)", value, re.I):
+        return True
+    return False
+
+
+def _latex_format_inline(text):
+    source = str(text or "").replace(">=", "\u2265").replace("<=", "\u2264")
+    result = []
+    last = 0
+    for match in MATH_TOKEN_RE.finditer(source):
+        prefix = match.group("prefix")
+        body = match.group("body")
+        start = match.start("body")
+        end = match.end("body")
+        if not _looks_like_math_token(body):
+            continue
+        result.append(_latex_text_escape(source[last:start]))
+        trailing = ""
+        while body and body[-1] in ".,;:":
+            trailing = body[-1] + trailing
+            body = body[:-1]
+            end -= 1
+        result.append(rf"\mbox{{${_latex_math_escape(body)}$}}")
+        result.append(_latex_text_escape(trailing))
+        last = match.end("body")
+    result.append(_latex_text_escape(source[last:]))
+    return "".join(result)
+
+
+def _compact_math_for_line_wrap(text):
+    def compact_line(match):
+        variable = match.group(1)
+        relation = match.group(2).replace(">=", "\u2265").replace("<=", "\u2264")
+        slope = (match.group(3) or "").replace(" ", "")
+        sign = (match.group(4) or "").replace(" ", "")
+        intercept = (match.group(5) or "").replace(" ", "")
+        return f"{variable}{relation}{slope}x{sign}{intercept}"
+
+    return re.sub(
+        r"\b([yf])\s*([=<>]=?|≤|≥)\s*([+-]?\s*\d*(?:/\d+)?(?:\.\d+)?)\s*x\s*([+-])?\s*(\d+(?:\.\d+)?)?",
+        compact_line,
+        str(text or ""),
+        flags=re.I,
+    )
+
+
+def _latex_lines(lines):
+    return r"\\".join(_latex_format_inline(line) if line else r"\mbox{}" for line in lines)
+
+
+def _node(x, y, width, lines, size=30, color="ink", align="left", weight=""):
+    font = rf"\fontsize{{{size}pt}}{{{int(size * 1.28)}pt}}\selectfont"
+    if weight == "bold":
+        font = r"\bfseries " + font
+    return (
+        rf"\node[anchor=north west, text={color}, align={align}, text width={width}pt, "
+        rf"font={{{font}}}] at ({x},{1080 - y}) {{{_latex_lines(lines)}}};"
+    )
+
+
+def _rect(x1, y1, x2, y2, fill="panel", draw="line", radius=7):
+    return (
+        rf"\draw[fill={fill}, draw={draw}, line width=2pt, rounded corners={radius}pt] "
+        rf"({x1},{1080 - y1}) rectangle ({x2},{1080 - y2});"
+    )
+
+
+def _latex_document(body):
+    return rf"""\documentclass{{article}}
+\usepackage[papersize={{1080pt,1080pt}},margin=0pt]{{geometry}}
+\usepackage[utf8]{{inputenc}}
+\usepackage[T1]{{fontenc}}
+\usepackage{{lmodern}}
+\usepackage{{tikz}}
+\usetikzlibrary{{arrows.meta}}
+\pagestyle{{empty}}
+\definecolor{{bg}}{{HTML}}{{F7F2EA}}
+\definecolor{{panel}}{{HTML}}{{FFFDF8}}
+\definecolor{{softpanel}}{{HTML}}{{FBFAF6}}
+\definecolor{{answerpanel}}{{HTML}}{{E7F3EE}}
+\definecolor{{ink}}{{HTML}}{{1F2933}}
+\definecolor{{muted}}{{HTML}}{{697586}}
+\definecolor{{line}}{{HTML}}{{D7D0C4}}
+\definecolor{{grid}}{{HTML}}{{E9E4DA}}
+\definecolor{{accent}}{{HTML}}{{176B87}}
+\definecolor{{accenttwo}}{{HTML}}{{315A89}}
+\definecolor{{solution}}{{HTML}}{{CFE8F3}}
+\definecolor{{danger}}{{HTML}}{{B45309}}
+\definecolor{{graphgreen}}{{HTML}}{{159947}}
+\definecolor{{graphblue}}{{HTML}}{{2563EB}}
+\definecolor{{graphyellow}}{{HTML}}{{D99A00}}
+\definecolor{{graphred}}{{HTML}}{{DC2626}}
+\definecolor{{shadegreen}}{{HTML}}{{DDF6E6}}
+\definecolor{{shadeblue}}{{HTML}}{{DFE9FF}}
+\definecolor{{shadeyellow}}{{HTML}}{{FFF1C2}}
+\definecolor{{shadered}}{{HTML}}{{FFE0E0}}
+\begin{{document}}
+\begin{{tikzpicture}}[x=1pt,y=1pt]
+\fill[bg] (0,0) rectangle (1080,1080);
+{body}
+\end{{tikzpicture}}
+\end{{document}}
+"""
+
+
+def _latex_thumbnail_source(question):
+    subtest = _wrap_plain_lines(question.get("mapel", "Latihan UTBK"), 28, 2)
+    subtopic = _wrap_plain_lines(question.get("topik") or question.get("mapel", "Subtopik"), 44, 2)
+    account = str(question.get("akun", "@utbk_neareducation") or "@utbk_neareducation")
+    body = "\n".join([
+        r"\draw[line, line width=2pt] (78,810) -- (1002,810);",
+        r"\draw[line, line width=2pt] (78,270) -- (1002,270);",
+        _node(78, 408, 924, subtest, size=48, align="center", weight="bold"),
+        _node(132, 542, 816, subtopic, size=30, color="muted", align="center"),
+        _node(148, 1008, 500, [account], size=20, color="muted"),
+    ])
+    return _latex_document(body)
+
+
+def _needs_cartesian_visual(question):
+    mapel = slugify(question.get("mapel"))
+    if mapel not in {"pengetahuan-kuantitatif", "penalaran-matematika"}:
+        return False
+    text = " ".join([
+        str(question.get("soal", "")),
+        str(question.get("deskripsi_visual", "")),
+        str(question.get("topik", "")),
+    ]).lower()
+    keywords = [
+        "kartesius",
+        "koordinat",
+        "bidang x",
+        "bidang x, y",
+        "grafik",
+        "garis",
+        "parabola",
+        "kurva",
+        "pertidaksamaan",
+        "sumbu x",
+        "sumbu y",
+    ]
+    return bool(question.get("butuh_visual")) or any(keyword in text for keyword in keywords)
+
+
+def _parse_linear_equations(question):
+    text = " ".join([str(question.get("soal", "")), str(question.get("deskripsi_visual", ""))])
+    equations = []
+    for match in re.finditer(r"y\s*([=<>≤≥]+)\s*([+-]?\s*\d*(?:/\d+)?(?:\.\d+)?)\s*x(?![²^])\s*([+-]\s*\d+(?:\.\d+)?)?", text, re.I):
+        relation = match.group(1)
+        slope_text = (match.group(2) or "1").replace(" ", "")
+        intercept_text = (match.group(3) or "0").replace(" ", "")
+        if slope_text in {"", "+"}:
+            slope = 1.0
+        elif slope_text == "-":
+            slope = -1.0
+        elif "/" in slope_text:
+            left, right = slope_text.split("/", 1)
+            slope = float(left or 1) / float(right)
+        else:
+            slope = float(slope_text)
+        intercept = float(intercept_text) if intercept_text else 0.0
+        equations.append({"type": "line", "m": slope, "b": intercept, "relation": relation})
+    if not equations and "gradien 1" in text.lower() and "(0,1)" in text:
+        equations.append({"type": "line", "m": 1.0, "b": 1.0, "relation": "="})
+    return equations[:3]
+
+
+def _parse_parabola(question):
+    text = " ".join([str(question.get("soal", "")), str(question.get("deskripsi_visual", ""))])
+    match = re.search(
+        r"y\s*=\s*x(?:²|\^2)\s*([+-]\s*\d+)\s*x\s*([+-]\s*\d+)",
+        text,
+        re.I,
+    )
+    if match:
+        bx = float(match.group(1).replace(" ", ""))
+        c = float(match.group(2).replace(" ", ""))
+        return {"type": "parabola", "a": 1.0, "b": bx, "c": c}
+    match = re.search(
+        r"f\(x\)\s*=\s*([+-]?\d*)x(?:²|\^2)\s*([+-]\s*\d*)?x?\s*([+-]\s*\d+)?",
+        text,
+        re.I,
+    )
+    if match:
+        a_text = (match.group(1) or "1").replace(" ", "")
+        a = -1.0 if a_text == "-" else float(a_text or 1)
+        b_text = (match.group(2) or "0").replace(" ", "")
+        b = 0.0 if b_text in {"", "+", "-"} else float(b_text)
+        c = float((match.group(3) or "0").replace(" ", ""))
+        return {"type": "parabola", "a": a, "b": b, "c": c}
+    return None
+
+
+def _cartesian_visual_code(question, x=570, y=198, w=438, h=352):
+    if not _needs_cartesian_visual(question):
+        return ""
+
+    lines = _parse_linear_equations(question)
+    parabola = _parse_parabola(question)
+    grid_size = max(220, min(w - 58, h - 32))
+    grid_w = grid_size
+    grid_h = grid_size
+    plot_top = y + 10
+    left = x + (w - grid_size) / 2
+    bottom = 1080 - plot_top - grid_size
+    center_x = grid_w / 2
+    center_y = grid_h / 2
+    x_unit = grid_w / 13
+    y_unit = grid_h / 13
+    body = [
+        rf"\begin{{scope}}[shift={{({left},{bottom})}}]",
+        rf"\clip (0,0) rectangle ({grid_w:.1f},{grid_h:.1f});",
+        rf"\draw[grid, line width=0.75pt] (0,0) grid[xstep={x_unit:.1f}, ystep={y_unit:.1f}] ({grid_w:.1f},{grid_h:.1f});",
+        rf"\draw[ink, line width=1.8pt, -{{Stealth[length=7pt]}}] (0,{center_y:.1f}) -- ({grid_w + 6:.1f},{center_y:.1f}) node[below left, text=ink] {{$x$}};",
+        rf"\draw[ink, line width=1.8pt, -{{Stealth[length=7pt]}}] ({center_x:.1f},0) -- ({center_x:.1f},{grid_h + 6:.1f}) node[below left, text=ink] {{$y$}};",
+        rf"\draw[muted, line width=1.2pt] ({center_x:.1f},{center_y - 4:.1f}) -- ({center_x:.1f},{center_y + 4:.1f}) node[below right, text=muted, font={{\fontsize{{13pt}}{{15pt}}\selectfont}}] {{0}};",
+    ]
+
+    def px(value):
+        return min(grid_w, max(0, center_x + value * x_unit))
+
+    def py(value):
+        return min(grid_h, max(0, center_y + value * y_unit))
+
+    def px_raw(value):
+        return center_x + value * x_unit
+
+    def py_raw(value):
+        return center_y + value * y_unit
+
+    for tick in range(-6, 7):
+        if tick == 0:
+            continue
+        tick_x = px(tick)
+        tick_y = py(tick)
+        body.append(rf"\draw[muted, line width=0.9pt] ({tick_x:.1f},{center_y - 4:.1f}) -- ({tick_x:.1f},{center_y + 4:.1f});")
+        body.append(
+            rf"\node[anchor=north, text=muted, font={{\fontsize{{13pt}}{{15pt}}\selectfont}}] "
+            rf"at ({tick_x:.1f},{center_y - 7:.1f}) {{{tick}}};"
+        )
+        body.append(rf"\draw[muted, line width=0.9pt] ({center_x - 4:.1f},{tick_y:.1f}) -- ({center_x + 4:.1f},{tick_y:.1f});")
+        body.append(
+            rf"\node[anchor=east, text=muted, font={{\fontsize{{13pt}}{{15pt}}\selectfont}}] "
+            rf"at ({center_x - 8:.1f},{tick_y - 3:.1f}) {{{tick}}};"
+        )
+
+    palette = [
+        ("graphgreen", "shadegreen"),
+        ("graphblue", "shadeblue"),
+        ("graphyellow", "shadeyellow"),
+        ("graphred", "shadered"),
+    ]
+    for index, line in enumerate(lines):
+        points = []
+        raw_points = []
+        for vx in [-6, 6]:
+            vy = line["m"] * vx + line["b"]
+            points.append((px(vx), py(vy)))
+        for vx in [-20, 20]:
+            vy = line["m"] * vx + line["b"]
+            raw_points.append((px_raw(vx), py_raw(vy)))
+        style = "dashed" if line["relation"] != "=" else "solid"
+        color, shade_color = palette[index % len(palette)]
+        if line["relation"] != "=":
+            relation = str(line["relation"])
+            shade_top = "<" not in relation and "\u2264" not in relation and "\u00e2\u2030\u00a4" not in relation
+            far_x1 = -grid_w
+            far_x2 = grid_w * 2
+            far_top = grid_h * 2
+            far_bottom = -grid_h
+            if shade_top:
+                polygon = (
+                    f"({raw_points[0][0]:.1f},{raw_points[0][1]:.1f}) -- "
+                    f"({raw_points[1][0]:.1f},{raw_points[1][1]:.1f}) -- "
+                    f"({far_x2:.1f},{far_top:.1f}) -- ({far_x1:.1f},{far_top:.1f}) -- cycle"
+                )
+            else:
+                polygon = (
+                    f"({raw_points[0][0]:.1f},{raw_points[0][1]:.1f}) -- "
+                    f"({raw_points[1][0]:.1f},{raw_points[1][1]:.1f}) -- "
+                    f"({far_x2:.1f},{far_bottom:.1f}) -- ({far_x1:.1f},{far_bottom:.1f}) -- cycle"
+                )
+            body.append(rf"\fill[{shade_color}, opacity=0.52, blend mode=multiply] {polygon};")
+        body.append(
+            rf"\draw[{color}, {style}, line width=3pt] "
+            rf"({raw_points[0][0]:.1f},{raw_points[0][1]:.1f}) -- ({raw_points[1][0]:.1f},{raw_points[1][1]:.1f});"
+        )
+        body.append(rf"\fill[{color}] ({px(0):.1f},{py(line['b']):.1f}) circle (3.5pt);")
+
+    if parabola:
+        a = parabola["a"]
+        b = parabola["b"]
+        c = parabola["c"]
+        coords = []
+        for step in range(-6, 7):
+            vx = step
+            vy = a * vx * vx + b * vx + c
+            coords.append(f"({px(vx):.1f},{py(vy):.1f})")
+        if len(coords) >= 3:
+            vertex_x = -b / (2 * a) if a else 0
+            vertex_y = a * vertex_x * vertex_x + b * vertex_x + c
+            body.append(rf"\draw[graphred, line width=3pt, smooth] plot coordinates {{{' '.join(coords)}}};")
+            body.append(rf"\fill[graphyellow] ({px(vertex_x):.1f},{py(vertex_y):.1f}) circle (4.5pt);")
+
+    if not lines and not parabola:
+        body.append(rf"\draw[graphgreen, line width=3pt] ({grid_w * 0.12:.1f},{grid_h * 0.25:.1f}) -- ({grid_w * 0.9:.1f},{grid_h * 0.78:.1f});")
+        body.append(rf"\draw[graphblue, dashed, line width=3pt] ({grid_w * 0.12:.1f},{grid_h * 0.78:.1f}) -- ({grid_w * 0.9:.1f},{grid_h * 0.32:.1f});")
+
+    body.append(r"\end{scope}")
+    return "\n".join(body)
+
+
+def _latex_quiz_sources(question):
+    question_text = _compact_math_for_line_wrap(_format_question_text(question.get("soal", "")))
+    q_lines = _wrap_plain_lines(question_text, 76)
+    choices = question.get("pilihan") or {}
+    choice_lines = {
+        key: _wrap_plain_lines(choices.get(key, ""), 52, 3)
+        for key in ["A", "B", "C", "D", "E"]
+    }
+    pages = []
+    has_visual = _needs_cartesian_visual(question)
+    if has_visual:
+        marker = re.search(
+            r"\b(?:perhatikan|berdasarkan|dari)\s+(?:grafik|gambar|diagram)[^.?!]*(?:[.?!]|$)",
+            question_text,
+            re.I,
+        )
+        overflow_lines = []
+        if marker:
+            before_lines = _wrap_plain_lines(question_text[:marker.start()].strip(), 76)
+            after_lines = _wrap_plain_lines(question_text[marker.end():].strip(), 76)
+            top_lines = before_lines[:3] or q_lines[:2]
+            bottom_lines = after_lines[:5] or q_lines[2:7]
+            overflow_lines = before_lines[3:] + after_lines[5:]
+        else:
+            split_at = max(1, min(3, len(q_lines) - 1)) if len(q_lines) > 1 else len(q_lines)
+            top_lines = q_lines[:split_at]
+            bottom_lines = q_lines[split_at:split_at + 5]
+            overflow_lines = q_lines[split_at + 5:]
+        pages.append({
+            "question": [],
+            "question_top": top_lines,
+            "question_bottom": bottom_lines,
+            "choices": [],
+            "visual_inline": True,
+        })
+        for chunk in _chunk_lines(overflow_lines, 13):
+            if chunk and chunk != [""]:
+                pages.append({"question": chunk, "choices": [], "visual": False})
+        pages.append({"question": [], "choices": list(choice_lines.items()), "visual": False})
+    elif len(q_lines) <= 8:
+        pages.append({"question": q_lines, "choices": list(choice_lines.items()), "visual": False})
+    else:
+        for chunk in _chunk_lines(q_lines, 13):
+            pages.append({"question": chunk, "choices": [], "visual": False})
+        pages.append({"question": [], "choices": list(choice_lines.items()), "visual": False})
+
+    sources = []
+    for page_number, page in enumerate(pages, start=1):
+        body_parts = [
+            _node(72, 78, 760, [str(question.get("mapel", "Kuis")).upper()[:42]], size=25, color="muted"),
+            _node(72, 118, 760, [str(question.get("topik") or question.get("mapel", "Pengetahuan Umum"))[:54]], size=36, weight="bold"),
+        ]
+        if page.get("visual_inline"):
+            top_lines = page.get("question_top") or []
+            bottom_lines = page.get("question_bottom") or []
+            body_parts.append(_rect(72, 190, 1008, 914))
+            if top_lines:
+                body_parts.append(_node(112, 228, 860, top_lines, size=25))
+            visual_y = 328 if len(top_lines) <= 2 else 356
+            body_parts.append(_cartesian_visual_code(question, x=150, y=visual_y, w=780, h=500))
+            bottom_y = visual_y + 540
+            if bottom_lines:
+                body_parts.append(_node(112, bottom_y, 860, bottom_lines, size=25))
+            choice_top = 930
+        elif page["question"]:
+            q_height = max(190, 58 + len(page["question"]) * 42)
+            if page.get("visual"):
+                q_height = max(260, q_height)
+                body_parts.append(_rect(72, 190, 548, 190 + q_height))
+                body_parts.append(_node(112, 230, 396, page["question"], size=27))
+                visual = _cartesian_visual_code(question)
+                if visual:
+                    body_parts.append(visual)
+            else:
+                body_parts.append(_rect(72, 190, 1008, 190 + q_height))
+                body_parts.append(_node(126, 230, 828, page["question"], size=29))
+            choice_top = 220 + q_height
+        else:
+            choice_top = 210
+        y = choice_top + 16
+        for key, lines in page["choices"]:
+            height = max(82, 34 + len(lines) * 36)
+            body_parts.append(_rect(72, y, 1008, y + height, fill="bg"))
+            body_parts.append(_rect(104, y + 20, 164, y + 74, fill="bg", radius=4))
+            body_parts.append(_node(124, y + 31, 34, [key], size=30, color="accent", weight="bold"))
+            body_parts.append(_node(190, y + 24, 748, lines, size=29))
+            y += height + 14
+        account = str(question.get("akun", "@utbk_neareducation") or "@utbk_neareducation")
+        body_parts.append(_node(72, 1010, 450, [account], size=22, color="muted"))
+        if len(pages) > 1:
+            body_parts.append(_node(930, 1010, 80, [f"{page_number}/{len(pages)}"], size=22, color="muted", align="right"))
+        sources.append(_latex_document("\n".join(body_parts)))
+    return sources
+
+
+def _latex_explanation_sources(question):
+    explanation = str(question.get("pembahasan") or "").strip()
+    if not explanation:
+        return []
+    has_visual = _needs_cartesian_visual(question)
+    lines = _wrap_plain_lines(_format_explanation_text(explanation), 44 if has_visual else 74)
+    chunks = _chunk_lines(lines, 12 if has_visual else 13)
+    answer_key = str(question.get("jawaban") or "").strip().upper()
+    answer_text = (question.get("pilihan") or {}).get(answer_key, "")
+    sources = []
+    for page_number, chunk in enumerate(chunks, start=1):
+        body_parts = [
+            _node(72, 78, 760, [str(question.get("mapel", "Kuis")).upper()[:42]], size=25, color="muted"),
+            _node(72, 118, 760, ["Pembahasan"], size=36, weight="bold"),
+        ]
+        panel_top = 210
+        if page_number == 1:
+            body_parts.append(_rect(72, panel_top, 1008, panel_top + 104, fill="answerpanel"))
+            body_parts.append(_rect(104, panel_top + 25, 164, panel_top + 79, fill="bg", radius=4))
+            body_parts.append(_node(124, panel_top + 36, 34, [answer_key], size=29, color="accent", weight="bold"))
+            answer = f"{answer_key}. {answer_text}" if answer_text else answer_key or "Jawaban"
+            body_parts.append(_node(190, panel_top + 34, 748, _wrap_plain_lines(answer, 58, 2), size=28))
+            panel_top = 342
+        panel_bottom = min(914, panel_top + 84 + len(chunk) * 38)
+        if has_visual and page_number == 1:
+            body_parts.append(_rect(72, panel_top, 532, 914))
+            body_parts.append(_node(116, panel_top + 40, 344, chunk, size=24))
+            body_parts.append(_cartesian_visual_code(question, x=560, y=342, w=448, h=572))
+        else:
+            body_parts.append(_rect(72, panel_top, 1008, panel_bottom))
+            body_parts.append(_node(126, panel_top + 42, 828 if not has_visual else 760, chunk, size=27))
+        account = str(question.get("akun", "@utbk_neareducation") or "@utbk_neareducation")
+        body_parts.append(_node(72, 1010, 450, [account], size=22, color="muted"))
+        if len(chunks) > 1:
+            body_parts.append(_node(930, 1010, 80, [f"{page_number}/{len(chunks)}"], size=22, color="muted", align="right"))
+        sources.append(_latex_document("\n".join(body_parts)))
+    return sources
+
+
+def _require_executable(command, label):
+    executable = shutil.which(command)
+    if not executable:
+        raise RuntimeError(
+            f"{label} tidak ditemukan. Install LaTeX toolchain atau set LATSOAL_RENDER_ENGINE=pil. "
+            f"Command yang dicari: {command}"
+        )
+    return executable
+
+
+def _run_render_command(args, cwd):
+    completed = subprocess.run(
+        args,
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        errors="replace",
+        timeout=RENDER_TIMEOUT_SECONDS,
+        check=False,
+    )
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout or "").strip()
+        raise RuntimeError(detail[-1200:] or f"Command render gagal: {' '.join(args)}")
+
+
+def _convert_pdf_to_jpg(pdf_path, jpg_path):
+    converter = PDF_CONVERTER
+    if converter:
+        converter_path = _require_executable(converter, "PDF converter")
+    else:
+        converter_path = shutil.which("magick") or shutil.which("pdftoppm")
+    if not converter_path:
+        raise RuntimeError(
+            "PDF converter tidak ditemukan. Install ImageMagick (`magick`) atau Poppler (`pdftoppm`)."
+        )
+
+    converter_name = Path(converter_path).name.lower()
+    if converter_name.startswith("magick"):
+        _run_render_command([
+            converter_path,
+            "-density",
+            "180",
+            str(pdf_path),
+            "-background",
+            "white",
+            "-alpha",
+            "remove",
+            "-quality",
+            "95",
+            str(jpg_path),
+        ], pdf_path.parent)
+        return jpg_path
+
+    output_stem = jpg_path.with_suffix("")
+    _run_render_command([
+        converter_path,
+        "-jpeg",
+        "-r",
+        "180",
+        "-singlefile",
+        str(pdf_path),
+        str(output_stem),
+    ], pdf_path.parent)
+    generated = output_stem.with_suffix(".jpg")
+    if generated != jpg_path and generated.exists():
+        generated.replace(jpg_path)
+    return jpg_path
+
+
+def _render_latex_source(source, run_dir, stem):
+    latex_path = run_dir / f"{stem}.tex"
+    pdf_path = run_dir / f"{stem}.pdf"
+    jpg_path = run_dir / f"{stem}.jpg"
+    latex_path.write_text(source, encoding="utf-8")
+    latex = _require_executable(LATEX_COMMAND, "LaTeX compiler")
+    _run_render_command([
+        latex,
+        "-interaction=nonstopmode",
+        "-halt-on-error",
+        f"-output-directory={run_dir}",
+        str(latex_path),
+    ], run_dir)
+    if not pdf_path.exists():
+        raise RuntimeError(f"LaTeX tidak menghasilkan PDF: {pdf_path.name}")
+    return _convert_pdf_to_jpg(pdf_path, jpg_path)
+
+
+def render_latex_content_images(question, run_dir):
+    run_dir.mkdir(parents=True, exist_ok=True)
+    rendered = [_render_latex_source(_latex_thumbnail_source(question), run_dir, "thumbnail")]
+    for index, source in enumerate(_latex_quiz_sources(question), start=1):
+        rendered.append(_render_latex_source(source, run_dir, f"post-{index}"))
+    for index, source in enumerate(_latex_explanation_sources(question), start=1):
+        rendered.append(_render_latex_source(source, run_dir, f"pembahasan-{index}"))
+    return rendered
+
+
+def render_pil_content_images(question, run_dir):
+    numbered_pages = _count_quiz_image_pages(question) + _count_explanation_image_pages(question)
+    thumbnail_path = render_thumbnail_image(question, run_dir)
+    thumbnail_paths = [thumbnail_path] if thumbnail_path else []
+    image_paths = render_quiz_images(
+        question,
+        run_dir,
+        page_offset=0,
+        total_pages=numbered_pages,
+    )
+    explanation_paths = render_explanation_images(
+        question,
+        run_dir,
+        page_offset=len(image_paths),
+        total_pages=numbered_pages,
+    )
+    return thumbnail_paths + image_paths + explanation_paths
+
+
+def render_content_images(question, run_dir):
+    engine = RENDER_ENGINE or "latex"
+    if engine not in {"latex", "pil", "auto"}:
+        raise ValueError("LATSOAL_RENDER_ENGINE harus salah satu dari: latex, pil, auto.")
+    if engine in {"latex", "auto"}:
+        try:
+            return render_latex_content_images(question, run_dir), "latex"
+        except Exception:
+            if engine == "latex":
+                raise
+    return render_pil_content_images(question, run_dir), "pil"
 
 
 STOPWORDS = {
@@ -987,7 +1813,11 @@ def check_duplicate(question):
         run_id = item.get("run_id")
         if not run_id:
             continue
-        metadata_path = SAVED_DIR / run_id / "metadata.json"
+        item_path = item.get("path") or f"saved/{run_id}"
+        relative_path = str(item_path).replace("\\", "/")
+        if relative_path.startswith("saved/"):
+            relative_path = relative_path[len("saved/"):]
+        metadata_path = SAVED_DIR / relative_path / "metadata.json"
         if not metadata_path.exists():
             continue
         try:
@@ -1015,8 +1845,9 @@ def check_duplicate(question):
     return best
 
 
-def _gemini_json(prompt, label, retries=MAX_GEMINI_RETRIES, schema=None):
+def _ai_json(prompt, label, retries=MAX_GEMINI_RETRIES, schema=None, provider="gemini"):
     last_error = None
+    provider_label = provider.capitalize()
     strict_prompt = (
         f"{prompt}\n\n"
         "PENTING: Balas hanya dengan satu objek JSON valid. "
@@ -1025,7 +1856,7 @@ def _gemini_json(prompt, label, retries=MAX_GEMINI_RETRIES, schema=None):
     )
     for attempt in range(1, retries + 1):
         try:
-            return _extract_json(_gemini_generate(strict_prompt, schema=schema))
+            return _extract_json(_ai_generate(strict_prompt, schema=schema, provider=provider))
         except Exception as exc:
             clean_error = clean_error_message(exc)
             if clean_error != str(exc):
@@ -1037,7 +1868,17 @@ def _gemini_json(prompt, label, retries=MAX_GEMINI_RETRIES, schema=None):
                 "Kirim ulang hanya satu objek JSON valid RFC 8259. "
                 "Jangan ada teks pembuka, markdown, trailing comma, atau newline mentah di dalam string."
             )
-    raise ValueError(f"Gagal parse JSON Gemini untuk {label} setelah {retries} percobaan: {clean_error_message(last_error)}")
+    raise ValueError(f"Gagal parse JSON {provider_label} untuk {label} setelah {retries} percobaan: {clean_error_message(last_error)}")
+
+
+def _gemini_json(prompt, label, retries=MAX_GEMINI_RETRIES, schema=None):
+    return _ai_json(prompt, label, retries=retries, schema=schema, provider="gemini")
+
+
+def _ai_generate(prompt, schema=None, provider="gemini"):
+    if provider == "kimi":
+        return _kimi_generate(prompt)
+    return _gemini_generate(prompt, schema=schema)
 
 
 def _gemini_generate(prompt, schema=None):
@@ -1078,6 +1919,7 @@ def _gemini_generate(prompt, schema=None):
     usage = raw.get("usageMetadata")
     if usage:
         GEMINI_USAGE.append({
+            "provider": "gemini",
             "model": DEFAULT_MODEL,
             "prompt_tokens": usage.get("promptTokenCount"),
             "output_tokens": usage.get("candidatesTokenCount"),
@@ -1095,6 +1937,60 @@ def _gemini_generate(prompt, schema=None):
         return text
     except (KeyError, IndexError) as exc:
         raise RuntimeError("Format response Gemini tidak dikenali.") from exc
+
+
+def _kimi_generate(prompt):
+    api_key = os.getenv("KIMI_API_KEY") or os.getenv("NVIDIA_API_KEY")
+    if not api_key:
+        raise RuntimeError("KIMI_API_KEY atau NVIDIA_API_KEY belum tersedia.")
+
+    payload = {
+        "model": KIMI_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": KIMI_MAX_OUTPUT_TOKENS,
+        "temperature": 1.0,
+        "top_p": 1.0,
+        "stream": False,
+    }
+    body = json.dumps(payload).encode("utf-8")
+    request = urllib.request.Request(
+        KIMI_API_URL,
+        data=body,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            raw = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        message = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Kimi API gagal: {exc.code} {message}") from exc
+
+    usage = raw.get("usage") or {}
+    if usage:
+        GEMINI_USAGE.append({
+            "provider": "kimi",
+            "model": KIMI_MODEL,
+            "prompt_tokens": usage.get("prompt_tokens"),
+            "output_tokens": usage.get("completion_tokens"),
+            "total_tokens": usage.get("total_tokens"),
+        })
+
+    try:
+        choice = raw["choices"][0]
+        finish_reason = choice.get("finish_reason")
+        text = choice["message"]["content"]
+        if finish_reason == "length":
+            raise RuntimeError(
+                f"Output Kimi terpotong karena max_tokens={KIMI_MAX_OUTPUT_TOKENS}."
+            )
+        return text
+    except (KeyError, IndexError, TypeError) as exc:
+        raise RuntimeError("Format response Kimi tidak dikenali.") from exc
 
 
 def load_patterns(mapel, topic, limit=2):
@@ -1127,6 +2023,7 @@ Gunakan bahasa Indonesia baku. Setiap soal punya tepat 5 pilihan A sampai E,
 hanya 1 jawaban benar, dan pembahasan jelas untuk pelajar SMA.
 Jika memakai pola referensi, gunakan hanya struktur konsepnya. Jangan menyalin kalimat,
 angka, konteks, atau pilihan dari contoh/pola referensi.
+Jangan menambahkan hint/petunjuk dalam tanda kurung pada teks soal.
 Output harus JSON valid tanpa markdown.
 """.strip()
 
@@ -1592,24 +2489,87 @@ def normalize_caption(question, caption):
     return normalized
 
 
-def generate_content(mapel, topic, level, mode="auto", account="@namaakun"):
+PAREN_HINT_WORD_RE = re.compile(
+    r"\b(?:hint|petunjuk|gunakan|pakai|perhatikan|lihat|cek|misal|misalnya|contoh|"
+    r"gambar|diagram|bantu|sketsa|asumsikan|ingat|anggap)\b",
+    re.I,
+)
+PAREN_MATH_RE = re.compile(r"[=<>+\-*/^≤≥≠√∠π²³]|\b-?\d+(?:[.,]\d+)?\s*,\s*-?\d+(?:[.,]\d+)?\b")
+
+
+def _is_removable_question_parenthetical(body, context):
+    body = str(body or "").strip()
+    if not body:
+        return True
+    if PAREN_HINT_WORD_RE.search(body):
+        return True
+    if PAREN_MATH_RE.search(body):
+        return False
+    if re.fullmatch(r"[A-Ea-e]", body):
+        return False
+
+    context_lower = str(context or "").lower()
+    math_context = any(
+        keyword in context_lower
+        for keyword in (
+            "persamaan linear",
+            "pertidaksamaan linear",
+            "aljabar",
+            "fungsi linear",
+            "sistem persamaan",
+        )
+    )
+    if math_context and re.search(r"[A-Za-zÀ-ÖØ-öø-ÿ]", body):
+        return True
+    return False
+
+
+def _remove_question_hint_parentheses(text, context=""):
+    def replace(match):
+        body = match.group(1)
+        if _is_removable_question_parenthetical(body, context):
+            return ""
+        return match.group(0)
+
+    cleaned = re.sub(r"\s*\(([^()]*)\)", replace, str(text or ""))
+    cleaned = re.sub(r"\s{2,}", " ", cleaned)
+    cleaned = re.sub(r"\s+([,.!?;:])", r"\1", cleaned)
+    return cleaned.strip()
+
+
+def normalize_question(question):
+    normalized = dict(question or {})
+    context = " ".join(
+        str(normalized.get(key, ""))
+        for key in ("mapel", "topik", "level", "soal")
+    )
+    normalized["soal"] = _remove_question_hint_parentheses(normalized.get("soal", ""), context)
+    return normalized
+
+
+def generate_content(mapel, topic, level, mode="auto", account="@utbk_neareducation", provider="gemini"):
     GEMINI_USAGE.clear()
     run_id = _now_id()
-    run_dir = OUTPUT_DIR / run_id
-    run_dir.mkdir(parents=True, exist_ok=True)
+    storage_path = None
+    run_dir = None
 
-    use_gemini = mode != "draft" and bool(os.getenv("GEMINI_API_KEY"))
+    provider = provider if provider in {"gemini", "kimi"} else "gemini"
+    provider_key = "GEMINI_API_KEY" if provider == "gemini" else "KIMI_API_KEY"
+    fallback_provider_key = "NVIDIA_API_KEY" if provider == "kimi" else None
+    has_provider_key = bool(os.getenv(provider_key) or (fallback_provider_key and os.getenv(fallback_provider_key)))
+    use_ai = mode != "draft" and has_provider_key
     source = "draft"
     fallbacks = []
     errors = {}
 
-    if use_gemini:
-        source = "gemini"
+    if use_ai:
+        source = provider
         try:
-            question = _gemini_json(
+            question = _ai_json(
                 build_question_prompt(mapel, topic, level),
                 "soal",
                 schema=QUESTION_SCHEMA,
+                provider=provider,
             )
         except Exception as exc:
             source = "fallback"
@@ -1622,17 +2582,18 @@ def generate_content(mapel, topic, level, mode="auto", account="@namaakun"):
 
         if GEMINI_VALIDATE and "question" not in fallbacks:
             try:
-                validation = _gemini_json(
+                validation = _ai_json(
                     build_validation_prompt(question),
                     "validasi",
                     retries=2,
                     schema=VALIDATION_SCHEMA,
+                    provider=provider,
                 )
             except Exception as exc:
                 validation = local_validation(question)
                 validation["saran_perbaikan"] = (
                     validation.get("saran_perbaikan", "")
-                    + f" Fallback lokal dipakai karena validasi Gemini gagal diparse: {exc}"
+                    + f" Fallback lokal dipakai karena validasi {provider.capitalize()} gagal diparse: {exc}"
                 ).strip()
                 fallbacks.append("validation")
                 errors["validation"] = clean_error_message(exc)
@@ -1642,11 +2603,12 @@ def generate_content(mapel, topic, level, mode="auto", account="@namaakun"):
 
         if GEMINI_CAPTION and "question" not in fallbacks:
             try:
-                caption = _gemini_json(
+                caption = _ai_json(
                     build_caption_prompt(question),
                     "caption",
                     retries=2,
                     schema=CAPTION_SCHEMA,
+                    provider=provider,
                 )
             except Exception as exc:
                 caption = draft_caption(question)
@@ -1663,28 +2625,24 @@ def generate_content(mapel, topic, level, mode="auto", account="@namaakun"):
         caption = draft_caption(question)
         validation = local_validation(question, caption)
 
+    question = normalize_question(question)
     caption = normalize_caption(question, caption)
     if not GEMINI_VALIDATE or source in {"draft", "fallback"}:
         validation = local_validation(question, caption)
     question["akun"] = account
-    numbered_pages = _count_quiz_image_pages(question) + _count_explanation_image_pages(question)
-    thumbnail_path = render_thumbnail_image(question, run_dir)
-    thumbnail_paths = [thumbnail_path] if thumbnail_path else []
-    image_paths = render_quiz_images(
-        question,
-        run_dir,
-        page_offset=0,
-        total_pages=numbered_pages,
-    )
-    explanation_paths = render_explanation_images(
-        question,
-        run_dir,
-        page_offset=len(image_paths),
-        total_pages=numbered_pages,
-    )
-    all_image_paths = thumbnail_paths + image_paths + explanation_paths
+    storage_path = build_storage_path(question, run_id)
+    run_dir = OUTPUT_DIR / storage_path
+    run_dir.mkdir(parents=True, exist_ok=True)
+    all_image_paths, render_engine = render_content_images(question, run_dir)
     numbered_image_paths = render_numbered_jpg_images(all_image_paths, run_dir)
-    explanation_start = len(thumbnail_paths) + len(image_paths)
+    explanation_start = next(
+        (
+            index
+            for index, path in enumerate(all_image_paths)
+            if Path(path).name.startswith("pembahasan-")
+        ),
+        len(all_image_paths),
+    )
     numbered_explanation_paths = numbered_image_paths[explanation_start:]
     dedup = check_duplicate(question)
     review_status = "needs_review" if "question" in fallbacks else "ready"
@@ -1726,7 +2684,10 @@ def generate_content(mapel, topic, level, mode="auto", account="@namaakun"):
             "total_output_tokens": sum(item.get("output_tokens") or 0 for item in GEMINI_USAGE),
             "total_tokens": sum(item.get("total_tokens") or 0 for item in GEMINI_USAGE),
         },
-        "model": DEFAULT_MODEL if source == "gemini" else None,
+        "provider": provider if source in {"gemini", "kimi"} else None,
+        "model": DEFAULT_MODEL if source == "gemini" else KIMI_MODEL if source == "kimi" else None,
+        "render_engine": render_engine,
+        "storage_path": storage_path.as_posix(),
         "created_at": dt.datetime.now().isoformat(timespec="seconds"),
         "question": question,
         "validation": validation,
@@ -1763,24 +2724,16 @@ def render_images_for_metadata(metadata_path):
     question = metadata.get("question") or {}
     if not question:
         raise ValueError("Metadata tidak memiliki question.")
-    numbered_pages = _count_quiz_image_pages(question) + _count_explanation_image_pages(question)
-    thumbnail_path = render_thumbnail_image(question, run_dir)
-    thumbnail_paths = [thumbnail_path] if thumbnail_path else []
-    image_paths = render_quiz_images(
-        question,
-        run_dir,
-        page_offset=0,
-        total_pages=numbered_pages,
-    )
-    explanation_paths = render_explanation_images(
-        question,
-        run_dir,
-        page_offset=len(image_paths),
-        total_pages=numbered_pages,
-    )
-    all_image_paths = thumbnail_paths + image_paths + explanation_paths
+    all_image_paths, render_engine = render_content_images(question, run_dir)
     numbered_image_paths = render_numbered_jpg_images(all_image_paths, run_dir)
-    explanation_start = len(thumbnail_paths) + len(image_paths)
+    explanation_start = next(
+        (
+            index
+            for index, path in enumerate(all_image_paths)
+            if Path(path).name.startswith("pembahasan-")
+        ),
+        len(all_image_paths),
+    )
     numbered_explanation_paths = numbered_image_paths[explanation_start:]
     metadata.setdefault("files", {})
     metadata["files"]["image"] = str(numbered_image_paths[0]) if numbered_image_paths else None
@@ -1788,6 +2741,7 @@ def render_images_for_metadata(metadata_path):
     metadata["files"]["thumbnail"] = str(numbered_image_paths[0]) if numbered_image_paths else None
     metadata["files"]["explanation"] = str(numbered_explanation_paths[0]) if numbered_explanation_paths else None
     metadata["files"]["explanations"] = [str(path) for path in numbered_explanation_paths]
+    metadata["render_engine"] = render_engine
     metadata["image_generated_at"] = dt.datetime.now().isoformat(timespec="seconds")
     metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
     return {
@@ -1807,7 +2761,8 @@ def main():
     parser.add_argument("--topik", default="")
     parser.add_argument("--level", default="sedang", choices=["mudah", "sedang", "sulit"])
     parser.add_argument("--mode", default="auto", choices=["auto", "gemini", "draft"])
-    parser.add_argument("--account", default="@namaakun")
+    parser.add_argument("--provider", default=os.getenv("AI_PROVIDER", "gemini"), choices=["gemini", "kimi"])
+    parser.add_argument("--account", default="@utbk_neareducation")
     parser.add_argument("--render-images", default="")
     try:
         args = parser.parse_args()
@@ -1816,7 +2771,7 @@ def main():
             return
         topic = args.topik or MAPEL_TOPICS[args.mapel][0]
         mode = "auto" if args.mode == "gemini" else args.mode
-        metadata = generate_content(args.mapel, topic, args.level, mode, args.account)
+        metadata = generate_content(args.mapel, topic, args.level, mode, args.account, args.provider)
         json_stdout(metadata)
     except SystemExit:
         raise

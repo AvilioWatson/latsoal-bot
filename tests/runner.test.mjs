@@ -9,6 +9,7 @@ function validPayload() {
   return {
     ok: true,
     run_id: "20990101-010101",
+    storage_path: "PU/penalaran-deduktif/20990101-010101",
     source: "draft",
     question: {
       mapel: "Penalaran Umum",
@@ -67,6 +68,8 @@ test("buildGeneratorArgs preserves generator CLI contract", () => {
     "sulit",
     "--mode",
     "draft",
+    "--provider",
+    "gemini",
     "--account",
     "@latsoal",
   ]);
@@ -77,9 +80,9 @@ test("runGenerator resolves valid JSON payload and adds web files", async () => 
     const result = await runGenerator({}, {python: "node", generatorScript: script, timeoutMs: 2000});
     assert.equal(result.run_id, "20990101-010101");
     assert.deepEqual(result.web_files, {
-      question: "/outputs/20990101-010101/soal.json",
-      caption: "/outputs/20990101-010101/caption.txt",
-      metadata: "/outputs/20990101-010101/metadata.json",
+      question: "/outputs/PU/penalaran-deduktif/20990101-010101/soal.json",
+      caption: "/outputs/PU/penalaran-deduktif/20990101-010101/caption.txt",
+      metadata: "/outputs/PU/penalaran-deduktif/20990101-010101/metadata.json",
     });
   });
 });
