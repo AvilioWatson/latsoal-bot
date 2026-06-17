@@ -3,7 +3,7 @@
   "kelompok_tes": "TPS",
   "patterns": [
     {
-      "topik": "Kalimat efektif",
+      "topik": "Kalimat Efektif",
       "tipe": "perbaikan kalimat tidak efektif",
       "level": "mudah",
       "pola_soal": "Diberikan satu kalimat dengan pemborosan kata atau struktur tidak sejajar, peserta memilih perbaikan paling efektif.",
@@ -11,7 +11,7 @@
       "batasan": ["jangan mengubah makna utama", "opsi benar harus paling ringkas dan baku"]
     },
     {
-      "topik": "Ejaan",
+      "topik": "Kapitalisasi dan Huruf Miring",
       "tipe": "perbaikan ejaan dan tanda baca",
       "level": "mudah",
       "pola_soal": "Diberikan kalimat dengan kesalahan ejaan, huruf kapital, atau tanda baca, peserta memilih versi yang benar.",
@@ -19,8 +19,8 @@
       "batasan": ["gunakan kasus umum", "jangan terlalu banyak kesalahan dalam satu soal"]
     },
     {
-      "topik": "Paragraf padu",
-      "tipe": "urutan kalimat",
+      "topik": "Sintaksis",
+      "tipe": "urutan dan hubungan kalimat",
       "level": "sedang",
       "pola_soal": "Diberikan beberapa kalimat acak, peserta menentukan urutan yang membentuk paragraf padu.",
       "konsep_kunci": ["gagasan utama", "kata rujukan", "alur informasi"],

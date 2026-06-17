@@ -3,7 +3,7 @@
   "kelompok_tes": "Literasi",
   "patterns": [
     {
-      "topik": "Data dan ketidakpastian",
+      "topik": "Data dan Ketidakpastian",
       "tipe": "interpretasi tabel sederhana",
       "level": "mudah",
       "pola_soal": "Diberikan tabel data sederhana dalam teks, peserta menafsirkan tren, selisih, rata-rata, atau perbandingan.",
@@ -11,7 +11,7 @@
       "batasan": ["data harus konsisten", "hindari tabel terlalu besar untuk Instagram"]
     },
     {
-      "topik": "Pemodelan matematika",
+      "topik": "Aljabar dan Fungsi",
       "tipe": "menerjemahkan situasi ke persamaan",
       "level": "sedang",
       "pola_soal": "Diberikan situasi realistis, peserta menentukan model matematika atau nilai berdasarkan model tersebut.",
@@ -19,7 +19,7 @@
       "batasan": ["konteks dekat dengan kehidupan siswa", "angka realistis"]
     },
     {
-      "topik": "Geometri",
+      "topik": "Geometri dan Pengukuran",
       "tipe": "penalaran luas atau keliling",
       "level": "sedang",
       "pola_soal": "Diberikan deskripsi bangun datar atau gabungan bangun, peserta menentukan luas, keliling, atau hubungan ukuran.",

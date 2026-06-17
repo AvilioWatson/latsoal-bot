@@ -1228,12 +1228,23 @@ def _compact_math_for_line_wrap(text):
         intercept = (match.group(5) or "").replace(" ", "")
         return f"{variable}{relation}{slope}x{sign}{intercept}"
 
-    return re.sub(
+    compacted = re.sub(
         r"\b([yf])\s*([=<>]=?|≤|≥)\s*([+-]?\s*\d*(?:/\d+)?(?:\.\d+)?)\s*x\s*([+-])?\s*(\d+(?:\.\d+)?)?",
         compact_line,
         str(text or ""),
         flags=re.I,
     )
+    compacted = re.sub(
+        r"(?<=[A-Za-z0-9)\]²³])\s*([+=<>≤≥≠*/])\s*(?=[A-Za-z0-9([])",
+        r"\1",
+        compacted,
+    )
+    compacted = re.sub(
+        r"(?<=[A-Za-z0-9)\]²³])\s+(-)\s*(?=[A-Za-z0-9([])",
+        r"\1",
+        compacted,
+    )
+    return compacted
 
 
 def _latex_lines(lines):
@@ -1313,6 +1324,8 @@ def _needs_cartesian_visual(question):
     mapel = slugify(question.get("mapel"))
     if mapel not in {"pengetahuan-kuantitatif", "penalaran-matematika"}:
         return False
+    if _has_symbolic_cartesian_parameter(question):
+        return False
     text = " ".join([
         str(question.get("soal", "")),
         str(question.get("deskripsi_visual", "")),
@@ -1332,6 +1345,25 @@ def _needs_cartesian_visual(question):
         "sumbu y",
     ]
     return bool(question.get("butuh_visual")) or any(keyword in text for keyword in keywords)
+
+
+def _has_symbolic_cartesian_parameter(question):
+    text = " ".join([str(question.get("soal", "")), str(question.get("deskripsi_visual", ""))])
+    compact = re.sub(r"\s+", "", text.lower())
+    equation_parts = re.findall(
+        r"(?:f\(x\)|y)(?:=|!=|≠|<=|>=|≤|≥|<|>)[^.,;!?]*",
+        compact,
+        flags=re.I,
+    )
+    for part in equation_parts:
+        part = part.replace("f(x)", "")
+        if re.search(r"(?<![a-z])[a-wz]x", part):
+            return True
+        if re.search(r"x[+\-][a-wz](?![a-z])", part):
+            return True
+        if re.search(r"[+\-][a-wz](?![a-z])", part):
+            return True
+    return False
 
 
 def _parse_linear_equations(question):
@@ -1358,6 +1390,8 @@ def _parse_linear_equations(question):
 
 
 def _parse_parabola(question):
+    if _has_symbolic_cartesian_parameter(question):
+        return None
     text = " ".join([str(question.get("soal", "")), str(question.get("deskripsi_visual", ""))])
     match = re.search(
         r"y\s*=\s*x(?:²|\^2)\s*([+-]\s*\d+)\s*x\s*([+-]\s*\d+)",
@@ -1412,13 +1446,13 @@ def _cartesian_visual_code(question, x=570, y=198, w=438, h=352):
         return min(grid_w, max(0, center_x + value * x_unit))
 
     def py(value):
-        return min(grid_h, max(0, center_y + value * y_unit))
+        return min(grid_h, max(0, center_y - value * y_unit))
 
     def px_raw(value):
         return center_x + value * x_unit
 
     def py_raw(value):
-        return center_y + value * y_unit
+        return center_y - value * y_unit
 
     for tick in range(-6, 7):
         if tick == 0:
@@ -1458,8 +1492,8 @@ def _cartesian_visual_code(question, x=570, y=198, w=438, h=352):
             shade_top = "<" not in relation and "\u2264" not in relation and "\u00e2\u2030\u00a4" not in relation
             far_x1 = -grid_w
             far_x2 = grid_w * 2
-            far_top = grid_h * 2
-            far_bottom = -grid_h
+            far_top = -grid_h
+            far_bottom = grid_h * 2
             if shade_top:
                 polygon = (
                     f"({raw_points[0][0]:.1f},{raw_points[0][1]:.1f}) -- "
@@ -1567,7 +1601,7 @@ def _latex_quiz_sources(question):
                 body_parts.append(_node(112, bottom_y, 860, bottom_lines, size=25))
             choice_top = 930
         elif page["question"]:
-            q_height = max(190, 58 + len(page["question"]) * 42)
+            q_height = max(118, 54 + len(page["question"]) * 42)
             if page.get("visual"):
                 q_height = max(260, q_height)
                 body_parts.append(_rect(72, 190, 548, 190 + q_height))
@@ -2265,7 +2299,7 @@ def deterministic_quant_question(mapel, topic, level, seed):
     rng = random.Random(seed)
     kelompok_tes = "TPS" if mapel == "Pengetahuan Kuantitatif" else "Literasi"
 
-    if topic in {"Statistika", "Data dan ketidakpastian"}:
+    if topic in {"Statistika", "Statistika dan Peluang", "Data dan ketidakpastian", "Data dan Ketidakpastian"}:
         n = rng.choice([5, 6, 7])
         known_count = n - 1
         known_values = [rng.randrange(62, 91, 2) for _ in range(known_count)]

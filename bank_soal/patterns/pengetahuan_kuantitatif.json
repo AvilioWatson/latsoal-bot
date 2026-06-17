@@ -3,7 +3,7 @@
   "kelompok_tes": "TPS",
   "patterns": [
     {
-      "topik": "Aritmetika",
+      "topik": "Bilangan",
       "tipe": "operasi bilangan dalam konteks sederhana",
       "level": "mudah",
       "pola_soal": "Diberikan konteks sehari-hari dengan beberapa operasi hitung, peserta menentukan nilai akhir.",
@@ -11,7 +11,7 @@
       "batasan": ["angka realistis", "hasil akhir berupa bilangan sederhana"]
     },
     {
-      "topik": "Perbandingan",
+      "topik": "Aljabar dan Fungsi",
       "tipe": "rasio dan proporsi",
       "level": "sedang",
       "pola_soal": "Diberikan rasio dua atau tiga kuantitas dan satu jumlah terkait, peserta menentukan kuantitas tertentu.",
@@ -19,7 +19,7 @@
       "batasan": ["opsi pengecoh dari salah memilih total atau bagian"]
     },
     {
-      "topik": "Statistika",
+      "topik": "Statistika dan Peluang",
       "tipe": "rata-rata dengan data hilang",
       "level": "mudah",
       "pola_soal": "Diberikan rata-rata sejumlah data dan sebagian nilai diketahui, peserta mencari satu nilai yang belum diketahui.",

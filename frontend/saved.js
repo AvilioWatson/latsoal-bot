@@ -1,10 +1,13 @@
 const sourceStatus = document.querySelector("#sourceStatus");
 const savedList = document.querySelector("#savedList");
+const savedLayout = document.querySelector(".saved-layout");
+const savedPreview = document.querySelector(".saved-preview");
 const savedSearch = document.querySelector("#savedSearch");
 const savedStatusFilter = document.querySelector("#savedStatusFilter");
 const refreshSavedButton = document.querySelector("#refreshSavedButton");
 const exportApprovedButton = document.querySelector("#exportApprovedButton");
 const subtestTabs = document.querySelector("#subtestTabs");
+const closePreviewButton = document.querySelector("#closePreviewButton");
 const copyCaptionButton = document.querySelector("#copyCaptionButton");
 const previewTitle = document.querySelector("#previewTitle");
 const runNote = document.querySelector("#runNote");
@@ -63,6 +66,23 @@ function statusLabel(status) {
   if (status === "approved") return "Approved";
   if (status === "rejected") return "Rejected";
   return "Saved";
+}
+
+function openPreviewPanel(runId) {
+  savedLayout?.classList.add("has-preview");
+  savedPreview?.setAttribute("aria-hidden", "false");
+  savedList.querySelectorAll(".saved-item").forEach((card) => {
+    card.dataset.active = card.dataset.runId === runId ? "true" : "false";
+  });
+}
+
+function closePreviewPanel() {
+  activePreviewRunId = "";
+  savedLayout?.classList.remove("has-preview");
+  savedPreview?.setAttribute("aria-hidden", "true");
+  savedList.querySelectorAll(".saved-item").forEach((card) => {
+    card.dataset.active = "false";
+  });
 }
 
 function setPreviewStatus(status) {
@@ -196,13 +216,21 @@ function renderSavedList(items = filteredSavedItems()) {
     const row = document.createElement("article");
     row.className = "saved-item";
     row.dataset.status = item.status || "saved";
+    row.dataset.runId = item.run_id;
+    row.dataset.active = activePreviewRunId === item.run_id ? "true" : "false";
     row.style.setProperty("--item-index", String(index));
     row.innerHTML = `
-      <div>
-        <strong></strong>
-        <p></p>
+      <div class="saved-card-top">
+        <span data-subtest></span>
+        <span data-status-pill></span>
       </div>
-      <span></span>
+      <h3 data-topic></h3>
+      <p class="saved-question-excerpt"></p>
+      <div class="saved-card-meta">
+        <span data-level></span>
+        <span data-upload-state></span>
+        <span data-run-id></span>
+      </div>
       <div class="saved-actions">
         <button type="button" data-action="approved">Approve</button>
         <button type="button" data-action="rejected">Reject</button>
@@ -214,9 +242,13 @@ function renderSavedList(items = filteredSavedItems()) {
     row.tabIndex = 0;
     row.setAttribute("role", "button");
     row.setAttribute("aria-label", `Preview ${item.mapel || item.run_id}`);
-    row.querySelector("strong").textContent = item.mapel ? `${item.mapel}: ${item.topik}` : item.run_id;
-    row.querySelector("p").textContent = `${item.run_id} / ${item.source || "-"} / ${item.level || "-"}${item.uploaded_at ? " / uploaded" : ""}`;
-    row.querySelector("span").textContent = statusLabel(item.status);
+    row.querySelector("[data-subtest]").textContent = item.mapel || "Tanpa subtes";
+    row.querySelector("[data-status-pill]").textContent = statusLabel(item.status);
+    row.querySelector("[data-topic]").textContent = item.topik || item.run_id;
+    row.querySelector(".saved-question-excerpt").textContent = item.soal_excerpt || "Soal belum memiliki ringkasan.";
+    row.querySelector("[data-level]").textContent = item.level || "-";
+    row.querySelector("[data-upload-state]").textContent = item.uploaded_at ? "Uploaded" : "Belum upload";
+    row.querySelector("[data-run-id]").textContent = item.run_id;
     row.querySelector("[data-action='approved']").disabled = item.status === "approved";
     row.querySelector("[data-action='rejected']").disabled = item.status === "rejected";
     row.querySelector("[data-uploaded='true']").disabled = Boolean(item.uploaded_at);
@@ -264,6 +296,12 @@ async function loadSavedList() {
 async function loadSavedPreview(runId) {
   setStatus("Loading");
   activePreviewRunId = runId;
+  openPreviewPanel(runId);
+  const selectedItem = savedItems.find((item) => item.run_id === runId);
+  previewTitle.textContent = selectedItem?.mapel
+    ? `${selectedItem.mapel}: ${selectedItem.topik}`
+    : "Memuat preview";
+  runNote.textContent = "Memuat detail soal.";
   const previewPanel = document.querySelector(".saved-preview");
   previewPanel?.classList.remove("is-loaded");
   previewPanel?.classList.add("is-loading");
@@ -334,6 +372,7 @@ function clearPreviewIfDeleted(runId) {
   downloadAllLink.href = "#";
   copyCaptionButton.disabled = true;
   debugPanel.hidden = true;
+  closePreviewPanel();
 }
 
 async function updateSavedStatus(runId, status) {
@@ -491,9 +530,16 @@ refreshSavedButton.addEventListener("click", () => {
 
 generateImageButton.addEventListener("click", generateSavedImages);
 deleteImageButton.addEventListener("click", deleteSavedImages);
+closePreviewButton.addEventListener("click", closePreviewPanel);
 
 savedSearch.addEventListener("input", () => renderSavedList());
 savedStatusFilter.addEventListener("change", () => renderSavedList());
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && savedLayout?.classList.contains("has-preview")) {
+    closePreviewPanel();
+  }
+});
 
 exportApprovedButton.addEventListener("click", async () => {
   exportApprovedButton.disabled = true;
@@ -532,6 +578,7 @@ copyCaptionButton.addEventListener("click", async () => {
 
 async function init() {
   await loadConfig();
+  closePreviewPanel();
   await loadSavedList();
 }
 

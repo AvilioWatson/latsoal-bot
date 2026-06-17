@@ -296,7 +296,7 @@ const smoke = run(PYTHON, [
   "--mapel",
   "Penalaran Umum",
   "--topik",
-  "Penalaran deduktif",
+  "Penalaran Deduktif",
   "--level",
   "mudah",
   "--mode",

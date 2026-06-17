@@ -151,6 +151,7 @@ async function listSavedRuns() {
       mapel: metadata?.question?.mapel || null,
       topik: metadata?.question?.topik || null,
       level: metadata?.question?.level || null,
+      soal_excerpt: String(metadata?.question?.soal || "").replace(/\s+/g, " ").trim().slice(0, 180),
       jawaban: metadata?.question?.jawaban || null,
       web_files: buildWebFiles("/saved", artifactPath, metadata?.files),
     });

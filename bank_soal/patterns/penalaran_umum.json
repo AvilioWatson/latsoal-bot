@@ -3,7 +3,7 @@
   "kelompok_tes": "TPS",
   "patterns": [
     {
-      "topik": "Penalaran deduktif",
+      "topik": "Penalaran Deduktif",
       "tipe": "silogisme kategori",
       "level": "mudah",
       "pola_soal": "Diberikan dua atau tiga premis umum tentang kelompok/objek, peserta memilih simpulan yang pasti benar.",
@@ -11,7 +11,7 @@
       "batasan": ["hindari konteks sensitif", "simpulan harus ditentukan dari premis saja", "satu jawaban pasti benar"]
     },
     {
-      "topik": "Penalaran induktif",
+      "topik": "Penalaran Induktif",
       "tipe": "generalisasi dari data singkat",
       "level": "sedang",
       "pola_soal": "Diberikan beberapa pengamatan sederhana, peserta memilih generalisasi yang paling didukung data.",
@@ -19,12 +19,12 @@
       "batasan": ["jangan membuat kesimpulan terlalu luas", "opsi pengecoh harus tampak masuk akal"]
     },
     {
-      "topik": "Analogi",
-      "tipe": "hubungan dua konsep",
+      "topik": "Penalaran Kuantitatif",
+      "tipe": "pola kuantitatif sederhana",
       "level": "mudah",
-      "pola_soal": "Diberikan pasangan konsep dengan relasi tertentu, peserta memilih pasangan lain dengan relasi sepadan.",
-      "konsep_kunci": ["relasi fungsi", "relasi sebab", "relasi bagian-keseluruhan"],
-      "batasan": ["gunakan kosakata umum", "relasi tidak boleh ambigu"]
+      "pola_soal": "Diberikan informasi numerik sederhana, peserta memilih simpulan kuantitatif yang paling tepat.",
+      "konsep_kunci": ["pola angka", "perbandingan sederhana", "simpulan kuantitatif"],
+      "batasan": ["angka harus realistis", "opsi pengecoh berasal dari salah membaca informasi"]
     }
   ]
 }

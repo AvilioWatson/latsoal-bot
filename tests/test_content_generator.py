@@ -235,6 +235,88 @@ class ContentGeneratorTest(unittest.TestCase):
             self.assertIn("{6}", first_page)
             self.assertIn("{-6}", first_page)
 
+    def test_latex_quiz_keeps_algebra_expression_compact(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            generator = load_generator(Path(tmp))
+            question = {
+                "mapel": "Pengetahuan Kuantitatif",
+                "topik": "Aljabar dan Fungsi",
+                "level": "sedang",
+                "soal": "Jika a² + b² = z dan ab = y, manakah di bawah ini yang ekuivalen dengan 4z + 8y?",
+                "pilihan": {
+                    "A": "2(a+b)²",
+                    "B": "2(2a+b)²",
+                    "C": "(4a+4b)²",
+                    "D": "(4a+8b)²",
+                    "E": "4(a+b)²",
+                },
+                "jawaban": "E",
+                "pembahasan": "Karena 4z + 8y = 4(a²+b²)+8ab = 4(a+b)².",
+                "butuh_visual": False,
+            }
+
+            first_page = generator._latex_quiz_sources(question)[0]
+
+            self.assertIn("4z+8y", first_page)
+            self.assertNotIn("4z +", first_page)
+
+    def test_symbolic_quadratic_parameter_does_not_render_cartesian_visual(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            generator = load_generator(Path(tmp))
+            question = {
+                "mapel": "Pengetahuan Kuantitatif",
+                "topik": "Aljabar dan Fungsi",
+                "level": "sedang",
+                "soal": (
+                    "Sebuah kurva parabolik memiliki fungsi f(x)=2x²+bx+5 dengan b≠0 "
+                    "memotong sumbu x di dua titik yang berbeda. Dibawah ini pernyataan "
+                    "yang benar terkait b adalah...."
+                ),
+                "pilihan": {
+                    "A": "b > 0",
+                    "B": "b < 0",
+                    "C": "b² > 40",
+                    "D": "b² < 40",
+                    "E": "b = 0",
+                },
+                "jawaban": "C",
+                "pembahasan": "Dua titik potong berbeda terjadi saat diskriminan lebih dari nol.",
+                "butuh_visual": True,
+            }
+
+            self.assertFalse(generator._needs_cartesian_visual(question))
+            self.assertEqual(generator._cartesian_visual_code(question), "")
+
+    def test_symbolic_linear_parameter_does_not_render_cartesian_visual(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            generator = load_generator(Path(tmp))
+            question = {
+                "mapel": "Pengetahuan Kuantitatif",
+                "topik": "Aljabar dan Fungsi",
+                "level": "sedang",
+                "soal": "Diketahui grafik garis y = ax + 2 memotong sumbu y di titik tertentu. Pernyataan yang benar tentang a adalah...",
+                "butuh_visual": True,
+            }
+
+            self.assertFalse(generator._needs_cartesian_visual(question))
+            self.assertEqual(generator._cartesian_visual_code(question), "")
+
+    def test_cartesian_positive_y_is_drawn_above_origin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            generator = load_generator(Path(tmp))
+            question = {
+                "mapel": "Pengetahuan Kuantitatif",
+                "topik": "Aljabar dan Fungsi",
+                "level": "sedang",
+                "soal": "Pada bidang kartesius, grafik garis y = x + 1 memotong sumbu y di titik (0, 1).",
+                "butuh_visual": True,
+            }
+
+            visual = generator._cartesian_visual_code(question)
+
+            self.assertIn(r"\fill[graphgreen]", visual)
+            self.assertIn("(160.0,135.4)", visual)
+
 
 if __name__ == "__main__":
     unittest.main()

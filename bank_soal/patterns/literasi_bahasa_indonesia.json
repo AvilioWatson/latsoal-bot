@@ -3,7 +3,7 @@
   "kelompok_tes": "Literasi",
   "patterns": [
     {
-      "topik": "Pemahaman teks informatif",
+      "topik": "Menemukan Informasi",
       "tipe": "identifikasi informasi eksplisit",
       "level": "mudah",
       "pola_soal": "Diberikan teks informatif 80 sampai 120 kata, peserta memilih pernyataan yang sesuai dengan isi teks.",
@@ -11,7 +11,7 @@
       "batasan": ["teks orisinal", "opsi salah berupa distorsi detail"]
     },
     {
-      "topik": "Tujuan penulis",
+      "topik": "Memahami Informasi",
       "tipe": "fungsi komunikatif teks",
       "level": "sedang",
       "pola_soal": "Diberikan teks argumentatif atau eksplanatif, peserta menentukan tujuan utama penulis.",
@@ -19,7 +19,7 @@
       "batasan": ["hindari opini politik praktis", "tujuan harus didukung seluruh teks"]
     },
     {
-      "topik": "Evaluasi pernyataan",
+      "topik": "Mengevaluasi dan Merefleksi Informasi",
       "tipe": "menilai dukungan argumen",
       "level": "sulit",
       "pola_soal": "Diberikan teks dan beberapa pernyataan, peserta memilih pernyataan yang memperkuat atau melemahkan argumen.",
