@@ -315,7 +315,52 @@ class ContentGeneratorTest(unittest.TestCase):
             visual = generator._cartesian_visual_code(question)
 
             self.assertIn(r"\fill[graphgreen]", visual)
-            self.assertIn("(160.0,135.4)", visual)
+            self.assertIn("(160.0,184.6)", visual)
+
+    def test_explanation_can_graph_after_symbolic_variable_is_solved(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            generator = load_generator(Path(tmp))
+            question = {
+                "mapel": "Pengetahuan Kuantitatif",
+                "topik": "Aljabar dan Fungsi",
+                "level": "sedang",
+                "soal": "Diketahui grafik garis y = ax + 2 melalui titik (1, 4). Tentukan grafik garis tersebut.",
+                "pilihan": {
+                    "A": "y = x + 2",
+                    "B": "y = 2x + 2",
+                    "C": "y = 3x + 2",
+                    "D": "y = 2x - 2",
+                    "E": "y = x - 2",
+                },
+                "jawaban": "B",
+                "pembahasan": "Substitusi titik (1,4) ke y = ax + 2 menghasilkan 4 = a + 2, sehingga a = 2. Jadi grafiknya y = 2x + 2.",
+                "butuh_visual": True,
+            }
+
+            self.assertFalse(generator._needs_cartesian_visual(question))
+            self.assertTrue(generator._needs_cartesian_visual(question, include_explanation=True))
+            self.assertEqual(generator._cartesian_visual_code(question), "")
+            self.assertIn(r"\draw[graphgreen", generator._cartesian_visual_code(question, include_explanation=True))
+
+    def test_latex_explanation_keeps_algebra_expression_compact(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            generator = load_generator(Path(tmp))
+            question = {
+                "mapel": "Pengetahuan Kuantitatif",
+                "topik": "Aljabar dan Fungsi",
+                "level": "sedang",
+                "soal": "Jika a² + b² = z dan ab = y, bentuk ekuivalen 4z + 8y adalah...",
+                "pilihan": {"A": "2(a+b)²", "B": "2(2a+b)²", "C": "(4a+4b)²", "D": "(4a+8b)²", "E": "4(a+b)²"},
+                "jawaban": "E",
+                "pembahasan": "Karena 4z + 8y = 4(a² + b²) + 8ab = 4(a² + 2ab + b²) = 4(a+b)². Maka, jawabannya E.",
+                "butuh_visual": False,
+            }
+
+            source = generator._latex_explanation_sources(question)[0]
+
+            self.assertIn("4z+8y", source)
+            self.assertIn(r"a^2+b^2", source)
+            self.assertNotIn(r"\mbox{}\\Maka", source)
 
 
 if __name__ == "__main__":

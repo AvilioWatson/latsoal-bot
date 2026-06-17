@@ -796,7 +796,7 @@ def _format_explanation_text(text, max_paragraph_chars=230):
                 current = candidate
         if current:
             paragraphs.append(current)
-    return "\n\n".join(paragraphs)
+    return _compact_math_for_line_wrap("\n\n".join(paragraphs))
 
 
 def _wrap_explanation_text(draw, text, font, max_width):
@@ -1320,15 +1320,17 @@ def _latex_thumbnail_source(question):
     return _latex_document(body)
 
 
-def _needs_cartesian_visual(question):
+def _needs_cartesian_visual(question, include_explanation=False):
     mapel = slugify(question.get("mapel"))
     if mapel not in {"pengetahuan-kuantitatif", "penalaran-matematika"}:
         return False
-    if _has_symbolic_cartesian_parameter(question):
+    parse_text = _cartesian_parse_text(question, include_explanation=include_explanation)
+    if _has_symbolic_cartesian_parameter(parse_text):
         return False
     text = " ".join([
         str(question.get("soal", "")),
         str(question.get("deskripsi_visual", "")),
+        str(question.get("pembahasan", "")) if include_explanation else "",
         str(question.get("topik", "")),
     ]).lower()
     keywords = [
@@ -1344,11 +1346,67 @@ def _needs_cartesian_visual(question):
         "sumbu x",
         "sumbu y",
     ]
-    return bool(question.get("butuh_visual")) or any(keyword in text for keyword in keywords)
+    wants_visual = bool(question.get("butuh_visual")) or any(keyword in text for keyword in keywords)
+    if not wants_visual:
+        return False
+    return bool(_parse_linear_equations(question, parse_text) or _parse_parabola(question, parse_text))
 
 
-def _has_symbolic_cartesian_parameter(question):
-    text = " ".join([str(question.get("soal", "")), str(question.get("deskripsi_visual", ""))])
+def _numeric_parameter_assignments(text):
+    assignments = {}
+    for match in re.finditer(r"\b([a-wz])\s*=\s*([+-]?\d+(?:\.\d+)?)\b", str(text or ""), re.I):
+        assignments[match.group(1).lower()] = match.group(2).replace(" ", "")
+    return assignments
+
+
+def _format_coefficient(value):
+    numeric = float(value)
+    if numeric == 1:
+        return ""
+    if numeric == -1:
+        return "-"
+    if numeric.is_integer():
+        return str(int(numeric))
+    return str(numeric)
+
+
+def _substitute_cartesian_parameters(text):
+    source = str(text or "")
+    assignments = _numeric_parameter_assignments(source)
+    if not assignments:
+        return source
+    substituted = source
+    for variable, value in assignments.items():
+        substituted = re.sub(
+            rf"(?<![A-Za-z]){re.escape(variable)}\s*x",
+            f"{_format_coefficient(value)}x",
+            substituted,
+            flags=re.I,
+        )
+        substituted = re.sub(
+            rf"(?<=[=<>+\-])\s*{re.escape(variable)}(?=\s*(?:[+\-.,;!?)]|$))",
+            value,
+            substituted,
+            flags=re.I,
+        )
+    substituted = re.sub(r"\+\s*-", "-", substituted)
+    substituted = re.sub(r"-\s*-", "+", substituted)
+    substituted = re.sub(r"\+\s*\+", "+", substituted)
+    substituted = re.sub(r"-\s*\+", "-", substituted)
+    return substituted
+
+
+def _cartesian_parse_text(question, include_explanation=False):
+    parts = [
+        str(question.get("soal", "")),
+        str(question.get("deskripsi_visual", "")),
+    ]
+    if include_explanation:
+        parts.append(str(question.get("pembahasan", "")))
+    return _substitute_cartesian_parameters(" ".join(parts))
+
+
+def _has_symbolic_cartesian_parameter(text):
     compact = re.sub(r"\s+", "", text.lower())
     equation_parts = re.findall(
         r"(?:f\(x\)|y)(?:=|!=|≠|<=|>=|≤|≥|<|>)[^.,;!?]*",
@@ -1366,8 +1424,9 @@ def _has_symbolic_cartesian_parameter(question):
     return False
 
 
-def _parse_linear_equations(question):
-    text = " ".join([str(question.get("soal", "")), str(question.get("deskripsi_visual", ""))])
+def _parse_linear_equations(question, text=None):
+    if text is None:
+        text = _cartesian_parse_text(question)
     equations = []
     for match in re.finditer(r"y\s*([=<>≤≥]+)\s*([+-]?\s*\d*(?:/\d+)?(?:\.\d+)?)\s*x(?![²^])\s*([+-]\s*\d+(?:\.\d+)?)?", text, re.I):
         relation = match.group(1)
@@ -1389,10 +1448,11 @@ def _parse_linear_equations(question):
     return equations[:3]
 
 
-def _parse_parabola(question):
-    if _has_symbolic_cartesian_parameter(question):
+def _parse_parabola(question, text=None):
+    if text is None:
+        text = _cartesian_parse_text(question)
+    if _has_symbolic_cartesian_parameter(text):
         return None
-    text = " ".join([str(question.get("soal", "")), str(question.get("deskripsi_visual", ""))])
     match = re.search(
         r"y\s*=\s*x(?:²|\^2)\s*([+-]\s*\d+)\s*x\s*([+-]\s*\d+)",
         text,
@@ -1417,12 +1477,13 @@ def _parse_parabola(question):
     return None
 
 
-def _cartesian_visual_code(question, x=570, y=198, w=438, h=352):
-    if not _needs_cartesian_visual(question):
+def _cartesian_visual_code(question, x=570, y=198, w=438, h=352, include_explanation=False):
+    if not _needs_cartesian_visual(question, include_explanation=include_explanation):
         return ""
 
-    lines = _parse_linear_equations(question)
-    parabola = _parse_parabola(question)
+    parse_text = _cartesian_parse_text(question, include_explanation=include_explanation)
+    lines = _parse_linear_equations(question, parse_text)
+    parabola = _parse_parabola(question, parse_text)
     grid_size = max(220, min(w - 58, h - 32))
     grid_w = grid_size
     grid_h = grid_size
@@ -1446,13 +1507,13 @@ def _cartesian_visual_code(question, x=570, y=198, w=438, h=352):
         return min(grid_w, max(0, center_x + value * x_unit))
 
     def py(value):
-        return min(grid_h, max(0, center_y - value * y_unit))
+        return min(grid_h, max(0, center_y + value * y_unit))
 
     def px_raw(value):
         return center_x + value * x_unit
 
     def py_raw(value):
-        return center_y - value * y_unit
+        return center_y + value * y_unit
 
     for tick in range(-6, 7):
         if tick == 0:
@@ -1492,8 +1553,8 @@ def _cartesian_visual_code(question, x=570, y=198, w=438, h=352):
             shade_top = "<" not in relation and "\u2264" not in relation and "\u00e2\u2030\u00a4" not in relation
             far_x1 = -grid_w
             far_x2 = grid_w * 2
-            far_top = -grid_h
-            far_bottom = grid_h * 2
+            far_top = grid_h * 2
+            far_bottom = -grid_h
             if shade_top:
                 polygon = (
                     f"({raw_points[0][0]:.1f},{raw_points[0][1]:.1f}) -- "
@@ -1527,10 +1588,6 @@ def _cartesian_visual_code(question, x=570, y=198, w=438, h=352):
             vertex_y = a * vertex_x * vertex_x + b * vertex_x + c
             body.append(rf"\draw[graphred, line width=3pt, smooth] plot coordinates {{{' '.join(coords)}}};")
             body.append(rf"\fill[graphyellow] ({px(vertex_x):.1f},{py(vertex_y):.1f}) circle (4.5pt);")
-
-    if not lines and not parabola:
-        body.append(rf"\draw[graphgreen, line width=3pt] ({grid_w * 0.12:.1f},{grid_h * 0.25:.1f}) -- ({grid_w * 0.9:.1f},{grid_h * 0.78:.1f});")
-        body.append(rf"\draw[graphblue, dashed, line width=3pt] ({grid_w * 0.12:.1f},{grid_h * 0.78:.1f}) -- ({grid_w * 0.9:.1f},{grid_h * 0.32:.1f});")
 
     body.append(r"\end{scope}")
     return "\n".join(body)
@@ -1635,8 +1692,8 @@ def _latex_explanation_sources(question):
     explanation = str(question.get("pembahasan") or "").strip()
     if not explanation:
         return []
-    has_visual = _needs_cartesian_visual(question)
-    lines = _wrap_plain_lines(_format_explanation_text(explanation), 44 if has_visual else 74)
+    has_visual = _needs_cartesian_visual(question, include_explanation=True)
+    lines = [line for line in _wrap_plain_lines(_format_explanation_text(explanation), 44 if has_visual else 74) if line]
     chunks = _chunk_lines(lines, 12 if has_visual else 13)
     answer_key = str(question.get("jawaban") or "").strip().upper()
     answer_text = (question.get("pilihan") or {}).get(answer_key, "")
@@ -1658,7 +1715,7 @@ def _latex_explanation_sources(question):
         if has_visual and page_number == 1:
             body_parts.append(_rect(72, panel_top, 532, 914))
             body_parts.append(_node(116, panel_top + 40, 344, chunk, size=24))
-            body_parts.append(_cartesian_visual_code(question, x=560, y=342, w=448, h=572))
+            body_parts.append(_cartesian_visual_code(question, x=560, y=342, w=448, h=572, include_explanation=True))
         else:
             body_parts.append(_rect(72, panel_top, 1008, panel_bottom))
             body_parts.append(_node(126, panel_top + 42, 828 if not has_visual else 760, chunk, size=27))
