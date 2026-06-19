@@ -1,3 +1,4 @@
+import argparse
 import json
 import shutil
 import sys
@@ -29,7 +30,7 @@ def metadata_dirs():
     return [path.parent for path in content_generator.SAVED_DIR.rglob("metadata.json")]
 
 
-def migrate_one(run_dir):
+def migrate_one(run_dir, dry_run=False):
     metadata_path = run_dir / "metadata.json"
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     run_id = metadata.get("run_id") or run_dir.name
@@ -42,8 +43,13 @@ def migrate_one(run_dir):
     retarget_files(metadata, target_dir)
 
     if current_relative == target_relative:
+        if dry_run:
+            return {"run_id": run_id, "path": f"saved/{target_relative.as_posix()}", "moved": False}
         metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
         return {"run_id": run_id, "path": f"saved/{target_relative.as_posix()}", "moved": False}
+
+    if dry_run:
+        return {"run_id": run_id, "path": f"saved/{target_relative.as_posix()}", "moved": True}
 
     target_dir.parent.mkdir(parents=True, exist_ok=True)
     if target_dir.exists():
@@ -86,9 +92,13 @@ def cleanup_empty_parents(relative_dir):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Migrate saved item folders to canonical storage paths.")
+    parser.add_argument("--dry-run", action="store_true", help="report planned metadata/index changes without writing files")
+    args = parser.parse_args()
+
     migrated = []
     for run_dir in metadata_dirs():
-        item = migrate_one(run_dir)
+        item = migrate_one(run_dir, dry_run=args.dry_run)
         if item:
             migrated.append(item)
 
@@ -108,8 +118,9 @@ def main():
                 "status": "saved",
                 "source": "import",
             })
-    save_index(index)
-    print(json.dumps({"ok": True, "migrated": migrated}, ensure_ascii=False, indent=2))
+    if not args.dry_run:
+        save_index(index)
+    print(json.dumps({"ok": True, "dry_run": args.dry_run, "migrated": migrated}, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

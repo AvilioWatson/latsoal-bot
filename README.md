@@ -109,6 +109,14 @@ http://127.0.0.1:8765/saved/penalaran-matematika
 
 Pastikan Node.js dan Python sudah tersedia.
 
+Dependency Python lokal minimal:
+
+```powershell
+python -m pip install pillow
+```
+
+Renderer PIL hanya membutuhkan Pillow. Renderer LaTeX membutuhkan `pdflatex` dan converter PDF seperti `pdftoppm` atau ImageMagick `magick`.
+
 Jalankan server lokal:
 
 ```powershell
@@ -122,6 +130,8 @@ http://127.0.0.1:8765
 ```
 
 Alternatif di Windows, klik dua kali `LatsoalBot.exe` dari root project. Launcher ini menghentikan server Node.js lama yang masih memakai port `8765`, menjalankan `node server.js` dari folder project saat ini, menyetel `LATSOAL_RENDER_ENGINE=pil` jika belum ada konfigurasi render, lalu membuka browser ke alamat lokal di atas.
+
+Kebijakan repo: `LatsoalBot.exe` tetap tracked sebagai launcher Windows kecil. Source launcher ada di `scripts/LatsoalBotLauncher.cs`; file `.cs` memakai CRLF lewat `.gitattributes`, sementara source lain tetap LF.
 
 Server memakai Node.js built-in HTTP server, tanpa Express dan tanpa dependency npm tambahan. Logic generator tetap berada di Python.
 
@@ -191,15 +201,15 @@ npm.cmd run check
 
 Command ini menjalankan:
 
-- `node --check` untuk `server.js`, semua file `routes/*.js`, `lib/*.js`, dan `frontend/*.js`;
+- `node --check` untuk `server.js`, semua file `routes/*.js`, `services/*.js`, `lib/*.js`, dan `frontend/*.js`;
 - audit file yang dilacak git agar `.env`, output runtime, saved item, approved export, dan `bank/index.json` tidak ikut commit;
 - secret scan ringan untuk file tracked dan untracked non-ignored;
-- pemeriksaan line ending LF untuk source, docs, dan config tracked maupun untracked non-ignored;
+- pemeriksaan line ending LF untuk source, docs, dan config tracked maupun untracked non-ignored; source `.cs` launcher dikecualikan karena dipatok CRLF;
 - unit test Node untuk validator output, utilitas path, config topik, dan workflow API Bank Review/export;
-- validasi JSON untuk `config/*.json` dan `bank_soal/patterns/*.json`;
+- validasi JSON untuk `config/taxonomy.json` dan `bank_soal/patterns/*.json`;
 - `python -m py_compile content_generator.py`;
 - unit test Python untuk validasi lokal, dedup, dan output draft generator;
-- pemeriksaan bahwa topik dan mapping pattern di generator Python sama dengan `config/*.json`;
+- pemeriksaan bahwa topik dan mapping pattern di generator Python sama dengan `config/taxonomy.json`;
 - smoke test generator Python dalam mode `draft`, lalu membersihkan output smoke test tersebut.
 
 Alias berikut juga tersedia:
@@ -207,6 +217,14 @@ Alias berikut juga tersedia:
 ```powershell
 npm.cmd test
 ```
+
+Audit database JSON bisa dijalankan terpisah:
+
+```powershell
+npm.cmd run audit-db
+```
+
+Audit ini mode report-only dan tidak mengubah data. Temuan yang dicek mencakup metadata hilang, path duplikat, `mapel` legacy yang memakai compatibility mapping, dan referensi gambar rusak.
 
 Quality gate yang sama juga dijalankan di GitHub Actions lewat:
 
@@ -459,6 +477,29 @@ Tombol `Sudah diupload` menandai item dengan `uploaded_at`, sedangkan `Tidak jad
 Di Bank Review, tombol `Generate` pada panel gambar menjalankan ulang renderer dari `metadata.json`. Tombol `Hapus gambar` menghapus `1.jpg`, `2.jpg`, dst serta file render intermediate dari item saved tanpa menghapus data soal, caption, atau metadata utama.
 
 Bank Review dibangun ulang dari file `saved/**/metadata.json` saat daftar dimuat. Ini membuat item lama tetap muncul walaupun index pernah tertinggal. Status review terbaru di `bank/index.json` tetap dipertahankan saat rebuild.
+
+## Recovery DB
+
+Sebelum mutasi data saved/bank, buat backup folder runtime:
+
+```powershell
+Copy-Item -Recurse saved saved.backup
+Copy-Item -Recurse bank bank.backup
+```
+
+Audit kondisi database JSON terlebih dahulu:
+
+```powershell
+npm.cmd run audit-db
+```
+
+Untuk melihat rencana migrasi storage path tanpa menulis file:
+
+```powershell
+python scripts/migrate_saved_storage.py --dry-run
+```
+
+Jika `bank/index.json` tertinggal, buka ulang Bank Review atau panggil `GET /saved`. Server akan rebuild daftar dari `saved/**/metadata.json` dan mempertahankan status yang masih ada di index. Jalankan migrasi tanpa `--dry-run` hanya setelah backup dan audit sudah diperiksa.
 
 ## Struktur Subtes
 

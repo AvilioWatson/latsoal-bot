@@ -13,7 +13,7 @@ Gate ini memeriksa:
 - audit git tracking agar file runtime lokal (`outputs/`, `saved/`, `approved/`, `bank/index.json`, `.env`) tidak ikut commit;
 - secret scan ringan untuk file tracked dan untracked non-ignored;
 - kontrak endpoint di `API.md` mencakup route utama aplikasi;
-- line ending source/docs/config tracked dan untracked non-ignored dijaga LF lewat `.gitattributes` dan quality check;
+- line ending source/docs/config tracked dan untracked non-ignored dijaga LF lewat `.gitattributes` dan quality check; source `.cs` launcher dipatok CRLF;
 - workflow manual generate menjalankan quality gate sebelum membuat artifact;
 - unit/integration test Node;
 - compile dan unit test Python;
@@ -33,5 +33,6 @@ Gate akan gagal jika file test Node atau Python tidak ditemukan, supaya rename/m
 - `npm.cmd run check` hijau.
 - README sesuai perilaku aplikasi saat ini.
 - `config/taxonomy.json` menjadi sumber tunggal taxonomy dan sinkron dengan file pattern.
+- `npm.cmd run audit-db` sudah dijalankan sebelum migrasi/recovery DB.
 - Generate mode `draft` berhasil.
 - Halaman `/`, `/saved`, `/stats`, dan `/health` bisa diakses saat server berjalan.
