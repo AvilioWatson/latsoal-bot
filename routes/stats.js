@@ -1,131 +1,6 @@
-import {readIndex} from "../lib/filestore.js";
+import {buildStats, readStats} from "../services/stats-service.js";
 
-const STATUS_KEYS = ["saved", "approved", "rejected"];
-const LEVEL_KEYS = ["mudah", "sedang", "sulit"];
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-function rate(part, total) {
-  if (!total) return 0;
-  return Number((part / total).toFixed(4));
-}
-
-function increment(target, key, amount = 1) {
-  target[key] = (target[key] || 0) + amount;
-}
-
-function statusOf(entry) {
-  return STATUS_KEYS.includes(entry.status) ? entry.status : "saved";
-}
-
-function newestIso(values) {
-  const latest = values
-    .filter(Boolean)
-    .map((value) => new Date(value))
-    .filter((date) => !Number.isNaN(date.getTime()))
-    .sort((a, b) => b.getTime() - a.getTime())[0];
-  return latest ? latest.toISOString() : null;
-}
-
-export function buildStats(entries, now = new Date()) {
-  const list = Array.isArray(entries) ? entries : [];
-  const total = list.length;
-  const byStatus = {saved: 0, approved: 0, rejected: 0};
-  const bySubtes = {};
-  const bySource = {};
-  const byLevel = {mudah: 0, sedang: 0, sulit: 0};
-  const since = now.getTime() - (7 * DAY_MS);
-  const recent = [];
-  const exportBatchIds = new Set();
-  let duplicates = 0;
-  let pendingExport = 0;
-
-  for (const entry of list) {
-    const status = statusOf(entry);
-    const subtes = entry.subtes || "unknown";
-    const source = entry.source || "unknown";
-    const level = entry.level || "unknown";
-
-    increment(byStatus, status);
-    increment(bySource, source);
-    increment(byLevel, level);
-
-    if (!bySubtes[subtes]) {
-      bySubtes[subtes] = {total: 0, saved: 0, approved: 0, rejected: 0};
-    }
-    bySubtes[subtes].total += 1;
-    bySubtes[subtes][status] += 1;
-
-    if (entry.is_duplicate) duplicates += 1;
-    if (entry.export_batch_id) exportBatchIds.add(entry.export_batch_id);
-    if (status === "approved" && !entry.exported_at) pendingExport += 1;
-
-    const savedAt = new Date(entry.saved_at || 0);
-    if (!Number.isNaN(savedAt.getTime()) && savedAt.getTime() >= since) {
-      recent.push(entry);
-    }
-  }
-
-  for (const key of LEVEL_KEYS) {
-    byLevel[key] = byLevel[key] || 0;
-  }
-
-  const recentApproved = recent.filter((entry) => statusOf(entry) === "approved").length;
-  const recentFallback = recent.filter((entry) => entry.source === "fallback").length;
-  const fallbackRate = rate(recentFallback, recent.length);
-  const duplicateRate = rate(duplicates, total);
-
-  const warnings = [];
-  if (fallbackRate > 0.20) {
-    warnings.push({
-      type: "high_fallback_rate",
-      message: `Fallback rate 7 hari terakhir ${Math.round(fallbackRate * 100)}% - quota Gemini mungkin sering kena`,
-      severity: "warn",
-    });
-  }
-  if (duplicateRate > 0.12) {
-    warnings.push({
-      type: "high_duplicate_rate",
-      message: `Duplicate rate ${Math.round(duplicateRate * 100)}% - variasi topik/prompt perlu ditambah`,
-      severity: "warn",
-    });
-  }
-  for (const [subtes, row] of Object.entries(bySubtes)) {
-    if (row.approved < 5) {
-      warnings.push({
-        type: "subtes_low_approved",
-        subtes,
-        message: `${subtes} hanya punya ${row.approved} soal approved`,
-        severity: "info",
-      });
-    }
-  }
-  if (pendingExport >= 10) {
-    warnings.push({
-      type: "pending_export",
-      message: `${pendingExport} soal approved belum pernah di-export`,
-      severity: "info",
-    });
-  }
-
-  return {
-    generated_at: now.toISOString(),
-    total,
-    by_status: byStatus,
-    by_subtes: bySubtes,
-    by_source: bySource,
-    by_level: byLevel,
-    last_7_days: {
-      total_generated: recent.length,
-      approved: recentApproved,
-      fallback_rate: fallbackRate,
-    },
-    duplicate_rate: duplicateRate,
-    export_batches: exportBatchIds.size,
-    last_exported_at: newestIso(list.map((entry) => entry.exported_at)),
-    pending_export: pendingExport,
-    warnings,
-  };
-}
+export {buildStats};
 
 function send(response, body, contentType) {
   const buffer = Buffer.from(body, "utf-8");
@@ -137,8 +12,7 @@ function send(response, body, contentType) {
 }
 
 export async function sendStatsJson(response) {
-  const entries = await readIndex();
-  send(response, JSON.stringify(buildStats(entries)), "application/json; charset=utf-8");
+  send(response, JSON.stringify(await readStats()), "application/json; charset=utf-8");
 }
 
 export function sendStatsPage(response) {
@@ -188,8 +62,15 @@ function statsHtml() {
       .value { font:800 34px/1.1 var(--font-head); margin-top:16px; }
       .value.danger { color:var(--red); }
       .grid { display:grid; grid-template-columns:1.45fr 1fr; gap:18px; }
+      .metrics-grid { display:grid; grid-template-columns:minmax(0,1.15fr) minmax(320px,.85fr); gap:18px; align-items:start; }
+      .token-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; margin-bottom:18px; }
       .panel { padding:18px; margin-bottom:18px; overflow:hidden; }
       .panel h3 { font:750 14px/1.2 var(--font-head); letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin-bottom:14px; }
+      .token-list { display:grid; gap:10px; }
+      .token-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:5px 12px; align-items:baseline; padding:12px 14px; border:1px solid var(--border); border-radius:10px; background:var(--surface2); }
+      .token-row span { color:var(--muted); font-weight:750; }
+      .token-row strong { font:800 24px/1.1 var(--font-head); }
+      .token-meta { grid-column:1 / -1; color:var(--faint); font-size:12px; }
       table { width:100%; border-collapse:collapse; }
       th, td { padding:11px 10px; border-bottom:1px solid var(--border); text-align:left; vertical-align:middle; }
       th { color:var(--faint); font-size:11px; letter-spacing:.09em; text-transform:uppercase; }
@@ -198,6 +79,10 @@ function statsHtml() {
       .bar-track { height:8px; width:100%; min-width:120px; border-radius:999px; background:var(--surface2); overflow:hidden; border:1px solid var(--border); }
       .bar-fill { height:100%; background:linear-gradient(90deg,var(--gold),#f0b840); border-radius:inherit; }
       .side-by-side { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+      .subtes-toggle { border:0; background:transparent; color:var(--text); padding:0; font:700 13px/1.2 var(--font-head); cursor:pointer; text-align:left; }
+      .subtes-toggle:hover { color:var(--gold); background:transparent; }
+      .subtopic-row td { background:rgba(72,54,30,.025); color:var(--muted); font-size:13px; }
+      .subtopic-name { padding-left:30px; }
       .export-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
       .export-stat { padding:14px; border-radius:10px; background:var(--surface2); border:1px solid var(--border); }
       .export-stat strong { display:block; font:750 24px/1.1 var(--font-head); margin-top:7px; }
@@ -209,7 +94,7 @@ function statsHtml() {
       .empty { color:var(--muted); padding:16px 0; }
       noscript { display:block; margin:18px 24px; padding:12px 14px; border-radius:10px; background:var(--gold-dim); color:#8a6117; }
       @media (max-width: 920px) {
-        .cards, .grid, .side-by-side, .export-grid { grid-template-columns:1fr; }
+        .cards, .grid, .metrics-grid, .token-grid, .side-by-side, .export-grid { grid-template-columns:1fr; }
         .header { align-items:flex-start; flex-direction:column; }
         main { padding:22px 16px 30px; }
         .topbar { height:auto; min-height:56px; grid-template-columns:minmax(0,1fr); align-items:flex-start; padding:14px 16px; }
@@ -243,27 +128,35 @@ function statsHtml() {
       </section>
       <section class="warnings" id="warnings"></section>
       <section class="cards" id="cards"></section>
-      <section class="grid">
+      <section class="token-grid">
         <div class="panel">
-          <h3>Progress per Subtes</h3>
-          <div id="subtesTable"></div>
+          <h3>Token Untuk Membuat Soal</h3>
+          <div class="token-list" id="questionTokenStats"></div>
         </div>
-        <div>
-          <div class="side-by-side">
-            <div class="panel">
-              <h3>Sumber</h3>
-              <div id="sourceTable"></div>
-            </div>
-            <div class="panel">
-              <h3>Level</h3>
-              <div id="levelTable"></div>
-            </div>
+        <div class="panel">
+          <h3>Token Untuk Pembahasan AI</h3>
+          <div class="token-list" id="explanationTokenStats"></div>
+        </div>
+      </section>
+      <section class="metrics-grid">
+        <div class="side-by-side">
+          <div class="panel">
+            <h3>Sumber</h3>
+            <div id="sourceTable"></div>
           </div>
           <div class="panel">
-            <h3>Export History</h3>
-            <div class="export-grid" id="exportStats"></div>
+            <h3>Level</h3>
+            <div id="levelTable"></div>
           </div>
         </div>
+        <div class="panel">
+          <h3>Export History</h3>
+          <div class="export-grid" id="exportStats"></div>
+        </div>
+      </section>
+      <section class="panel">
+        <h3>Soal Dibuat per Subtes</h3>
+        <div id="subtesTable"></div>
       </section>
       <footer class="footer">
         <button type="button" id="refreshButton">Refresh</button>
@@ -290,6 +183,73 @@ function statsHtml() {
           '</tr></thead><tbody>' + rows.map((row) => '<tr>' + columns.map((col) => '<td>' + col.render(row) + '</td>').join('') + '</tr>').join('') + '</tbody></table>';
       }
 
+      function progressBar(approved, total) {
+        const width = total ? Math.round((approved / total) * 100) : 0;
+        return '<div class="bar-track" title="' + width + '%"><div class="bar-fill" style="width:' + width + '%"></div></div>';
+      }
+
+      function renderTokenStats(targetId, usage) {
+        const rows = [
+          ['Gemini', usage?.gemini || {}],
+          ['Kimi', usage?.kimi || {}],
+        ];
+        document.getElementById(targetId).innerHTML = rows.map(([label, row]) => (
+          '<div class="token-row">' +
+            '<span>' + esc(label) + '</span>' +
+            '<strong>' + rupiah.format(row.total_tokens || 0) + '</strong>' +
+            '<small class="token-meta">Input ' + rupiah.format(row.prompt_tokens || 0) + ' / Output ' + rupiah.format(row.output_tokens || 0) + '</small>' +
+          '</div>'
+        )).join('');
+      }
+
+      function renderSubtesTable(data) {
+        const rows = Object.entries(data.by_subtes || {}).sort((a, b) => a[0].localeCompare(b[0]));
+        if (!rows.length) {
+          document.getElementById('subtesTable').innerHTML = '<p class="empty">Belum ada data.</p>';
+          return;
+        }
+        const body = rows.map(([name, row], index) => {
+          const parentId = 'subtes-' + index;
+          const topics = Object.entries(row.topics || {}).sort((a, b) => a[0].localeCompare(b[0]));
+          const parent = '<tr>' +
+            '<td><button type="button" class="subtes-toggle" data-target="' + parentId + '" data-label="' + esc(name) + '">[+] ' + esc(name) + '</button></td>' +
+            '<td>' + rupiah.format(row.total || 0) + '</td>' +
+            '<td>' + rupiah.format(row.approved || 0) + '</td>' +
+            '<td>' + rupiah.format(row.uploaded || 0) + '</td>' +
+            '<td>' + rupiah.format(row.rejected || 0) + '</td>' +
+            '<td>' + rupiah.format(row.saved || 0) + '</td>' +
+            '<td>' + progressBar(row.approved || 0, row.total || 0) + '</td>' +
+          '</tr>';
+          const children = topics.map(([topic, topicRow]) => (
+            '<tr class="subtopic-row" data-parent="' + parentId + '" hidden>' +
+              '<td class="subtopic-name">' + esc(topic) + '</td>' +
+              '<td>' + rupiah.format(topicRow.total || 0) + '</td>' +
+              '<td>' + rupiah.format(topicRow.approved || 0) + '</td>' +
+              '<td>' + rupiah.format(topicRow.uploaded || 0) + '</td>' +
+              '<td>' + rupiah.format(topicRow.rejected || 0) + '</td>' +
+              '<td>' + rupiah.format(topicRow.saved || 0) + '</td>' +
+              '<td>' + progressBar(topicRow.approved || 0, topicRow.total || 0) + '</td>' +
+            '</tr>'
+          )).join('');
+          return parent + children;
+        }).join('');
+        document.getElementById('subtesTable').innerHTML =
+          '<table><thead><tr><th>Subtes / Subtopik</th><th>Total</th><th>Approved</th><th>Uploaded</th><th>Rejected</th><th>Saved</th><th>Progress</th></tr></thead><tbody>' +
+          body +
+          '</tbody></table>';
+        document.querySelectorAll('.subtes-toggle').forEach((button) => {
+          button.addEventListener('click', () => {
+            const target = button.dataset.target;
+            const rows = document.querySelectorAll('[data-parent="' + target + '"]');
+            const expanded = rows.length ? rows[0].hidden : false;
+            rows.forEach((row) => {
+              row.hidden = !expanded;
+            });
+            button.textContent = (expanded ? '[-] ' : '[+] ') + (button.dataset.label || '');
+          });
+        });
+      }
+
       function render(data) {
         document.getElementById('timestamp').textContent = 'Data per: ' + new Date(data.generated_at).toLocaleString('id-ID');
         document.getElementById('warnings').innerHTML = (data.warnings || []).map((item) =>
@@ -304,18 +264,9 @@ function statsHtml() {
           ['Fallback Rate (7 Hari)', fallbackRate + '%', fallbackRate > 20 ? 'danger' : '']
         ].map(([label, value, cls]) => '<article class="card"><p class="label">' + esc(label) + '</p><p class="value ' + esc(cls || '') + '">' + esc(value) + '</p></article>').join('');
 
-        const subtesRows = Object.entries(data.by_subtes || {}).sort((a, b) => a[0].localeCompare(b[0])).map(([name, row]) => ({name, ...row}));
-        document.getElementById('subtesTable').innerHTML = table(subtesRows, [
-          {label:'Subtes', render:(r) => esc(r.name)},
-          {label:'Total', render:(r) => rupiah.format(r.total)},
-          {label:'Approved', render:(r) => rupiah.format(r.approved)},
-          {label:'Rejected', render:(r) => rupiah.format(r.rejected)},
-          {label:'Saved', render:(r) => rupiah.format(r.saved)},
-          {label:'Progress', render:(r) => {
-            const width = r.total ? Math.round((r.approved / r.total) * 100) : 0;
-            return '<div class="bar-track" title="' + width + '%"><div class="bar-fill" style="width:' + width + '%"></div></div>';
-          }},
-        ]);
+        renderSubtesTable(data);
+        renderTokenStats('questionTokenStats', data.token_usage?.question);
+        renderTokenStats('explanationTokenStats', data.token_usage?.explanation);
 
         const sourceRows = Object.entries(data.by_source || {}).map(([name, count]) => ({name, count, percent: data.total ? count / data.total : 0}));
         document.getElementById('sourceTable').innerHTML = table(sourceRows, [

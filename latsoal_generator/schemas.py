@@ -71,3 +71,32 @@ CAPTION_SCHEMA = {
     },
     "required": ["caption", "hashtag"],
 }
+
+
+EXPLANATION_REVIEW_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "lolos": {"type": "BOOLEAN"},
+        "skor": {"type": "INTEGER"},
+        "akurasi": {"type": "STRING"},
+        "bahasa_formal": {"type": "STRING"},
+        "catatan": {
+            "type": "ARRAY",
+            "items": {"type": "STRING"},
+        },
+        "saran_revisi": {
+            "type": "ARRAY",
+            "items": {"type": "STRING"},
+        },
+        "pembahasan_revisi": {"type": "STRING"},
+    },
+    "required": [
+        "lolos",
+        "skor",
+        "akurasi",
+        "bahasa_formal",
+        "catatan",
+        "saran_revisi",
+        "pembahasan_revisi",
+    ],
+}

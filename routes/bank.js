@@ -153,6 +153,7 @@ async function listSavedRuns() {
       mapel: metadata?.question?.mapel || null,
       topik: metadata?.question?.topik || null,
       canonical_topik: canonicalTopic(metadata?.question?.mapel, metadata?.question?.topik) || null,
+      explanation_review: metadata?.explanation_review || null,
       level: metadata?.question?.level || null,
       soal_excerpt: String(metadata?.question?.soal || "").replace(/\s+/g, " ").trim().slice(0, 180),
       jawaban: metadata?.question?.jawaban || null,
@@ -276,6 +277,48 @@ function runImageRenderer(metadataPath) {
   });
 }
 
+function runExplanationReview(metadataPath, provider = "gemini") {
+  return new Promise((resolve, reject) => {
+    const child = spawn(DEFAULT_PYTHON, [
+      "content_generator.py",
+      "--review-explanation",
+      metadataPath,
+      "--provider",
+      provider,
+    ], {
+      cwd: ROOT,
+      env: process.env,
+      windowsHide: true,
+    });
+
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf-8");
+    child.stderr.setEncoding("utf-8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      let parsed = null;
+      try {
+        parsed = JSON.parse(stdout);
+      } catch {
+        reject(new Error(stderr || "Review pembahasan tidak mengembalikan JSON valid."));
+        return;
+      }
+      if (code !== 0 || parsed.ok === false) {
+        reject(new Error(parsed.detail || stderr || "Review pembahasan gagal."));
+        return;
+      }
+      resolve(parsed);
+    });
+  });
+}
+
 async function generateSavedImages(runId) {
   if (!isValidRunId(runId)) {
     throw requestError(400, "Run ID tidak valid.");
@@ -298,6 +341,34 @@ async function generateSavedImages(runId) {
     run_id: runId,
     files: result.files,
     web_files: buildWebFiles("/saved", artifactPath, result.files),
+  };
+}
+
+async function reviewSavedExplanation(runId, provider = "gemini") {
+  if (!isValidRunId(runId)) {
+    throw requestError(400, "Run ID tidak valid.");
+  }
+  const resolved = await resolveSavedRun(runId);
+  const runDir = resolved?.dir;
+  const artifactPath = resolved?.artifactPath || runId;
+  if (!runDir) {
+    throw requestError(404, "Saved run tidak ditemukan.");
+  }
+  const metadataPath = path.join(runDir, "metadata.json");
+  let metadata;
+  try {
+    metadata = await readJsonValidated(metadataPath, "metadata");
+  } catch {
+    throw requestError(404, "Saved run tidak ditemukan.");
+  }
+
+  const result = await runExplanationReview(metadataPath, provider);
+  metadata.explanation_review = result.explanation_review;
+  await writeJsonValidated(metadataPath, metadata, "metadata");
+  return {
+    run_id: runId,
+    explanation_review: metadata.explanation_review,
+    web_files: buildWebFiles("/saved", artifactPath, metadata.files),
   };
 }
 
@@ -453,6 +524,16 @@ export async function handle(request, response, route) {
   if (request.method === "POST" && savedRoute?.length === 3 && savedRoute[2] === "images") {
     try {
       sendJson(response, await generateSavedImages(savedRoute[1]));
+    } catch (error) {
+      sendError(response, errorStatus(error), error.message);
+    }
+    return true;
+  }
+
+  if (request.method === "POST" && savedRoute?.length === 3 && savedRoute[2] === "explanation-review") {
+    try {
+      const payload = await readJsonBody(request).catch(() => ({}));
+      sendJson(response, await reviewSavedExplanation(savedRoute[1], payload.provider || "gemini"));
     } catch (error) {
       sendError(response, errorStatus(error), error.message);
     }

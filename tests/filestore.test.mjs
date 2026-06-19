@@ -121,6 +121,31 @@ test("createEntryFromMetadata preserves review patch fields", () => {
   assert.equal(entry.path, "saved/PU/penalaran-deduktif/20990101-030303");
 });
 
+test("createEntryFromMetadata summarizes AI token usage", () => {
+  const payload = {
+    ...metadata(),
+    ai_usage: {
+      calls: [
+        {provider: "gemini", prompt_tokens: 10, output_tokens: 20, total_tokens: 30},
+        {provider: "kimi", prompt_tokens: 5, output_tokens: 6, total_tokens: 11},
+      ],
+    },
+    explanation_review: {
+      usage: [
+        {provider: "gemini", prompt_tokens: 3, output_tokens: 4, total_tokens: 7},
+        {provider: "kimi", prompt_tokens: 2, output_tokens: 8, total_tokens: 10},
+      ],
+    },
+  };
+
+  const entry = createEntryFromMetadata("20990101-060606", payload);
+
+  assert.equal(entry.token_usage.question.gemini.total_tokens, 30);
+  assert.equal(entry.token_usage.question.kimi.total_tokens, 11);
+  assert.equal(entry.token_usage.explanation.gemini.total_tokens, 7);
+  assert.equal(entry.token_usage.explanation.kimi.total_tokens, 10);
+});
+
 test("schema validators report warnings without throwing", () => {
   assert.ok(validateQuestion({mapel: "Penalaran Umum"}, "soal.json").length > 0);
   assert.ok(validateMetadata({run_id: "bad"}, "metadata.json").length > 0);

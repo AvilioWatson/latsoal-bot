@@ -46,14 +46,18 @@ from latsoal_generator.storage import (
 )
 from latsoal_generator.schemas import (
     CAPTION_SCHEMA,
+    EXPLANATION_REVIEW_SCHEMA,
     QUESTION_SCHEMA,
     VALIDATION_SCHEMA,
 )
 from latsoal_generator.prompts import (
+    InsufficientTopicExamplesError,
     build_caption_prompt,
+    build_explanation_review_prompt,
     build_question_prompt,
     build_validation_prompt,
     load_patterns,
+    require_topic_examples,
 )
 from latsoal_generator.validation import (
     PAREN_HINT_WORD_RE,
@@ -74,6 +78,8 @@ def json_stdout(payload):
 
 def classify_error(exc):
     message = clean_error_message(exc) if "clean_error_message" in globals() else str(exc)
+    if isinstance(exc, InsufficientTopicExamplesError):
+        return "insufficient_topic_examples"
     lowered = message.lower()
     if "quota" in lowered or "429" in lowered:
         return "quota_exceeded"
@@ -657,7 +663,7 @@ def render_quiz_images(question, run_dir, page_offset=0, total_pages=None):
             if has_choices:
                 q_y = question_box[1] + max(16, (question_box[3] - question_box[1] - q_total_h) // 2)
             else:
-                q_y = question_box[1] + 46
+                q_y = question_box[1] + max(24, (question_box[3] - question_box[1] - q_total_h) // 2)
             text_x = question_box[0] + 54
             text_w = question_box[2] - question_box[0] - 108
             for line_index, line in enumerate(q_lines):
@@ -2307,12 +2313,16 @@ def generate_content(mapel, topic, level, mode="auto", account="@utbk_neareducat
     source = "draft"
     fallbacks = []
     errors = {}
+    topic_examples = []
+
+    if mode != "draft":
+        topic_examples = require_topic_examples(mapel, topic)
 
     if use_ai:
         source = provider
         try:
             question = _ai_json(
-                build_question_prompt(mapel, topic, level),
+                build_question_prompt(mapel, topic, level, topic_examples=topic_examples),
                 "soal",
                 schema=QUESTION_SCHEMA,
                 provider=provider,
@@ -2498,6 +2508,33 @@ def render_images_for_metadata(metadata_path):
     }
 
 
+def review_explanation_for_metadata(metadata_path, provider="gemini"):
+    metadata_path = Path(metadata_path).resolve()
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    question = metadata.get("question") or {}
+    if not question:
+        raise ValueError("Metadata tidak memiliki question.")
+    if not question.get("pembahasan"):
+        raise ValueError("Pembahasan tidak tersedia untuk dicek.")
+    provider = provider if provider in {"gemini", "kimi"} else "gemini"
+    GEMINI_USAGE.clear()
+    review = _ai_json(
+        build_explanation_review_prompt(question),
+        "review pembahasan",
+        retries=2,
+        schema=EXPLANATION_REVIEW_SCHEMA,
+        provider=provider,
+    )
+    review["checked_at"] = dt.datetime.now(dt.timezone.utc).isoformat()
+    review["provider"] = provider
+    review["usage"] = list(GEMINI_USAGE)
+    return {
+        "ok": True,
+        "run_id": metadata.get("run_id") or metadata_path.parent.name,
+        "explanation_review": review,
+    }
+
+
 def main():
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
@@ -2511,10 +2548,14 @@ def main():
     parser.add_argument("--provider", default=os.getenv("AI_PROVIDER", "gemini"), choices=["gemini", "kimi"])
     parser.add_argument("--account", default="@utbk_neareducation")
     parser.add_argument("--render-images", default="")
+    parser.add_argument("--review-explanation", default="")
     try:
         args = parser.parse_args()
         if args.render_images:
             json_stdout(render_images_for_metadata(args.render_images))
+            return
+        if args.review_explanation:
+            json_stdout(review_explanation_for_metadata(args.review_explanation, args.provider))
             return
         topic = args.topik or MAPEL_TOPICS[args.mapel][0]
         mode = "auto" if args.mode == "gemini" else args.mode
@@ -2525,13 +2566,20 @@ def main():
     except Exception as exc:
         error = classify_error(exc)
         detail = clean_error_message(exc)
-        json_stdout({
+        payload = {
             "ok": False,
             "error": error,
             "detail": detail,
             "fallback_used": False,
             "fallback_reason": None,
-        })
+        }
+        if isinstance(exc, InsufficientTopicExamplesError):
+            payload.update({
+                "warning": detail,
+                "required_examples": exc.required,
+                "found_examples": exc.found,
+            })
+        json_stdout(payload)
         print(f"[ERROR] {error}: {detail}", file=sys.stderr)
         raise SystemExit(1)
 

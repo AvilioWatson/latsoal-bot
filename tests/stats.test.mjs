@@ -15,19 +15,43 @@ test("buildStats aggregates status, source, level, subtest, duplicate, and expor
       saved_at: "2026-05-28T12:00:00.000Z",
       exported_at: "2026-05-29T10:00:00.000Z",
       export_batch_id: "batch-1",
+      topik: "penalaran-deduktif",
+      uploaded_at: "2026-05-29T11:30:00.000Z",
+      token_usage: {
+        question: {
+          gemini: {prompt_tokens: 10, output_tokens: 20, total_tokens: 30},
+          kimi: {prompt_tokens: 0, output_tokens: 0, total_tokens: 0},
+        },
+        explanation: {
+          gemini: {prompt_tokens: 3, output_tokens: 4, total_tokens: 7},
+          kimi: {prompt_tokens: 0, output_tokens: 0, total_tokens: 0},
+        },
+      },
     },
     {
       run_id: "20260529-110000",
       subtes: "penalaran-umum",
+      topik: "penalaran-induktif",
       level: "sedang",
       status: "approved",
       source: "fallback",
       saved_at: "2026-05-29T11:00:00.000Z",
       is_duplicate: true,
+      token_usage: {
+        question: {
+          gemini: {prompt_tokens: 0, output_tokens: 0, total_tokens: 0},
+          kimi: {prompt_tokens: 5, output_tokens: 6, total_tokens: 11},
+        },
+        explanation: {
+          gemini: {prompt_tokens: 0, output_tokens: 0, total_tokens: 0},
+          kimi: {prompt_tokens: 2, output_tokens: 8, total_tokens: 10},
+        },
+      },
     },
     {
       run_id: "20260520-110000",
       subtes: "literasi-bahasa-inggris",
+      topik: "main-idea",
       level: "sulit",
       status: "rejected",
       source: "draft",
@@ -38,6 +62,10 @@ test("buildStats aggregates status, source, level, subtest, duplicate, and expor
   assert.equal(stats.total, 3);
   assert.deepEqual(stats.by_status, {saved: 0, approved: 2, rejected: 1});
   assert.equal(stats.by_subtes["penalaran-umum"].approved, 2);
+  assert.equal(stats.by_subtes["penalaran-umum"].uploaded, 1);
+  assert.equal(stats.by_subtes["penalaran-umum"].topics["penalaran-deduktif"].total, 1);
+  assert.equal(stats.by_subtes["penalaran-umum"].topics["penalaran-deduktif"].uploaded, 1);
+  assert.equal(stats.by_subtes["penalaran-umum"].topics["penalaran-induktif"].approved, 1);
   assert.equal(stats.by_source.fallback, 1);
   assert.equal(stats.by_level.sulit, 1);
   assert.equal(stats.last_7_days.total_generated, 2);
@@ -46,6 +74,10 @@ test("buildStats aggregates status, source, level, subtest, duplicate, and expor
   assert.equal(stats.export_batches, 1);
   assert.equal(stats.last_exported_at, "2026-05-29T10:00:00.000Z");
   assert.equal(stats.pending_export, 1);
+  assert.equal(stats.token_usage.question.gemini.total_tokens, 30);
+  assert.equal(stats.token_usage.question.kimi.total_tokens, 11);
+  assert.equal(stats.token_usage.explanation.gemini.total_tokens, 7);
+  assert.equal(stats.token_usage.explanation.kimi.total_tokens, 10);
 });
 
 test("buildStats treats unknown status as saved and handles empty input", () => {

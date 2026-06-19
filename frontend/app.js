@@ -24,12 +24,35 @@ const copyCaptionButton = document.querySelector("#copyCaptionButton");
 let topicsByMapel = {};
 let currentRunId = "";
 const {
-  copyCaption,
-  formatQuestionText,
-  renderDebug: renderSharedDebug,
-  renderImages: renderSharedImages,
-  sourceText,
-} = window.LatsoalShared;
+  copyCaption: sharedCopyCaption = async (elements, setStatusCallback) => {
+    const {captionText, hashtagText, debugPanel, debugSource, debugText} = elements;
+    try {
+      await navigator.clipboard.writeText(`${captionText.textContent}\n${hashtagText.textContent}`.trim());
+      setStatusCallback("Copied");
+    } catch (error) {
+      debugPanel.hidden = false;
+      debugSource.textContent = "clipboard";
+      debugText.textContent = error.message;
+    }
+  },
+  formatQuestionText: sharedFormatQuestionText = (text) => text || "",
+  renderDebug: sharedRenderDebug = (data, elements) => {
+    elements.debugText.textContent = JSON.stringify(data, null, 2);
+    elements.debugPanel.hidden = false;
+  },
+  renderImages: sharedRenderImages = (data, elements) => {
+    const images = data.web_files?.images || [];
+    elements.imageCount.textContent = `${images.length} gambar`;
+    elements.imagePreviewList.innerHTML = "";
+    for (const image of images) {
+      const img = document.createElement("img");
+      img.src = image;
+      img.alt = "Preview gambar";
+      elements.imagePreviewList.append(img);
+    }
+  },
+  sourceText: sharedSourceText = (data) => data.source || "-",
+} = window.LatsoalShared || {};
 
 function setStatus(text) {
   sourceStatus.textContent = text;
@@ -54,11 +77,11 @@ function reviewNote(data) {
 }
 
 function renderDebug(data) {
-  renderSharedDebug(data, {debugPanel, debugSource, debugText});
+  sharedRenderDebug(data, {debugPanel, debugSource, debugText});
 }
 
 function renderImages(data) {
-  renderSharedImages(data, {imageCount, imagePreviewList});
+  sharedRenderImages(data, {imageCount, imagePreviewList});
 }
 
 function fillTopics() {
@@ -94,12 +117,12 @@ function renderResult(data) {
   const caption = data.caption;
   const validation = data.validation;
   previewTitle.textContent = `${question.mapel}: ${question.topik}`;
-  sourceLabel.textContent = sourceText(data);
+  sourceLabel.textContent = sharedSourceText(data);
   validationScore.textContent = `Skor ${validation.skor ?? "-"}`;
   runNote.textContent = reviewNote(data);
   renderDebug(data);
   renderImages(data);
-  questionText.textContent = formatQuestionText(question.soal);
+  questionText.textContent = sharedFormatQuestionText(question.soal);
 
   choicesList.innerHTML = "";
   for (const [key, value] of Object.entries(question.pilihan)) {
@@ -180,7 +203,7 @@ saveButton.addEventListener("click", async () => {
 });
 
 copyCaptionButton.addEventListener("click", async () => {
-  await copyCaption({captionText, hashtagText, debugPanel, debugSource, debugText}, setStatus);
+  await sharedCopyCaption({captionText, hashtagText, debugPanel, debugSource, debugText}, setStatus);
 });
 
 loadConfig().catch((error) => {

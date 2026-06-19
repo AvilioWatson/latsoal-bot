@@ -688,7 +688,20 @@ select option {
   padding-bottom: 4px;
 }
 
-.subtest-tabs a {
+.subtopic-tabs {
+  display: flex;
+  gap: 7px;
+  margin-top: -10px;
+  overflow-x: auto;
+  padding-bottom: 3px;
+}
+
+.subtopic-tabs[hidden] {
+  display: none;
+}
+
+.subtest-tabs a,
+.subtopic-tabs button {
   flex: 0 0 auto;
   min-height: 32px;
   display: inline-flex;
@@ -704,8 +717,18 @@ select option {
   transition: color 150ms ease, border-color 150ms ease, background 150ms ease;
 }
 
+.subtopic-tabs button {
+  min-height: 28px;
+  border-radius: var(--radius-sm);
+  padding: 0 10px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
 .subtest-tabs a:hover,
-.subtest-tabs a[data-active="true"] {
+.subtest-tabs a[data-active="true"],
+.subtopic-tabs button:hover,
+.subtopic-tabs button[data-active="true"] {
   color: var(--gold);
   border-color: rgba(232, 168, 48, 0.28);
   background: var(--gold-dim);
@@ -754,11 +777,48 @@ select option {
 
 .saved-preview .review-header {
   align-items: flex-start;
+  flex-direction: column;
+  gap: 14px;
   padding: 18px;
 }
 
+.saved-preview .review-header > div:first-child {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.saved-preview .review-header h2 {
+  max-width: 100%;
+  margin: 0;
+  line-height: 1.22;
+  overflow-wrap: anywhere;
+}
+
+.saved-preview .review-header .run-note {
+  max-width: 100%;
+}
+
 .saved-preview .review-actions {
-  justify-content: flex-end;
+  width: 100%;
+  justify-content: flex-start;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.saved-preview .review-actions button,
+.saved-preview .review-actions .link-button,
+.saved-preview .review-actions .ghost-link {
+  max-width: 100%;
+  white-space: normal;
+}
+
+.saved-preview #reviewExplanationButton {
+  min-width: 138px;
+}
+
+.saved-preview .preview-close-button {
+  margin-left: auto;
+  flex: 0 0 auto;
 }
 
 .saved-preview .detail-grid {

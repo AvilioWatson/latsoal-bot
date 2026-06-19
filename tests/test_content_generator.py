@@ -65,6 +65,76 @@ class ContentGeneratorTest(unittest.TestCase):
             self.assertEqual(result["matched_run_id"], run_id)
             self.assertEqual(result["matched_status"], "approved")
 
+    def test_question_prompt_samples_three_same_topic_saved_examples(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_root = Path(tmp)
+            generator = load_generator(data_root)
+            saved_root = data_root / "saved"
+            same_topic_questions = []
+            for index in range(4):
+                run_dir = saved_root / f"20990101-01010{index}"
+                run_dir.mkdir(parents=True)
+                question = {
+                    "mapel": "Pengetahuan Kuantitatif",
+                    "topik": "Persamaan Linear",
+                    "level": "mudah",
+                    "soal": f"Contoh database persamaan linear {index}",
+                    "pilihan": {"A": "1", "B": "2", "C": "3", "D": "4", "E": "5"},
+                    "jawaban": "A",
+                    "pembahasan": f"Pembahasan persamaan linear {index}",
+                    "konsep_kunci": "Persamaan linear",
+                    "butuh_visual": False,
+                }
+                same_topic_questions.append(question)
+                (run_dir / "metadata.json").write_text(
+                    json.dumps({"question": question}, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+            other_dir = saved_root / "20990101-020202"
+            other_dir.mkdir(parents=True)
+            (other_dir / "metadata.json").write_text(
+                json.dumps({
+                    "question": {
+                        "mapel": "Pengetahuan Kuantitatif",
+                        "topik": "Statistika",
+                        "soal": "Contoh database statistika yang tidak boleh masuk",
+                        "pilihan": {"A": "1"},
+                    }
+                }, ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+            prompt = generator.build_question_prompt(
+                "Pengetahuan Kuantitatif",
+                "Aljabar dan Fungsi",
+                "mudah",
+            )
+
+            included = [
+                question for question in same_topic_questions
+                if question["soal"] in prompt
+            ]
+            self.assertEqual(len(included), 3)
+            self.assertIn("Contoh soal database untuk topik yang sama", prompt)
+            self.assertNotIn("Contoh database statistika yang tidak boleh masuk", prompt)
+
+    def test_generate_content_auto_blocks_when_same_topic_examples_are_insufficient(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            generator = load_generator(Path(tmp))
+
+            with self.assertRaises(generator.InsufficientTopicExamplesError) as context:
+                generator.generate_content(
+                    "Pengetahuan Kuantitatif",
+                    "Aljabar dan Fungsi",
+                    "mudah",
+                    mode="auto",
+                    account="@quality",
+                )
+
+            self.assertEqual(context.exception.required, 3)
+            self.assertEqual(context.exception.found, 0)
+            self.assertIn("Butuh minimal 3 contoh", str(context.exception))
+
     def test_generate_content_draft_writes_expected_files_to_data_root(self):
         with tempfile.TemporaryDirectory() as tmp:
             data_root = Path(tmp)

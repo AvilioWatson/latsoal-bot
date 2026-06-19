@@ -7,7 +7,9 @@ const savedStatusFilter = document.querySelector("#savedStatusFilter");
 const refreshSavedButton = document.querySelector("#refreshSavedButton");
 const exportApprovedButton = document.querySelector("#exportApprovedButton");
 const subtestTabs = document.querySelector("#subtestTabs");
+const subtopicTabs = document.querySelector("#subtopicTabs");
 const closePreviewButton = document.querySelector("#closePreviewButton");
+const reviewExplanationButton = document.querySelector("#reviewExplanationButton");
 const copyCaptionButton = document.querySelector("#copyCaptionButton");
 const previewTitle = document.querySelector("#previewTitle");
 const runNote = document.querySelector("#runNote");
@@ -29,20 +31,52 @@ const debugText = document.querySelector("#debugText");
 
 let savedItems = [];
 let activeSubtest = "all";
+let activeSubtopic = "all";
 let activePreviewRunId = "";
 let activePreviewStatus = "";
 let activePreviewSource = "";
 let subtests = [];
 const {
-  copyCaption,
-  formatQuestionText,
-  renderDebug: renderSharedDebug,
-  renderImages: renderSharedImages,
-  sourceText,
-} = window.LatsoalShared;
+  copyCaption: sharedCopyCaption = async (elements, setStatusCallback) => {
+    const {captionText, hashtagText, debugPanel, debugSource, debugText} = elements;
+    try {
+      await navigator.clipboard.writeText(`${captionText.textContent}\n${hashtagText.textContent}`.trim());
+      setStatusCallback("Copied");
+    } catch (error) {
+      debugPanel.hidden = false;
+      debugSource.textContent = "clipboard";
+      debugText.textContent = error.message;
+    }
+  },
+  formatQuestionText: sharedFormatQuestionText = (text) => text || "",
+  renderDebug: sharedRenderDebug = (data, elements) => {
+    elements.debugText.textContent = JSON.stringify(data, null, 2);
+    elements.debugPanel.hidden = false;
+  },
+  renderImages: sharedRenderImages = (data, elements) => {
+    const images = data.web_files?.images || [];
+    elements.imageCount.textContent = `${images.length} gambar`;
+    elements.imagePreviewList.innerHTML = "";
+    for (const image of images) {
+      const img = document.createElement("img");
+      img.src = image;
+      img.alt = "Preview gambar saved";
+      elements.imagePreviewList.append(img);
+    }
+  },
+  sourceText: sharedSourceText = (data) => data.source || "-",
+} = window.LatsoalShared || {};
 
 function slugifySubtest(name) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+function topicLabel(item) {
+  return item.canonical_topik || item.topik || "Tanpa subtopik";
+}
+
+function topicKey(value) {
+  return String(value || "Tanpa subtopik").trim().toLowerCase();
 }
 
 function subtestFromPath() {
@@ -90,18 +124,20 @@ function setPreviewStatus(status) {
 }
 
 function reviewNote(data) {
+  if (data.explanation_review?.lolos) return `Pembahasan sudah lolos cek AI dengan skor ${data.explanation_review.skor ?? "-"}.`;
+  if (data.explanation_review && !data.explanation_review.lolos) return `Pembahasan belum lolos cek AI: ${(data.explanation_review.catatan || [])[0] || "perlu revisi."}`;
   if (data.dedup && data.dedup.is_duplicate) return `Kemungkinan duplikat: similarity ${data.dedup.similarity} dengan ${data.dedup.matched_run_id}.`;
   if (data.review_status === "ready") return "Konten siap direview final sebelum posting.";
   if (data.errors && data.errors.question) return `Mode fallback aktif: ${data.errors.question}`;
-  return "Review manual sebelum upload.";
+  return "Cek pembahasan dengan AI sebelum approve.";
 }
 
 function renderDebug(data) {
-  renderSharedDebug(data, {debugPanel, debugSource, debugText});
+  sharedRenderDebug(data, {debugPanel, debugSource, debugText});
 }
 
 function renderImages(data) {
-  renderSharedImages(data, {imageCount, imagePreviewList}, {altPrefix: "Preview gambar saved"});
+  sharedRenderImages(data, {imageCount, imagePreviewList}, {altPrefix: "Preview gambar saved"});
 }
 
 function filteredSavedItems() {
@@ -110,8 +146,15 @@ function filteredSavedItems() {
   return savedItems.filter((item) => {
     const statusOk = status === "all" || (item.status || "saved") === status;
     const subtestOk = activeSubtest === "all" || item.mapel === activeSubtest;
+    const topicOk = activeSubtopic === "all" || topicKey(topicLabel(item)) === activeSubtopic;
     const haystack = [item.run_id, item.mapel, item.topik, item.canonical_topik, item.level, item.source, item.status].join(" ").toLowerCase();
-    return subtestOk && statusOk && (!query || haystack.includes(query));
+    return subtestOk && topicOk && statusOk && (!query || haystack.includes(query));
+  }).sort((left, right) => {
+    const leftQuestion = left.soal_excerpt || "";
+    const rightQuestion = right.soal_excerpt || "";
+    return leftQuestion.localeCompare(rightQuestion, "id", {sensitivity: "base"})
+      || String(left.topik || "").localeCompare(String(right.topik || ""), "id", {sensitivity: "base"})
+      || String(left.run_id || "").localeCompare(String(right.run_id || ""), "id", {sensitivity: "base"});
   });
 }
 
@@ -130,11 +173,59 @@ function renderSubtestTabs() {
     link.addEventListener("click", (event) => {
       event.preventDefault();
       activeSubtest = tab.value;
+      activeSubtopic = "all";
       window.history.pushState({}, "", tab.href);
       renderSubtestTabs();
+      renderSubtopicTabs();
       renderSavedList();
     });
     subtestTabs.append(link);
+  }
+}
+
+function renderSubtopicTabs() {
+  subtopicTabs.innerHTML = "";
+  if (activeSubtest === "all") {
+    activeSubtopic = "all";
+    subtopicTabs.hidden = true;
+    return;
+  }
+
+  const topicNames = Array.from(new Set(
+    savedItems
+      .filter((item) => item.mapel === activeSubtest)
+      .map(topicLabel)
+      .filter(Boolean),
+  )).sort((left, right) => left.localeCompare(right, "id", {sensitivity: "base"}));
+
+  if (!topicNames.length) {
+    activeSubtopic = "all";
+    subtopicTabs.hidden = true;
+    return;
+  }
+
+  const activeExists = topicNames.some((topic) => topicKey(topic) === activeSubtopic);
+  if (activeSubtopic !== "all" && !activeExists) {
+    activeSubtopic = "all";
+  }
+
+  subtopicTabs.hidden = false;
+  const tabs = [{label: "Semua subtopik", value: "all"}, ...topicNames.map((topic) => ({
+    label: topic,
+    value: topicKey(topic),
+  }))];
+
+  for (const tab of tabs) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = tab.label;
+    button.dataset.active = tab.value === activeSubtopic ? "true" : "false";
+    button.addEventListener("click", () => {
+      activeSubtopic = tab.value;
+      renderSubtopicTabs();
+      renderSavedList();
+    });
+    subtopicTabs.append(button);
   }
 }
 
@@ -147,6 +238,7 @@ async function loadConfig() {
   subtests = Object.keys(config.topics || {});
   activeSubtest = subtestFromPath();
   renderSubtestTabs();
+  renderSubtopicTabs();
 }
 
 function renderSavedList(items = filteredSavedItems()) {
@@ -195,7 +287,10 @@ function renderSavedList(items = filteredSavedItems()) {
     row.querySelector("[data-level]").textContent = item.level || "-";
     row.querySelector("[data-upload-state]").textContent = item.uploaded_at ? "Uploaded" : "Belum upload";
     row.querySelector("[data-run-id]").textContent = item.run_id;
-    row.querySelector("[data-action='approved']").disabled = item.status === "approved";
+    const approveButton = row.querySelector("[data-action='approved']");
+    const reviewPassed = Boolean(item.explanation_review?.lolos);
+    approveButton.disabled = item.status === "approved" || !reviewPassed;
+    approveButton.title = reviewPassed ? "Approve soal" : "Cek pembahasan AI sampai lolos sebelum approve.";
     row.querySelector("[data-action='rejected']").disabled = item.status === "rejected";
     row.querySelector("[data-uploaded='true']").disabled = Boolean(item.uploaded_at);
     row.querySelector("[data-unuploaded='true']").disabled = !item.uploaded_at;
@@ -236,6 +331,7 @@ async function loadSavedList() {
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || "Gagal memuat saved.");
   savedItems = data.items || [];
+  renderSubtopicTabs();
   renderSavedList();
 }
 
@@ -248,6 +344,7 @@ async function loadSavedPreview(runId) {
     ? `${selectedItem.mapel}: ${selectedItem.topik}`
     : "Memuat preview";
   runNote.textContent = "Memuat detail soal.";
+  reviewExplanationButton.disabled = true;
   const previewPanel = document.querySelector(".saved-preview");
   previewPanel?.classList.remove("is-loaded");
   previewPanel?.classList.add("is-loading");
@@ -267,14 +364,15 @@ async function loadSavedPreview(runId) {
   const caption = data.caption;
   const validation = data.validation;
   previewTitle.textContent = `${question.mapel}: ${question.topik}`;
-  activePreviewSource = sourceText(data);
+  activePreviewSource = sharedSourceText(data);
   setPreviewStatus(savedItems.find((item) => item.run_id === runId)?.status || "saved");
   validationScore.textContent = `Skor ${validation.skor ?? "-"}`;
   runNote.textContent = reviewNote(data);
   renderImages(data);
+  reviewExplanationButton.disabled = false;
   generateImageButton.disabled = false;
   deleteImageButton.disabled = !(data.web_files?.images || []).length;
-  questionText.textContent = formatQuestionText(question.soal);
+  questionText.textContent = sharedFormatQuestionText(question.soal);
   choicesList.innerHTML = "";
   for (const [key, value] of Object.entries(question.pilihan)) {
     const item = document.createElement("li");
@@ -317,8 +415,43 @@ function clearPreviewIfDeleted(runId) {
   downloadAllLink.hidden = true;
   downloadAllLink.href = "#";
   copyCaptionButton.disabled = true;
+  reviewExplanationButton.disabled = true;
   debugPanel.hidden = true;
   closePreviewPanel();
+}
+
+async function reviewExplanation() {
+  if (!activePreviewRunId) return;
+  reviewExplanationButton.disabled = true;
+  reviewExplanationButton.textContent = "Checking";
+  setStatus("Reviewing");
+  try {
+    const response = await fetch(`/saved/${activePreviewRunId}/explanation-review`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({provider: "gemini"}),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Cek pembahasan gagal.");
+    const selected = savedItems.find((item) => item.run_id === activePreviewRunId);
+    if (selected) selected.explanation_review = data.explanation_review;
+    setStatus(data.explanation_review?.lolos ? "Review passed" : "Review failed");
+    runNote.textContent = data.explanation_review?.lolos
+      ? `Pembahasan lolos cek AI dengan skor ${data.explanation_review.skor ?? "-"}.`
+      : `Pembahasan belum lolos cek AI: ${(data.explanation_review?.catatan || [])[0] || "perlu revisi."}`;
+    debugPanel.hidden = false;
+    debugSource.textContent = "explanation-review";
+    debugText.textContent = JSON.stringify(data.explanation_review, null, 2);
+    renderSavedList();
+  } catch (error) {
+    setStatus("Error");
+    debugPanel.hidden = false;
+    debugSource.textContent = "explanation-review";
+    debugText.textContent = error.stack || error.message;
+  } finally {
+    reviewExplanationButton.disabled = false;
+    reviewExplanationButton.textContent = "Cek pembahasan AI";
+  }
 }
 
 async function updateSavedStatus(runId, status) {
@@ -476,10 +609,14 @@ refreshSavedButton.addEventListener("click", () => {
 
 generateImageButton.addEventListener("click", generateSavedImages);
 deleteImageButton.addEventListener("click", deleteSavedImages);
+reviewExplanationButton.addEventListener("click", reviewExplanation);
 closePreviewButton.addEventListener("click", closePreviewPanel);
 
 savedSearch.addEventListener("input", () => renderSavedList());
-savedStatusFilter.addEventListener("change", () => renderSavedList());
+savedStatusFilter.addEventListener("change", () => {
+  renderSubtopicTabs();
+  renderSavedList();
+});
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && savedLayout?.classList.contains("has-preview")) {
@@ -510,7 +647,7 @@ exportApprovedButton.addEventListener("click", async () => {
 });
 
 copyCaptionButton.addEventListener("click", async () => {
-  await copyCaption({captionText, hashtagText, debugPanel, debugSource, debugText}, setStatus);
+  await sharedCopyCaption({captionText, hashtagText, debugPanel, debugSource, debugText}, setStatus);
 });
 
 async function init() {
@@ -521,7 +658,9 @@ async function init() {
 
 window.addEventListener("popstate", () => {
   activeSubtest = subtestFromPath();
+  activeSubtopic = "all";
   renderSubtestTabs();
+  renderSubtopicTabs();
   renderSavedList();
 });
 
