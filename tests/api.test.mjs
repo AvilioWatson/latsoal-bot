@@ -99,7 +99,10 @@ test("bank review API can save, approve, export, and delete in an isolated data 
     response = await fetch(`${baseUrl}/config`, {headers: {Accept: "application/json"}});
     assert.equal(response.status, 200);
     assert.match(response.headers.get("content-type"), /application\/json/);
-    assert.ok((await response.json()).topics["Penalaran Umum"]);
+    body = await response.json();
+    assert.ok(body.topics["Penalaran Umum"]);
+    assert.equal(body.subtest_codes["Penalaran Umum"], "PU");
+    assert.equal(body.topic_aliases["Pengetahuan Kuantitatif"]["Persamaan Linear"], "Aljabar dan Fungsi");
 
     response = await fetch(`${baseUrl}/saved/penalaran-umum`);
     assert.equal(response.status, 200);

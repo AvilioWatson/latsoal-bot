@@ -1,10 +1,10 @@
-import {readFileSync} from "node:fs";
-import path from "node:path";
 import {errorStatus, readJsonBody, sendError, sendJson} from "../lib/http.js";
-import {ROOT, canonicalTopic} from "../lib/paths.js";
+import {canonicalTopic} from "../lib/paths.js";
 import {runGenerator} from "../lib/runner.js";
+import {TOPICS, configPayload} from "../lib/taxonomy.js";
 
-export const TOPICS = JSON.parse(readFileSync(path.join(ROOT, "config", "topics.json"), "utf-8"));
+export {TOPICS};
+
 const LEVELS = new Set(["mudah", "sedang", "sulit"]);
 const MODES = new Set(["auto", "gemini", "draft"]);
 const PROVIDERS = new Set(["gemini", "kimi"]);
@@ -52,7 +52,7 @@ function normalizeGeneratePayload(payload) {
 
 export async function handle(request, response, route) {
   if (request.method === "GET" && (route === "/api/config" || route === "/config")) {
-    sendJson(response, {topics: TOPICS});
+    sendJson(response, configPayload());
     return true;
   }
 

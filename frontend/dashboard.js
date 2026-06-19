@@ -8,6 +8,7 @@ const dashboardRefreshButton = document.querySelector("#dashboardRefreshButton")
 
 const numberFormatter = new Intl.NumberFormat("id-ID");
 let topicsBySubtest = {};
+let topicAliases = new Map();
 let savedItems = [];
 
 function setDashboardStatus(text, state = "") {
@@ -28,22 +29,11 @@ function canonicalKey(value) {
   return String(value || "").trim().toLocaleLowerCase("id-ID");
 }
 
-const topicAliases = new Map([
-  ["pengetahuan kuantitatif\u001fpersamaan linear", "Aljabar dan Fungsi"],
-  ["pengetahuan kuantitatif\u001fpersamaan kuadrat", "Aljabar dan Fungsi"],
-  ["pengetahuan kuantitatif\u001ffungsi linear", "Aljabar dan Fungsi"],
-  ["pengetahuan kuantitatif\u001ffungsi kuadrat", "Aljabar dan Fungsi"],
-  ["pengetahuan kuantitatif\u001faljabar linear", "Aljabar dan Fungsi"],
-  ["pengetahuan kuantitatif\u001fsistem persamaan linear", "Aljabar dan Fungsi"],
-  ["pengetahuan kuantitatif\u001fpertidaksamaan linear", "Aljabar dan Fungsi"],
-  ["penalaran matematika\u001fpersamaan linear", "Aljabar dan Fungsi"],
-  ["penalaran matematika\u001fpersamaan kuadrat", "Aljabar dan Fungsi"],
-  ["penalaran matematika\u001ffungsi linear", "Aljabar dan Fungsi"],
-  ["penalaran matematika\u001ffungsi kuadrat", "Aljabar dan Fungsi"],
-  ["penalaran matematika\u001faljabar linear", "Aljabar dan Fungsi"],
-  ["penalaran matematika\u001fsistem persamaan linear", "Aljabar dan Fungsi"],
-  ["penalaran matematika\u001fpertidaksamaan linear", "Aljabar dan Fungsi"],
-]);
+function buildTopicAliases(configAliases = {}) {
+  return new Map(Object.entries(configAliases).flatMap(([subtest, aliases]) => (
+    Object.entries(aliases || {}).map(([topic, canonical]) => [`${canonicalKey(subtest)}\u001f${canonicalKey(topic)}`, canonical])
+  )));
+}
 
 function canonicalSubtestName(value) {
   const key = canonicalKey(value);
@@ -282,6 +272,7 @@ async function loadDashboard() {
     if (!configResponse.ok) throw new Error(config.error || "Gagal memuat config.");
     if (!savedResponse.ok) throw new Error(saved.error || "Gagal memuat saved.");
     topicsBySubtest = config.topics || {};
+    topicAliases = buildTopicAliases(config.topic_aliases || {});
     savedItems = saved.items || [];
     renderDashboard();
     setDashboardStatus("Siap", "ready");

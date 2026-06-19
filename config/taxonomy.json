@@ -1,0 +1,90 @@
+{
+  "subtest_codes": {
+    "Pengetahuan Kuantitatif": "PK",
+    "Penalaran Matematika": "PM",
+    "Penalaran Umum": "PU",
+    "Pengetahuan dan Pemahaman Umum": "PPU",
+    "Pemahaman Bacaan dan Menulis": "PBM",
+    "Literasi Bahasa Indonesia": "LBI",
+    "Literasi Bahasa Inggris": "LBE"
+  },
+  "topic_aliases": {
+    "Pengetahuan Kuantitatif": {
+      "Persamaan Linear": "Aljabar dan Fungsi",
+      "Persamaan Kuadrat": "Aljabar dan Fungsi",
+      "Fungsi Linear": "Aljabar dan Fungsi",
+      "Fungsi Kuadrat": "Aljabar dan Fungsi",
+      "Aljabar Linear": "Aljabar dan Fungsi",
+      "Sistem Persamaan Linear": "Aljabar dan Fungsi",
+      "Pertidaksamaan Linear": "Aljabar dan Fungsi"
+    },
+    "Penalaran Matematika": {
+      "Persamaan Linear": "Aljabar dan Fungsi",
+      "Persamaan Kuadrat": "Aljabar dan Fungsi",
+      "Fungsi Linear": "Aljabar dan Fungsi",
+      "Fungsi Kuadrat": "Aljabar dan Fungsi",
+      "Aljabar Linear": "Aljabar dan Fungsi",
+      "Sistem Persamaan Linear": "Aljabar dan Fungsi",
+      "Pertidaksamaan Linear": "Aljabar dan Fungsi"
+    }
+  },
+  "topics": {
+    "Pengetahuan dan Pemahaman Umum": [
+      "Kalimat Efektif",
+      "Makna",
+      "Pembentukan Frasa",
+      "Pembentukan Kata",
+      "Tata Kalimat",
+      "Wacana"
+    ],
+    "Penalaran Umum": [
+      "Penalaran Induktif",
+      "Penalaran Deduktif",
+      "Penalaran Kuantitatif"
+    ],
+    "Pemahaman Bacaan dan Menulis": [
+      "Aturan Imbuhan",
+      "Kalimat Efektif",
+      "Kapitalisasi dan Huruf Miring",
+      "Kata Tugas",
+      "Kelas Frasa",
+      "Kelas Kata",
+      "Latihan Soal PBM",
+      "Lebih Dekat dengan Bahasa Indonesia",
+      "Singkatan dan Akronim",
+      "Sintaksis",
+      "Tanda Baca"
+    ],
+    "Literasi Bahasa Indonesia": [
+      "Memahami Informasi",
+      "Menemukan Informasi",
+      "Mengevaluasi dan Merefleksi Informasi"
+    ],
+    "Literasi Bahasa Inggris": [
+      "General Information",
+      "Implied Information",
+      "Specific Information"
+    ],
+    "Pengetahuan Kuantitatif": [
+      "Aljabar dan Fungsi",
+      "Bilangan",
+      "Geometri dan Pengukuran",
+      "Statistika dan Peluang"
+    ],
+    "Penalaran Matematika": [
+      "Aljabar dan Fungsi",
+      "Bilangan",
+      "Data dan Ketidakpastian",
+      "Geometri dan Pengukuran"
+    ]
+  },
+  "pattern_files": {
+    "Pengetahuan dan Pemahaman Umum": "pengetahuan_pemahaman_umum.json",
+    "Penalaran Umum": "penalaran_umum.json",
+    "Pemahaman Bacaan dan Menulis": "pemahaman_bacaan_menulis.json",
+    "Literasi Bahasa Indonesia": "literasi_bahasa_indonesia.json",
+    "Literasi Bahasa Inggris": "literasi_bahasa_inggris.json",
+    "Pengetahuan Kuantitatif": "pengetahuan_kuantitatif.json",
+    "Penalaran Matematika": "penalaran_matematika.json"
+  }
+}

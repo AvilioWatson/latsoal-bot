@@ -56,7 +56,7 @@ Request:
 
 Validation:
 
-- `mapel` harus ada di `config/topics.json`.
+- `mapel` harus ada di `config/taxonomy.json` pada field `topics`.
 - `topik` harus tersedia untuk `mapel`.
 - `level` harus `mudah`, `sedang`, atau `sulit`.
 - `mode` harus `auto`, `gemini`, atau `draft`.

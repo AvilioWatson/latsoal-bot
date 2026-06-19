@@ -17,7 +17,7 @@ Gate ini memeriksa:
 - workflow manual generate menjalankan quality gate sebelum membuat artifact;
 - unit/integration test Node;
 - compile dan unit test Python;
-- sinkronisasi config Python dengan `config/*.json`;
+- sinkronisasi config Python dengan `config/taxonomy.json`;
 - smoke test generator mode `draft` dengan cleanup output.
 
 Gate akan gagal jika file test Node atau Python tidak ditemukan, supaya rename/move test tidak membuat suite kosong tampak hijau.
@@ -32,6 +32,6 @@ Gate akan gagal jika file test Node atau Python tidak ditemukan, supaya rename/m
 
 - `npm.cmd run check` hijau.
 - README sesuai perilaku aplikasi saat ini.
-- `config/topics.json` dan `config/patterns.json` sinkron dengan file pattern.
+- `config/taxonomy.json` menjadi sumber tunggal taxonomy dan sinkron dengan file pattern.
 - Generate mode `draft` berhasil.
 - Halaman `/`, `/saved`, `/stats`, dan `/health` bisa diakses saat server berjalan.

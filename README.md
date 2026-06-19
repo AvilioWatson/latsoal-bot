@@ -488,16 +488,12 @@ Pola ini dipakai sebagai cetakan konsep, bukan untuk menyalin soal.
 Daftar subtes dan topik aplikasi disimpan di satu sumber:
 
 ```text
-config/topics.json
+config/taxonomy.json
 ```
 
-Mapping subtes ke file pattern disimpan di:
+File ini menyimpan `subtest_codes`, `topic_aliases`, `topics`, dan `pattern_files`.
 
-```text
-config/patterns.json
-```
-
-Frontend mengambil daftar topik lewat route `/config`, dan generator Python membaca file config yang sama untuk pilihan `--mapel` dan pattern referensi.
+Frontend mengambil daftar topik dan alias lewat route `/config`, backend Node membaca config yang sama untuk validasi dan storage path, dan generator Python membaca file config yang sama untuk pilihan `--mapel` dan pattern referensi.
 
 ## Generate Manual Tanpa Web
 

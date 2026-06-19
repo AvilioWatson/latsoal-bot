@@ -59,7 +59,7 @@ function listTestFiles() {
 }
 
 function listJsonFiles() {
-  const files = [path.join("config", "topics.json"), path.join("config", "patterns.json")];
+  const files = [path.join("config", "taxonomy.json")];
   for (const entry of readdirSync(path.join(ROOT, "bank_soal", "patterns"), {withFileTypes: true})) {
     if (entry.isFile() && entry.name.endsWith(".json")) {
       files.push(path.join("bank_soal", "patterns", entry.name));
@@ -148,8 +148,7 @@ function checkProjectDocs() {
     "API.md",
     "QUALITY.md",
     ".github/workflows/quality.yml",
-    "config/topics.json",
-    "config/patterns.json",
+    "config/taxonomy.json",
     "scripts/check.mjs",
   ];
   const missingFiles = requiredFiles.filter((file) => {
@@ -197,11 +196,23 @@ function checkWorkflows() {
 
 function checkFrontendConfigUsage() {
   const savedJs = readFileSync(path.join(ROOT, "frontend", "saved.js"), "utf-8");
-  const topics = JSON.parse(readFileSync(path.join(ROOT, "config", "topics.json"), "utf-8"));
+  const dashboardJs = readFileSync(path.join(ROOT, "frontend", "dashboard.js"), "utf-8");
+  const taxonomy = JSON.parse(readFileSync(path.join(ROOT, "config", "taxonomy.json"), "utf-8"));
+  const topics = taxonomy.topics || {};
   const hardcoded = Object.keys(topics).filter((subtest) => savedJs.includes(`"${subtest}"`));
   if (hardcoded.length > 0) {
     throw new Error(`frontend/saved.js has hardcoded subtests; load /config instead:\n${hardcoded.join("\n")}`);
   }
+  const hardcodedAliases = Object.entries(taxonomy.topic_aliases || {}).flatMap(([subtest, aliases]) => (
+    Object.keys(aliases || {}).filter((topic) => dashboardJs.includes(`"${canonicalKeyForCheck(subtest)}\u001f${canonicalKeyForCheck(topic)}"`))
+  ));
+  if (hardcodedAliases.length > 0) {
+    throw new Error(`frontend/dashboard.js has hardcoded topic aliases; load /config instead:\n${hardcodedAliases.join("\n")}`);
+  }
+}
+
+function canonicalKeyForCheck(value) {
+  return String(value || "").trim().toLocaleLowerCase("id-ID");
 }
 
 function checkLineEndings(files) {
@@ -278,18 +289,23 @@ console.log("ok python unittest tests");
 
 const pythonTopics = run(PYTHON, [
   "-c",
-  "import json, content_generator; print(json.dumps({'topics': content_generator.MAPEL_TOPICS, 'patterns': content_generator.PATTERN_FILES}, ensure_ascii=False))",
+  "import json, content_generator; print(json.dumps({'topics': content_generator.MAPEL_TOPICS, 'pattern_files': content_generator.PATTERN_FILES, 'subtest_codes': content_generator.TAXONOMY.get('subtest_codes'), 'topic_aliases': content_generator.TAXONOMY.get('topic_aliases')}, ensure_ascii=False))",
 ]);
-const jsTopics = JSON.parse(readFileSync(path.join(ROOT, "config", "topics.json"), "utf-8"));
-const jsPatterns = JSON.parse(readFileSync(path.join(ROOT, "config", "patterns.json"), "utf-8"));
+const taxonomy = JSON.parse(readFileSync(path.join(ROOT, "config", "taxonomy.json"), "utf-8"));
 const pythonConfig = JSON.parse(pythonTopics.stdout);
-if (JSON.stringify(pythonConfig.topics) !== JSON.stringify(jsTopics)) {
-  throw new Error("Python generator topics do not match config/topics.json");
+if (JSON.stringify(pythonConfig.topics) !== JSON.stringify(taxonomy.topics)) {
+  throw new Error("Python generator topics do not match config/taxonomy.json");
 }
-if (JSON.stringify(pythonConfig.patterns) !== JSON.stringify(jsPatterns)) {
-  throw new Error("Python generator patterns do not match config/patterns.json");
+if (JSON.stringify(pythonConfig.pattern_files) !== JSON.stringify(taxonomy.pattern_files)) {
+  throw new Error("Python generator pattern files do not match config/taxonomy.json");
 }
-console.log("ok python config matches config/*.json");
+if (JSON.stringify(pythonConfig.subtest_codes) !== JSON.stringify(taxonomy.subtest_codes)) {
+  throw new Error("Python generator subtest codes do not match config/taxonomy.json");
+}
+if (JSON.stringify(pythonConfig.topic_aliases) !== JSON.stringify(taxonomy.topic_aliases)) {
+  throw new Error("Python generator topic aliases do not match config/taxonomy.json");
+}
+console.log("ok python config matches config/taxonomy.json");
 
 const smoke = run(PYTHON, [
   "content_generator.py",

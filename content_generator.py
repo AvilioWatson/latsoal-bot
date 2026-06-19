@@ -27,40 +27,26 @@ LATEX_COMMAND = os.getenv("LATSOAL_LATEX_COMMAND", "pdflatex").strip() or "pdfla
 PDF_CONVERTER = os.getenv("LATSOAL_PDF_CONVERTER", "").strip()
 RENDER_TIMEOUT_SECONDS = int(os.getenv("LATSOAL_RENDER_TIMEOUT_SECONDS", "60"))
 
-SUBTEST_CODES = {
-    "pengetahuan-kuantitatif": "PK",
-    "penalaran-matematika": "PM",
-    "penalaran-umum": "PU",
-    "pengetahuan-dan-pemahaman-umum": "PPU",
-    "pemahaman-bacaan-dan-menulis": "PBM",
-    "literasi-bahasa-indonesia": "LBI",
-    "literasi-bahasa-inggris": "LBE",
-}
-
-TOPIC_ALIASES = {
-    ("pengetahuan-kuantitatif", "persamaan-linear"): "Aljabar dan Fungsi",
-    ("pengetahuan-kuantitatif", "persamaan-kuadrat"): "Aljabar dan Fungsi",
-    ("pengetahuan-kuantitatif", "fungsi-linear"): "Aljabar dan Fungsi",
-    ("pengetahuan-kuantitatif", "fungsi-kuadrat"): "Aljabar dan Fungsi",
-    ("pengetahuan-kuantitatif", "aljabar-linear"): "Aljabar dan Fungsi",
-    ("pengetahuan-kuantitatif", "sistem-persamaan-linear"): "Aljabar dan Fungsi",
-    ("pengetahuan-kuantitatif", "pertidaksamaan-linear"): "Aljabar dan Fungsi",
-    ("penalaran-matematika", "persamaan-linear"): "Aljabar dan Fungsi",
-    ("penalaran-matematika", "persamaan-kuadrat"): "Aljabar dan Fungsi",
-    ("penalaran-matematika", "fungsi-linear"): "Aljabar dan Fungsi",
-    ("penalaran-matematika", "fungsi-kuadrat"): "Aljabar dan Fungsi",
-    ("penalaran-matematika", "aljabar-linear"): "Aljabar dan Fungsi",
-    ("penalaran-matematika", "sistem-persamaan-linear"): "Aljabar dan Fungsi",
-    ("penalaran-matematika", "pertidaksamaan-linear"): "Aljabar dan Fungsi",
-}
-
-
 def json_stdout(payload):
     print(json.dumps(payload, ensure_ascii=False, indent=2))
 
 
 def slugify(value):
     return re.sub(r"[^a-z0-9]+", "-", str(value or "").lower()).strip("-")
+
+
+TAXONOMY = json.loads((ROOT / "config" / "taxonomy.json").read_text(encoding="utf-8"))
+MAPEL_TOPICS = TAXONOMY.get("topics", {})
+PATTERN_FILES = TAXONOMY.get("pattern_files", {})
+SUBTEST_CODES = {
+    slugify(mapel): code
+    for mapel, code in TAXONOMY.get("subtest_codes", {}).items()
+}
+TOPIC_ALIASES = {
+    (slugify(mapel), slugify(topic)): canonical
+    for mapel, aliases in TAXONOMY.get("topic_aliases", {}).items()
+    for topic, canonical in aliases.items()
+}
 
 
 def subtest_code(mapel):
@@ -128,10 +114,6 @@ KIMI_MAX_OUTPUT_TOKENS = int(os.getenv("KIMI_MAX_OUTPUT_TOKENS", "16384"))
 GEMINI_VALIDATE = os.getenv("GEMINI_VALIDATE", "").lower() in {"1", "true", "yes"}
 GEMINI_CAPTION = os.getenv("GEMINI_CAPTION", "").lower() in {"1", "true", "yes"}
 GEMINI_USAGE = []
-
-
-MAPEL_TOPICS = json.loads((ROOT / "config" / "topics.json").read_text(encoding="utf-8"))
-PATTERN_FILES = json.loads((ROOT / "config" / "patterns.json").read_text(encoding="utf-8"))
 
 
 QUESTION_SCHEMA = {
