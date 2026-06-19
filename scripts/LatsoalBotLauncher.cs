@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Net;
@@ -9,6 +10,7 @@ namespace LatsoalBotLauncher
     internal static class Program
     {
         private const string AppUrl = "http://127.0.0.1:8765";
+        private const int AppPort = 8765;
 
         private static int Main()
         {
@@ -25,10 +27,8 @@ namespace LatsoalBotLauncher
                 return 1;
             }
 
-            if (!IsServerReady())
-            {
-                StartServer(root);
-            }
+            StopExistingServers();
+            StartServer(root);
 
             if (!WaitForServer())
             {
@@ -40,6 +40,76 @@ namespace LatsoalBotLauncher
             Console.WriteLine("Latsoal Bot berjalan di " + AppUrl);
             Console.WriteLine("Tutup window server Node.js jika ingin menghentikan aplikasi.");
             return 0;
+        }
+
+        private static void StopExistingServers()
+        {
+            foreach (int processId in FindListeningProcessIds(AppPort))
+            {
+                try
+                {
+                    Process process = Process.GetProcessById(processId);
+                    string name = process.ProcessName ?? "";
+                    if (!name.Equals("node", StringComparison.OrdinalIgnoreCase) &&
+                        !name.Equals("node.exe", StringComparison.OrdinalIgnoreCase))
+                    {
+                        Console.WriteLine("Port " + AppPort + " dipakai proses non-Node: " + name + " (" + processId + ").");
+                        continue;
+                    }
+
+                    Console.WriteLine("Menghentikan server Node.js lama: PID " + processId);
+                    process.Kill();
+                    process.WaitForExit(5000);
+                }
+                catch (Exception error)
+                {
+                    Console.WriteLine("Gagal menghentikan proses lama PID " + processId + ": " + error.Message);
+                }
+            }
+        }
+
+        private static IEnumerable<int> FindListeningProcessIds(int port)
+        {
+            List<int> processIds = new List<int>();
+            try
+            {
+                using (Process process = Process.Start(new ProcessStartInfo
+                {
+                    FileName = "netstat.exe",
+                    Arguments = "-ano -p tcp",
+                    CreateNoWindow = true,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                }))
+                {
+                    string output = process.StandardOutput.ReadToEnd();
+                    process.WaitForExit(5000);
+                    string marker = ":" + port;
+                    foreach (string rawLine in output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+                    {
+                        string line = rawLine.Trim();
+                        if (!line.StartsWith("TCP", StringComparison.OrdinalIgnoreCase) ||
+                            line.IndexOf(marker, StringComparison.OrdinalIgnoreCase) < 0 ||
+                            line.IndexOf("LISTENING", StringComparison.OrdinalIgnoreCase) < 0)
+                        {
+                            continue;
+                        }
+
+                        string[] parts = line.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                        int processId;
+                        if (parts.Length >= 5 && int.TryParse(parts[parts.Length - 1], out processId) && !processIds.Contains(processId))
+                        {
+                            processIds.Add(processId);
+                        }
+                    }
+                }
+            }
+            catch (Exception error)
+            {
+                Console.WriteLine("Tidak bisa mengecek server lama di port " + port + ": " + error.Message);
+            }
+            return processIds;
         }
 
         private static string FindProjectRoot()
@@ -83,14 +153,19 @@ namespace LatsoalBotLauncher
 
         private static void StartServer(string root)
         {
-            Process.Start(new ProcessStartInfo
+            ProcessStartInfo startInfo = new ProcessStartInfo
             {
                 FileName = "cmd.exe",
                 Arguments = "/c \"node server.js\"",
                 WorkingDirectory = root,
-                UseShellExecute = true,
+                UseShellExecute = false,
                 WindowStyle = ProcessWindowStyle.Minimized
-            });
+            };
+            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LATSOAL_RENDER_ENGINE")))
+            {
+                startInfo.EnvironmentVariables["LATSOAL_RENDER_ENGINE"] = "pil";
+            }
+            Process.Start(startInfo);
         }
 
         private static bool WaitForServer()

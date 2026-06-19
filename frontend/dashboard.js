@@ -28,6 +28,23 @@ function canonicalKey(value) {
   return String(value || "").trim().toLocaleLowerCase("id-ID");
 }
 
+const topicAliases = new Map([
+  ["pengetahuan kuantitatif\u001fpersamaan linear", "Aljabar dan Fungsi"],
+  ["pengetahuan kuantitatif\u001fpersamaan kuadrat", "Aljabar dan Fungsi"],
+  ["pengetahuan kuantitatif\u001ffungsi linear", "Aljabar dan Fungsi"],
+  ["pengetahuan kuantitatif\u001ffungsi kuadrat", "Aljabar dan Fungsi"],
+  ["pengetahuan kuantitatif\u001faljabar linear", "Aljabar dan Fungsi"],
+  ["pengetahuan kuantitatif\u001fsistem persamaan linear", "Aljabar dan Fungsi"],
+  ["pengetahuan kuantitatif\u001fpertidaksamaan linear", "Aljabar dan Fungsi"],
+  ["penalaran matematika\u001fpersamaan linear", "Aljabar dan Fungsi"],
+  ["penalaran matematika\u001fpersamaan kuadrat", "Aljabar dan Fungsi"],
+  ["penalaran matematika\u001ffungsi linear", "Aljabar dan Fungsi"],
+  ["penalaran matematika\u001ffungsi kuadrat", "Aljabar dan Fungsi"],
+  ["penalaran matematika\u001faljabar linear", "Aljabar dan Fungsi"],
+  ["penalaran matematika\u001fsistem persamaan linear", "Aljabar dan Fungsi"],
+  ["penalaran matematika\u001fpertidaksamaan linear", "Aljabar dan Fungsi"],
+]);
+
 function canonicalSubtestName(value) {
   const key = canonicalKey(value);
   return Object.keys(topicsBySubtest).find((subtest) => canonicalKey(subtest) === key) || value || "Tanpa Sub Tes";
@@ -36,7 +53,10 @@ function canonicalSubtestName(value) {
 function canonicalTopicName(subtest, value) {
   const topics = topicsBySubtest[subtest] || [];
   const key = canonicalKey(value);
-  return topics.find((topic) => canonicalKey(topic) === key) || value || "Tanpa Sub Topik";
+  const alias = topicAliases.get(`${canonicalKey(subtest)}\u001f${key}`);
+  const target = alias || value;
+  const targetKey = canonicalKey(target);
+  return topics.find((topic) => canonicalKey(topic) === targetKey) || target || "Tanpa Sub Topik";
 }
 
 function uploadPercent(uploaded, total) {
@@ -81,7 +101,7 @@ function createDashboardRows() {
 
   for (const item of savedItems) {
     const subtest = canonicalSubtestName(item.mapel);
-    const topic = canonicalTopicName(subtest, item.topik);
+    const topic = canonicalTopicName(subtest, item.canonical_topik || item.topik);
     const row = ensureRow(subtest, topic);
     const level = normalizeLevel(item.level);
     if (level) row[level] += 1;
@@ -165,6 +185,13 @@ function appendCountCell(row, value, variant = "") {
   row.append(cell);
 }
 
+function uploadStatus(uploaded, total) {
+  if (!total) return "empty";
+  if (uploaded >= total) return "complete";
+  if (uploaded > 0) return "partial";
+  return "empty";
+}
+
 function renderTable(rows) {
   dashboardTableBody.innerHTML = "";
   const visibleRows = filteredRows(rows);
@@ -210,12 +237,22 @@ function renderTable(rows) {
 
       const uploadedCell = document.createElement("td");
       const percent = uploadPercent(item.uploaded, item.total);
+      const status = uploadStatus(item.uploaded, item.total);
       uploadedCell.innerHTML = `
-        <div class="upload-cell">
-          <span>${formatNumber(item.uploaded)}</span>
-          <div class="upload-meter" aria-label="Upload ${percent}%">
-            <span style="width: ${percent}%"></span>
+        <div class="upload-cell" data-status="${status}">
+          <div class="upload-count">
+            <strong>${formatNumber(item.uploaded)}</strong>
+            <span>/ ${formatNumber(item.total)}</span>
           </div>
+          <div class="upload-progress">
+            <div class="upload-meter" aria-label="Upload ${percent}% dari ${formatNumber(item.total)} soal">
+              <span style="width: ${percent}%"></span>
+            </div>
+            <span class="upload-percent">${percent}%</span>
+          </div>
+          <span class="upload-state">
+            ${status === "complete" ? "Lengkap" : status === "partial" ? "Sebagian" : "Belum ada"}
+          </span>
         </div>
       `;
       row.append(uploadedCell);

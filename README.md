@@ -45,6 +45,7 @@ Implemented question generation, review workflow, validation, deduplication, cap
 - Simpan soal yang dianggap bagus ke Bank Review.
 - Bank Review terpisah dari halaman generator.
 - Bank Review bisa dibuka per subtes.
+- Bank Review mempertahankan topik asli soal, sekaligus tetap bisa mencari topik kanonis seperti `Aljabar dan Fungsi`.
 - Generate ulang atau hapus gambar dari item saved.
 - Approve atau reject soal saved.
 - Tandai soal saved yang sudah diupload.
@@ -120,7 +121,7 @@ Lalu buka:
 http://127.0.0.1:8765
 ```
 
-Alternatif di Windows, klik dua kali `LatsoalBot.exe` dari root project. Launcher ini menjalankan `node server.js`, menunggu server siap, lalu membuka browser ke alamat lokal di atas.
+Alternatif di Windows, klik dua kali `LatsoalBot.exe` dari root project. Launcher ini menghentikan server Node.js lama yang masih memakai port `8765`, menjalankan `node server.js` dari folder project saat ini, menyetel `LATSOAL_RENDER_ENGINE=pil` jika belum ada konfigurasi render, lalu membuka browser ke alamat lokal di atas.
 
 Server memakai Node.js built-in HTTP server, tanpa Express dan tanpa dependency npm tambahan. Logic generator tetap berada di Python.
 
@@ -171,6 +172,13 @@ Di dalam container, renderer default adalah:
 LATSOAL_RENDER_ENGINE=latex
 LATSOAL_LATEX_COMMAND=pdflatex
 LATSOAL_PDF_CONVERTER=pdftoppm
+```
+
+Di Windows lewat `LatsoalBot.exe`, launcher memakai renderer PIL agar aplikasi tetap jalan tanpa instalasi LaTeX lokal. Jika ingin memaksa LaTeX di mesin lokal, set environment variable sendiri sebelum menjalankan server:
+
+```powershell
+$env:LATSOAL_RENDER_ENGINE="latex"
+node server.js
 ```
 
 ## Check dan Smoke Test
@@ -270,6 +278,10 @@ Alur dasar saat tombol generate ditekan:
 5. Browser menampilkan preview dari output tersebut.
 6. Jika pengguna menekan tombol simpan, output dicopy ke `saved/<kode-subtes>/<topik>/<run-id>/`.
 
+`run-id` dibuat dari timestamp. Jika timestamp yang sama sudah dipakai di `outputs/` atau `saved/`, generator otomatis maju ke detik berikutnya agar hasil lama tidak tertimpa.
+
+Topik tertentu dapat disimpan ke folder kanonis agar struktur file rapi. Contohnya `Persamaan Linear`, `Fungsi Kuadrat`, dan beberapa topik aljabar lain masuk folder `aljabar-dan-fungsi`. Di Bank Review, nama topik asli dari metadata tetap ditampilkan dan tetap bisa dicari.
+
 ## LLM dan Fallback Lokal
 
 Sistem ini masih bisa memakai LLM untuk membuat soal, tetapi tidak sepenuhnya bergantung pada LLM.
@@ -341,7 +353,7 @@ bank/index.json
 Metadata soal pembanding tetap dibaca dari:
 
 ```text
-saved/<run-id>/metadata.json
+saved/<kode-subtes>/<topik>/<run-id>/metadata.json
 ```
 
 ## Output File
@@ -360,14 +372,8 @@ metadata.json
 1.jpg
 2.jpg
 3.jpg
-thumbnail.tex
-thumbnail.pdf
-thumbnail.jpg
-post-1.tex
-post-1.pdf
-post-1.jpg
-pembahasan-1.tex
-pembahasan-1.pdf
+thumbnail.png atau thumbnail.jpg
+post-1.png atau post-1.jpg
 pembahasan-1.jpg
 soal.json
 ```
@@ -377,26 +383,29 @@ Keterangan:
 - `caption.txt`: caption final.
 - `metadata.json`: catatan source, fallback, error, validator, dedup, usage token, dan daftar file gambar.
 - `1.jpg`, `2.jpg`, `3.jpg`, dst: gambar final yang dipakai preview dan download, sudah berurutan dari thumbnail sampai pembahasan.
-- `thumbnail.tex`, `post-*.tex`, dan `pembahasan-*.tex`: sumber LaTeX/TikZ untuk setiap slide.
-- `thumbnail.pdf`, `post-*.pdf`, dan `pembahasan-*.pdf`: hasil compile LaTeX.
-- `thumbnail.jpg`, `post-*.jpg`, dan `pembahasan-*.jpg`: hasil convert PDF sebelum disalin menjadi JPG bernomor.
+- `thumbnail.png` / `post-*.png` / `pembahasan-*.jpg`: output intermediate dari renderer PIL.
+- `thumbnail.tex`, `post-*.tex`, `pembahasan-*.tex`, PDF, dan JPG intermediate hanya muncul jika renderer LaTeX dipakai.
 - `soal.json`: data soal mentah.
 
 Metadata gambar menyimpan file JPG bernomor di `files.image`, `files.images`, `files.thumbnail`, dan `files.explanation` / `files.explanations`.
 
-Contoh struktur untuk Pengetahuan Kuantitatif topik fungsi kuadrat:
+Contoh struktur untuk Pengetahuan Kuantitatif topik fungsi kuadrat atau persamaan linear:
 
 ```text
-saved/PK/fungsi-kuadrat/20260612-092806/
+saved/PK/aljabar-dan-fungsi/20260612-092806/
 ```
 
-Renderer gambar default memakai flow:
+Renderer gambar mendukung tiga mode:
 
 ```text
-LaTeX/TikZ .tex -> PDF -> JPG
+LATSOAL_RENDER_ENGINE=auto   # default Python: coba LaTeX, fallback ke PIL
+LATSOAL_RENDER_ENGINE=pil    # default launcher EXE: tidak perlu LaTeX
+LATSOAL_RENDER_ENGINE=latex  # paksa LaTeX/TikZ -> PDF -> JPG
 ```
 
-Dependency runtime yang dibutuhkan:
+Mode PIL cukup membutuhkan Pillow dan menghasilkan thumbnail, soal, pilihan ganda, serta pembahasan siap upload. Layout soal, opsi, jawaban, dan pembahasan memakai kotak putih; jika masih muat, pilihan ganda digabung di halaman soal agar ruang kosong tidak terbuang. Konten di halaman lanjutan dimulai dari area atas, bukan dipusatkan ke bawah.
+
+Mode LaTeX membutuhkan:
 
 - LaTeX compiler, default `pdflatex`.
 - PDF converter, salah satu dari ImageMagick `magick` atau Poppler `pdftoppm`.
@@ -404,13 +413,13 @@ Dependency runtime yang dibutuhkan:
 Konfigurasi terkait:
 
 ```text
-LATSOAL_RENDER_ENGINE=latex
+LATSOAL_RENDER_ENGINE=auto
 LATSOAL_LATEX_COMMAND=pdflatex
 LATSOAL_PDF_CONVERTER=
 LATSOAL_RENDER_TIMEOUT_SECONDS=60
 ```
 
-Jika mesin belum punya LaTeX/converter dan hanya ingin menjalankan test lokal, pakai `LATSOAL_RENDER_ENGINE=pil`. Mode ini fallback lama dan bukan flow utama web.
+Jika mesin belum punya LaTeX/converter, pakai `LATSOAL_RENDER_ENGINE=pil` atau jalankan lewat `LatsoalBot.exe`.
 
 Tombol `Download folder` mengunduh ZIP yang hanya berisi JPG bernomor:
 
@@ -448,6 +457,8 @@ Tombol `Export approved` hanya menyalin item berstatus `Approved` ke folder `app
 Tombol `Sudah diupload` menandai item dengan `uploaded_at`, sedangkan `Tidak jadi diupload` mengosongkan tanda tersebut tanpa mengubah status review. Catatan upload tetap terpisah dari alur approve/reject/export.
 
 Di Bank Review, tombol `Generate` pada panel gambar menjalankan ulang renderer dari `metadata.json`. Tombol `Hapus gambar` menghapus `1.jpg`, `2.jpg`, dst serta file render intermediate dari item saved tanpa menghapus data soal, caption, atau metadata utama.
+
+Bank Review dibangun ulang dari file `saved/**/metadata.json` saat daftar dimuat. Ini membuat item lama tetap muncul walaupun index pernah tertinggal. Status review terbaru di `bank/index.json` tetap dipertahankan saat rebuild.
 
 ## Struktur Subtes
 
@@ -499,7 +510,7 @@ python content_generator.py --mapel "Penalaran Umum" --topik "Penalaran deduktif
 Output tetap masuk ke:
 
 ```text
-outputs/<run-id>/
+outputs/<kode-subtes>/<topik>/<run-id>/
 ```
 
 ## GitHub Actions Self-Hosted
@@ -538,13 +549,15 @@ Web akan menampilkan error quota dan generator akan memakai fallback jika memung
 
 ### Preview tidak muncul
 
-Cek folder `outputs/<run-id>/` atau `saved/<run-id>/`. Pastikan `soal.json`, `caption.txt`, dan `metadata.json` tersedia.
+Cek folder `outputs/<kode-subtes>/<topik>/<run-id>/` atau `saved/<kode-subtes>/<topik>/<run-id>/`. Pastikan `soal.json`, `caption.txt`, dan `metadata.json` tersedia.
 
 Jika metadata ada tetapi gambar hilang di Bank Review, buka item tersebut lalu tekan tombol `Generate` pada panel gambar untuk membuat ulang JPG bernomor.
 
+Jika item saved tidak terlihat di daftar, buka ulang Bank Review atau restart server. Daftar saved dibangun ulang dari `saved/**/metadata.json`, sehingga item lama akan muncul kembali selama folder metadata masih ada.
+
 ### Download folder gagal
 
-Pastikan run id masih ada di `outputs/<run-id>/` atau `saved/<run-id>/`. Endpoint download hanya menerima run id format timestamp seperti `20260605-230100`.
+Pastikan run id masih ada di dalam `outputs/` atau `saved/`. Endpoint download menerima run id format timestamp seperti `20260605-230100` dan akan mencari foldernya di struktur nested subtes/topik.
 
 ### API key bocor
 

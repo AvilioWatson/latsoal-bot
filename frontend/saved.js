@@ -164,7 +164,7 @@ function filteredSavedItems() {
   return savedItems.filter((item) => {
     const statusOk = status === "all" || (item.status || "saved") === status;
     const subtestOk = activeSubtest === "all" || item.mapel === activeSubtest;
-    const haystack = [item.run_id, item.mapel, item.topik, item.level, item.source, item.status].join(" ").toLowerCase();
+    const haystack = [item.run_id, item.mapel, item.topik, item.canonical_topik, item.level, item.source, item.status].join(" ").toLowerCase();
     return subtestOk && statusOk && (!query || haystack.includes(query));
   });
 }

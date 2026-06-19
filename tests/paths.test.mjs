@@ -58,6 +58,10 @@ test("buildStoragePath groups question artifacts by subtest code and topic", () 
   assert.equal(subtestCode("Pengetahuan Kuantitatif"), "PK");
   assert.equal(
     buildStoragePath({mapel: "Pengetahuan Kuantitatif", topik: "Aljabar Linear"}, "20260529-123456"),
-    "PK/aljabar-linear/20260529-123456",
+    "PK/aljabar-dan-fungsi/20260529-123456",
+  );
+  assert.equal(
+    buildStoragePath({mapel: "Pengetahuan Kuantitatif", topik: "Persamaan Linear"}, "20260529-123456"),
+    "PK/aljabar-dan-fungsi/20260529-123456",
   );
 });

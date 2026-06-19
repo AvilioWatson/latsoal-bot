@@ -22,7 +22,7 @@ SAVED_DIR = DATA_ROOT / "saved"
 BANK_INDEX_PATH = DATA_ROOT / "bank" / "index.json"
 DEDUP_THRESHOLD = float(os.getenv("DEDUP_THRESHOLD", "0.82"))
 LOGO_PATH = ROOT / "assets" / "near_education_wordmark_v2.svg"
-RENDER_ENGINE = os.getenv("LATSOAL_RENDER_ENGINE", "latex").strip().lower()
+RENDER_ENGINE = os.getenv("LATSOAL_RENDER_ENGINE", "auto").strip().lower()
 LATEX_COMMAND = os.getenv("LATSOAL_LATEX_COMMAND", "pdflatex").strip() or "pdflatex"
 PDF_CONVERTER = os.getenv("LATSOAL_PDF_CONVERTER", "").strip()
 RENDER_TIMEOUT_SECONDS = int(os.getenv("LATSOAL_RENDER_TIMEOUT_SECONDS", "60"))
@@ -35,6 +35,23 @@ SUBTEST_CODES = {
     "pemahaman-bacaan-dan-menulis": "PBM",
     "literasi-bahasa-indonesia": "LBI",
     "literasi-bahasa-inggris": "LBE",
+}
+
+TOPIC_ALIASES = {
+    ("pengetahuan-kuantitatif", "persamaan-linear"): "Aljabar dan Fungsi",
+    ("pengetahuan-kuantitatif", "persamaan-kuadrat"): "Aljabar dan Fungsi",
+    ("pengetahuan-kuantitatif", "fungsi-linear"): "Aljabar dan Fungsi",
+    ("pengetahuan-kuantitatif", "fungsi-kuadrat"): "Aljabar dan Fungsi",
+    ("pengetahuan-kuantitatif", "aljabar-linear"): "Aljabar dan Fungsi",
+    ("pengetahuan-kuantitatif", "sistem-persamaan-linear"): "Aljabar dan Fungsi",
+    ("pengetahuan-kuantitatif", "pertidaksamaan-linear"): "Aljabar dan Fungsi",
+    ("penalaran-matematika", "persamaan-linear"): "Aljabar dan Fungsi",
+    ("penalaran-matematika", "persamaan-kuadrat"): "Aljabar dan Fungsi",
+    ("penalaran-matematika", "fungsi-linear"): "Aljabar dan Fungsi",
+    ("penalaran-matematika", "fungsi-kuadrat"): "Aljabar dan Fungsi",
+    ("penalaran-matematika", "aljabar-linear"): "Aljabar dan Fungsi",
+    ("penalaran-matematika", "sistem-persamaan-linear"): "Aljabar dan Fungsi",
+    ("penalaran-matematika", "pertidaksamaan-linear"): "Aljabar dan Fungsi",
 }
 
 
@@ -51,8 +68,13 @@ def subtest_code(mapel):
     return SUBTEST_CODES.get(slug, slug.upper() or "LAINNYA")
 
 
+def canonical_topic(mapel, topic):
+    raw_topic = topic or "umum"
+    return TOPIC_ALIASES.get((slugify(mapel), slugify(raw_topic)), raw_topic)
+
+
 def build_storage_path(question, run_id):
-    return Path(subtest_code(question.get("mapel"))) / slugify(question.get("topik") or "umum") / run_id
+    return Path(subtest_code(question.get("mapel"))) / slugify(canonical_topic(question.get("mapel"), question.get("topik"))) / run_id
 
 
 def classify_error(exc):
@@ -189,6 +211,27 @@ CAPTION_SCHEMA = {
 
 def _now_id():
     return dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+
+
+def _unique_run_id(seed_run_id, question):
+    try:
+        current = dt.datetime.strptime(seed_run_id, "%Y%m%d-%H%M%S")
+    except ValueError:
+        current = dt.datetime.now()
+
+    for _ in range(86400):
+        run_id = current.strftime("%Y%m%d-%H%M%S")
+        storage_path = build_storage_path(question, run_id)
+        candidates = [
+            OUTPUT_DIR / storage_path,
+            SAVED_DIR / storage_path,
+            OUTPUT_DIR / run_id,
+            SAVED_DIR / run_id,
+        ]
+        if not any(candidate.exists() for candidate in candidates):
+            return run_id
+        current += dt.timedelta(seconds=1)
+    raise RuntimeError("Tidak bisa membuat run_id unik untuk output baru.")
 
 
 def _extract_json(text):
@@ -362,6 +405,11 @@ def _split_sentences(text):
 
 def _format_question_text(text):
     formatted = str(text).replace("\r\n", "\n").replace("\r", "\n")
+    formatted = re.sub(
+        r"\b\d+(?:\s*:\s*\d+){1,}\b",
+        lambda match: re.sub(r"\s*:\s*", ":", match.group(0)),
+        formatted,
+    )
     formatted = re.sub(r"\s+([1-9]\d?\.)\s+", r"\n\1 ", formatted)
     formatted = re.sub(r"\s+(Simpulan\b)", r"\n\1", formatted)
     return re.sub(r"\n{3,}", "\n\n", formatted).strip()
@@ -455,25 +503,25 @@ def _paginate_quiz(draw, question, fonts):
     q_paragraphs = _wrap_question_paragraphs(draw, question.get("soal", ""), fonts["question"], 790)
     q_lines = _flatten_paragraphs(q_paragraphs)
     choices = question.get("pilihan", {})
-    choice_page_limit = 460 if len(q_lines) <= 5 else 742
+    choice_page_limit = 460 if len(q_lines) <= 8 else 742
     choice_pages = []
     current = []
     used = 0
     for key in ["A", "B", "C", "D", "E"]:
         lines = _wrap_text(draw, choices.get(key, ""), fonts["body"], 650)
         content_h = _lines_visual_height(draw, lines, fonts["body"], gap=8)
-        block_h = max(78, content_h + 28)
-        if current and used + block_h + 14 > choice_page_limit:
+        block_h = max(74, content_h + 24)
+        if current and used + block_h + 12 > choice_page_limit:
             choice_pages.append(current)
             current = []
             used = 0
         current.append((key, lines, block_h))
-        used += block_h + 14
+        used += block_h + 12
     if current:
         choice_pages.append(current)
 
     pages = []
-    if len(q_lines) <= 5:
+    if len(q_lines) <= 8:
         pages.append({"question_lines": q_lines, "choices": choice_pages[0] if choice_pages else []})
         for choice_page in choice_pages[1:]:
             pages.append({"question_lines": [], "choices": choice_page})
@@ -543,6 +591,13 @@ def _build_quiz_logo_fallback(target_width=164):
     return logo
 
 
+def _draw_page_header(draw, question, fonts, colors, title_override=None):
+    title = str(question.get("mapel", "Kuis"))
+    subtitle = title_override or str(question.get("topik") or question.get("mapel", "Pengetahuan Umum"))
+    draw.text((72, 82), title[:42], font=fonts["title"], fill=colors["ink"])
+    _draw_tracking_text(draw, 72, 132, subtitle.upper()[:48], fonts["category"], colors["muted"], tracking=2)
+
+
 def _count_quiz_image_pages(question):
     try:
         from PIL import Image, ImageDraw
@@ -581,7 +636,7 @@ def render_thumbnail_image(question, run_dir):
 
     image = Image.new("RGB", (width, height), colors["bg"])
     draw = ImageDraw.Draw(image)
-    logo = _load_quiz_logo()
+    logo = _load_quiz_logo(target_width=260)
     account = str(question.get("akun", "@utbk_neareducation") or "@utbk_neareducation")
     if not account.startswith("@"):
         account = f"@{account}"
@@ -636,7 +691,7 @@ def render_quiz_images(question, run_dir, page_offset=0, total_pages=None):
         "quiet": "#c8bfb0",
         "line": "#d4cdc2",     # border sedikit kecoklatan
         "dark": "#1a1208",
-        "white": "#f5f0e8",    # "putih" di sini tetap krem
+        "white": "#fffdf8",
     }
     fonts = {
         "category": _load_font(25, family="lora"),
@@ -662,10 +717,7 @@ def render_quiz_images(question, run_dir, page_offset=0, total_pages=None):
         draw.rectangle((0, 0, width, height), fill=colors["bg"])
         if logo:
             image.paste(logo, (928 - logo.width, 68), logo)
-        category = str(question.get("mapel", "Kuis")).upper()
-        title = str(question.get("topik") or question.get("mapel", "Pengetahuan Umum"))
-        _draw_tracking_text(draw, 72, 78, category[:42], fonts["category"], colors["muted"], tracking=2)
-        draw.text((72, 118), title[:44], font=fonts["title"], fill=colors["ink"])
+        _draw_page_header(draw, question, fonts, colors)
 
         has_question = bool(page["question_lines"])
         has_choices = bool(page["choices"])
@@ -673,21 +725,23 @@ def render_quiz_images(question, run_dir, page_offset=0, total_pages=None):
         if has_question and not has_choices:
             q_box_h = min(696, max(320, len(page["question_lines"]) * q_line_h + 120))
             available_top = 188
-            available_bottom = 930
-            q_box_top = available_top + (available_bottom - available_top - q_box_h) // 2
+            q_box_top = available_top
             question_box = (72, q_box_top, 928, q_box_top + q_box_h)
         elif has_question:
-            q_box_bottom = min(440, 228 + len(page["question_lines"]) * q_line_h + 54)
+            q_box_bottom = min(474, 228 + len(page["question_lines"]) * q_line_h + 94)
             question_box = (72, 188, 928, max(328, q_box_bottom))
         else:
             question_box = None
 
         q_lines = page["question_lines"]
         if question_box:
-            draw.rounded_rectangle(question_box, radius=7, fill=colors["panel"], outline=colors["line"], width=2)
+            draw.rounded_rectangle(question_box, radius=7, fill=colors["white"], outline=colors["line"], width=2)
         q_total_h = len(q_lines) * q_line_h
         if question_box:
-            q_y = question_box[1] + max(26, (question_box[3] - question_box[1] - q_total_h) // 2)
+            if has_choices:
+                q_y = question_box[1] + max(16, (question_box[3] - question_box[1] - q_total_h) // 2)
+            else:
+                q_y = question_box[1] + 46
             text_x = question_box[0] + 54
             text_w = question_box[2] - question_box[0] - 108
             for line_index, line in enumerate(q_lines):
@@ -699,26 +753,29 @@ def render_quiz_images(question, run_dir, page_offset=0, total_pages=None):
                     fonts["question"],
                     colors["ink"],
                     text_w,
-                    justify=line_index < len(q_lines) - 1,
+                    justify=False,
                 )
                 q_y += q_line_h
 
-        GAP = 14
+        GAP = 12
         block_heights = []
         for _, lines, _ in page["choices"]:
             content_h = _lines_visual_height(draw, lines, fonts["body"], gap=8)
-            block_heights.append(max(78, content_h + 28))
+            block_heights.append(max(74, content_h + 24))
 
         total_h = sum(block_heights) + GAP * (len(page["choices"]) - 1)
         area_top = (question_box[3] + 28) if question_box else 188
         area_bottom = 930
         area_h = area_bottom - area_top
-        y = area_top + (area_h - total_h) // 2 if page["choices"] else area_top
+        if page["choices"] and question_box:
+            y = area_top + max(0, (area_h - total_h) // 2)
+        else:
+            y = area_top
         for (key, lines, _), block_h in zip(page["choices"], block_heights):
-            fill = colors["bg"]
+            fill = colors["white"]
             outline = colors["line"]
             draw.rounded_rectangle((72, y, 928, y + block_h), radius=7, fill=fill, outline=outline, width=2)
-            badge_fill = colors["bg"]
+            badge_fill = colors["white"]
             badge_outline = colors["line"]
             badge_text = "#26405a"
 
@@ -763,7 +820,7 @@ def render_quiz_images(question, run_dir, page_offset=0, total_pages=None):
     return output_paths
 
 
-def _format_explanation_text(text, max_paragraph_chars=230):
+def _format_explanation_text(text, max_paragraph_chars=230, sentence_per_line=False):
     raw = str(text).replace("\r\n", "\n").replace("\r", "\n").strip()
     if not raw:
         return ""
@@ -788,6 +845,9 @@ def _format_explanation_text(text, max_paragraph_chars=230):
             continue
         current = ""
         for sentence in _split_sentences(block):
+            if sentence_per_line:
+                paragraphs.append(sentence)
+                continue
             candidate = f"{current} {sentence}".strip()
             if current and len(candidate) > max_paragraph_chars:
                 paragraphs.append(current)
@@ -909,6 +969,7 @@ def render_explanation_images(question, run_dir, page_offset=0, total_pages=None
         "ink": "#2a2118",
         "muted": "#9c8f7e",
         "line": "#d4cdc2",
+        "white": "#fffdf8",
     }
     fonts = {
         "category": _load_font(25, family="lora"),
@@ -942,23 +1003,14 @@ def render_explanation_images(question, run_dir, page_offset=0, total_pages=None
         draw.rectangle((0, 0, width, height), fill=colors["bg"])
         if logo:
             image.paste(logo, (928 - logo.width, 68), logo)
-        _draw_tracking_text(
-            draw,
-            72,
-            78,
-            str(question.get("mapel", "Kuis")).upper()[:42],
-            fonts["category"],
-            colors["muted"],
-            tracking=2,
-        )
-        draw.text((72, 118), "Pembahasan", font=fonts["title"], fill=colors["ink"])
+        _draw_page_header(draw, question, fonts, colors, title_override="Pembahasan")
 
         panel_top = 210
         if page_index == 1:
             answer_box = (72, panel_top, 928, panel_top + 104)
-            draw.rounded_rectangle(answer_box, radius=7, fill=colors["answer_panel"], outline=colors["line"], width=2)
+            draw.rounded_rectangle(answer_box, radius=7, fill=colors["white"], outline=colors["line"], width=2)
             badge = (104, panel_top + 25, 164, panel_top + 79)
-            draw.rounded_rectangle(badge, radius=4, fill=colors["bg"], outline=colors["line"], width=2)
+            draw.rounded_rectangle(badge, radius=4, fill=colors["white"], outline=colors["line"], width=2)
             if answer_key:
                 key_bbox = _text_bbox(draw, answer_key, fonts["body_bold"])
                 key_y = badge[1] + (54 - (key_bbox[3] - key_bbox[1])) // 2 - key_bbox[1]
@@ -980,7 +1032,7 @@ def render_explanation_images(question, run_dir, page_offset=0, total_pages=None
 
         content_h = _explanation_visual_height(len(lines), line_h)
         panel_bottom = min(876, panel_top + content_h + 92)
-        draw.rounded_rectangle((72, panel_top, 928, panel_bottom), radius=7, fill=colors["panel"], outline=colors["line"], width=2)
+        draw.rounded_rectangle((72, panel_top, 928, panel_bottom), radius=7, fill=colors["white"], outline=colors["line"], width=2)
         text_y = panel_top + 46
         for line_index, line in enumerate(lines):
             if line:
@@ -992,7 +1044,7 @@ def render_explanation_images(question, run_dir, page_offset=0, total_pages=None
                     fonts["body"],
                     colors["ink"],
                     748,
-                    justify=line_index < len(lines) - 1 and lines[line_index + 1] != "",
+                    justify=False,
                 )
             text_y += line_h
 
@@ -1261,10 +1313,29 @@ def _node(x, y, width, lines, size=30, color="ink", align="left", weight=""):
     )
 
 
+def _centered_node(x, y, width, height, lines, size=30, color="ink", weight=""):
+    font = rf"\fontsize{{{size}pt}}{{{int(size * 1.28)}pt}}\selectfont"
+    if weight == "bold":
+        font = r"\bfseries " + font
+    return (
+        rf"\node[anchor=center, text={color}, align=center, inner sep=0pt, "
+        rf"minimum width={width}pt, minimum height={height}pt, font={{{font}}}] "
+        rf"at ({x + width / 2:.1f},{1080 - (y + height / 2):.1f}) "
+        rf"{{{_latex_lines(lines)}}};"
+    )
+
+
 def _rect(x1, y1, x2, y2, fill="panel", draw="line", radius=7):
     return (
         rf"\draw[fill={fill}, draw={draw}, line width=2pt, rounded corners={radius}pt] "
         rf"({x1},{1080 - y1}) rectangle ({x2},{1080 - y2});"
+    )
+
+
+def _latex_quiz_logo(x=800, y=82, width=190):
+    return (
+        rf"\node[anchor=north west, inner sep=0pt] at ({x},{1080 - y}) "
+        rf"{{\includegraphics[width={width}pt]{{near_education_logo.png}}}};"
     )
 
 
@@ -1274,6 +1345,7 @@ def _latex_document(body):
 \usepackage[utf8]{{inputenc}}
 \usepackage[T1]{{fontenc}}
 \usepackage{{lmodern}}
+\usepackage{{graphicx}}
 \usepackage{{tikz}}
 \usetikzlibrary{{arrows.meta}}
 \pagestyle{{empty}}
@@ -1311,6 +1383,7 @@ def _latex_thumbnail_source(question):
     subtopic = _wrap_plain_lines(question.get("topik") or question.get("mapel", "Subtopik"), 44, 2)
     account = str(question.get("akun", "@utbk_neareducation") or "@utbk_neareducation")
     body = "\n".join([
+        _latex_quiz_logo(),
         r"\draw[line, line width=2pt] (78,810) -- (1002,810);",
         r"\draw[line, line width=2pt] (78,270) -- (1002,270);",
         _node(78, 408, 924, subtest, size=48, align="center", weight="bold"),
@@ -1497,7 +1570,6 @@ def _cartesian_visual_code(question, x=570, y=198, w=438, h=352, include_explana
     body = [
         rf"\begin{{scope}}[shift={{({left},{bottom})}}]",
         rf"\clip (0,0) rectangle ({grid_w:.1f},{grid_h:.1f});",
-        rf"\draw[grid, line width=0.75pt] (0,0) grid[xstep={x_unit:.1f}, ystep={y_unit:.1f}] ({grid_w:.1f},{grid_h:.1f});",
         rf"\draw[ink, line width=1.8pt, -{{Stealth[length=7pt]}}] (0,{center_y:.1f}) -- ({grid_w + 6:.1f},{center_y:.1f}) node[below left, text=ink] {{$x$}};",
         rf"\draw[ink, line width=1.8pt, -{{Stealth[length=7pt]}}] ({center_x:.1f},0) -- ({center_x:.1f},{grid_h + 6:.1f}) node[below left, text=ink] {{$y$}};",
         rf"\draw[muted, line width=1.2pt] ({center_x:.1f},{center_y - 4:.1f}) -- ({center_x:.1f},{center_y + 4:.1f}) node[below right, text=muted, font={{\fontsize{{13pt}}{{15pt}}\selectfont}}] {{0}};",
@@ -1642,13 +1714,14 @@ def _latex_quiz_sources(question):
     sources = []
     for page_number, page in enumerate(pages, start=1):
         body_parts = [
-            _node(72, 78, 760, [str(question.get("mapel", "Kuis")).upper()[:42]], size=25, color="muted"),
-            _node(72, 118, 760, [str(question.get("topik") or question.get("mapel", "Pengetahuan Umum"))[:54]], size=36, weight="bold"),
+            _latex_quiz_logo(),
+            _node(72, 78, 760, [str(question.get("mapel", "Kuis"))[:42]], size=36, weight="bold"),
+            _node(72, 132, 760, [str(question.get("topik") or question.get("mapel", "Pengetahuan Umum")).upper()[:54]], size=25, color="muted"),
         ]
         if page.get("visual_inline"):
             top_lines = page.get("question_top") or []
             bottom_lines = page.get("question_bottom") or []
-            body_parts.append(_rect(72, 190, 1008, 914))
+            body_parts.append(_rect(72, 190, 1008, 914, fill="panel"))
             if top_lines:
                 body_parts.append(_node(112, 228, 860, top_lines, size=25))
             visual_y = 328 if len(top_lines) <= 2 else 356
@@ -1661,13 +1734,13 @@ def _latex_quiz_sources(question):
             q_height = max(118, 54 + len(page["question"]) * 42)
             if page.get("visual"):
                 q_height = max(260, q_height)
-                body_parts.append(_rect(72, 190, 548, 190 + q_height))
+                body_parts.append(_rect(72, 190, 548, 190 + q_height, fill="panel"))
                 body_parts.append(_node(112, 230, 396, page["question"], size=27))
                 visual = _cartesian_visual_code(question)
                 if visual:
                     body_parts.append(visual)
             else:
-                body_parts.append(_rect(72, 190, 1008, 190 + q_height))
+                body_parts.append(_rect(72, 190, 1008, 190 + q_height, fill="panel"))
                 body_parts.append(_node(126, 230, 828, page["question"], size=29))
             choice_top = 220 + q_height
         else:
@@ -1675,9 +1748,9 @@ def _latex_quiz_sources(question):
         y = choice_top + 16
         for key, lines in page["choices"]:
             height = max(82, 34 + len(lines) * 36)
-            body_parts.append(_rect(72, y, 1008, y + height, fill="bg"))
-            body_parts.append(_rect(104, y + 20, 164, y + 74, fill="bg", radius=4))
-            body_parts.append(_node(124, y + 31, 34, [key], size=30, color="accent", weight="bold"))
+            body_parts.append(_rect(72, y, 1008, y + height, fill="panel"))
+            body_parts.append(_rect(104, y + 20, 164, y + 74, fill="panel", radius=4))
+            body_parts.append(_centered_node(104, y + 20, 60, 54, [key], size=30, color="accent", weight="bold"))
             body_parts.append(_node(190, y + 24, 748, lines, size=29))
             y += height + 14
         account = str(question.get("akun", "@utbk_neareducation") or "@utbk_neareducation")
@@ -1693,31 +1766,40 @@ def _latex_explanation_sources(question):
     if not explanation:
         return []
     has_visual = _needs_cartesian_visual(question, include_explanation=True)
-    lines = [line for line in _wrap_plain_lines(_format_explanation_text(explanation), 44 if has_visual else 74) if line]
+    sentence_per_line = slugify(question.get("mapel")) == "pengetahuan-kuantitatif"
+    lines = [
+        line
+        for line in _wrap_plain_lines(
+            _format_explanation_text(explanation, sentence_per_line=sentence_per_line),
+            44 if has_visual else 74,
+        )
+        if line
+    ]
     chunks = _chunk_lines(lines, 12 if has_visual else 13)
     answer_key = str(question.get("jawaban") or "").strip().upper()
     answer_text = (question.get("pilihan") or {}).get(answer_key, "")
     sources = []
     for page_number, chunk in enumerate(chunks, start=1):
         body_parts = [
-            _node(72, 78, 760, [str(question.get("mapel", "Kuis")).upper()[:42]], size=25, color="muted"),
-            _node(72, 118, 760, ["Pembahasan"], size=36, weight="bold"),
+            _latex_quiz_logo(),
+            _node(72, 78, 760, [str(question.get("mapel", "Kuis"))[:42]], size=36, weight="bold"),
+            _node(72, 132, 760, ["PEMBAHASAN"], size=25, color="muted"),
         ]
         panel_top = 210
         if page_number == 1:
-            body_parts.append(_rect(72, panel_top, 1008, panel_top + 104, fill="answerpanel"))
-            body_parts.append(_rect(104, panel_top + 25, 164, panel_top + 79, fill="bg", radius=4))
-            body_parts.append(_node(124, panel_top + 36, 34, [answer_key], size=29, color="accent", weight="bold"))
+            body_parts.append(_rect(72, panel_top, 1008, panel_top + 104, fill="panel"))
+            body_parts.append(_rect(104, panel_top + 25, 164, panel_top + 79, fill="panel", radius=4))
+            body_parts.append(_centered_node(104, panel_top + 25, 60, 54, [answer_key], size=29, color="accent", weight="bold"))
             answer = f"{answer_key}. {answer_text}" if answer_text else answer_key or "Jawaban"
             body_parts.append(_node(190, panel_top + 34, 748, _wrap_plain_lines(answer, 58, 2), size=28))
             panel_top = 342
         panel_bottom = min(914, panel_top + 84 + len(chunk) * 38)
         if has_visual and page_number == 1:
-            body_parts.append(_rect(72, panel_top, 532, 914))
+            body_parts.append(_rect(72, panel_top, 532, 914, fill="panel"))
             body_parts.append(_node(116, panel_top + 40, 344, chunk, size=24))
             body_parts.append(_cartesian_visual_code(question, x=560, y=342, w=448, h=572, include_explanation=True))
         else:
-            body_parts.append(_rect(72, panel_top, 1008, panel_bottom))
+            body_parts.append(_rect(72, panel_top, 1008, panel_bottom, fill="panel"))
             body_parts.append(_node(126, panel_top + 42, 828 if not has_visual else 760, chunk, size=27))
         account = str(question.get("akun", "@utbk_neareducation") or "@utbk_neareducation")
         body_parts.append(_node(72, 1010, 450, [account], size=22, color="muted"))
@@ -1797,10 +1879,20 @@ def _convert_pdf_to_jpg(pdf_path, jpg_path):
     return jpg_path
 
 
+def _prepare_latex_assets(run_dir):
+    logo_path = run_dir / "near_education_logo.png"
+    if logo_path.exists():
+        return
+    logo = _load_quiz_logo(target_width=260)
+    if logo:
+        logo.save(logo_path, format="PNG")
+
+
 def _render_latex_source(source, run_dir, stem):
     latex_path = run_dir / f"{stem}.tex"
     pdf_path = run_dir / f"{stem}.pdf"
     jpg_path = run_dir / f"{stem}.jpg"
+    _prepare_latex_assets(run_dir)
     latex_path.write_text(source, encoding="utf-8")
     latex = _require_executable(LATEX_COMMAND, "LaTeX compiler")
     _run_render_command([
@@ -2721,6 +2813,7 @@ def generate_content(mapel, topic, level, mode="auto", account="@utbk_neareducat
     if not GEMINI_VALIDATE or source in {"draft", "fallback"}:
         validation = local_validation(question, caption)
     question["akun"] = account
+    run_id = _unique_run_id(run_id, question)
     storage_path = build_storage_path(question, run_id)
     run_dir = OUTPUT_DIR / storage_path
     run_dir.mkdir(parents=True, exist_ok=True)

@@ -143,6 +143,31 @@ class ContentGeneratorTest(unittest.TestCase):
             self.assertTrue(result["files"]["thumbnail"])
             self.assertTrue(result["files"]["explanations"])
 
+    def test_generate_content_uses_unique_run_id_when_timestamp_collides(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_root = Path(tmp)
+            generator = load_generator(data_root)
+            generator._now_id = lambda: "20260619-120000"
+
+            first = generator.generate_content(
+                "Pengetahuan Kuantitatif",
+                "Bilangan",
+                "mudah",
+                mode="draft",
+                account="@quality",
+            )
+            second = generator.generate_content(
+                "Pengetahuan Kuantitatif",
+                "Bilangan",
+                "mudah",
+                mode="draft",
+                account="@quality",
+            )
+
+            self.assertNotEqual(first["run_id"], second["run_id"])
+            self.assertTrue((data_root / "outputs" / first["storage_path"] / "metadata.json").exists())
+            self.assertTrue((data_root / "outputs" / second["storage_path"] / "metadata.json").exists())
+
     def test_generate_content_draft_covers_every_default_subtest(self):
         with tempfile.TemporaryDirectory() as tmp:
             data_root = Path(tmp)
@@ -303,6 +328,17 @@ class ContentGeneratorTest(unittest.TestCase):
             self.assertIn("4z+8y", first_page)
             self.assertNotIn("4z +", first_page)
 
+    def test_question_ratio_stays_compact_before_wrapping(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            generator = load_generator(Path(tmp))
+
+            formatted = generator._format_question_text(
+                "Perbandingan novel, komik, dan ensiklopedia adalah 3 : 4 : 7."
+            )
+
+            self.assertIn("3:4:7", formatted)
+            self.assertNotIn("3 : 4", formatted)
+
     def test_symbolic_quadratic_parameter_does_not_render_cartesian_visual(self):
         with tempfile.TemporaryDirectory() as tmp:
             generator = load_generator(Path(tmp))
@@ -359,6 +395,7 @@ class ContentGeneratorTest(unittest.TestCase):
 
             self.assertIn(r"\fill[graphgreen]", visual)
             self.assertIn("(160.0,184.6)", visual)
+            self.assertNotIn(" grid[", visual)
 
     def test_explanation_can_graph_after_symbolic_variable_is_solved(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -404,6 +441,25 @@ class ContentGeneratorTest(unittest.TestCase):
             self.assertIn("4z+8y", source)
             self.assertIn(r"a^2+b^2", source)
             self.assertNotIn(r"\mbox{}\\Maka", source)
+
+    def test_pk_latex_explanation_breaks_after_sentence_periods(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            generator = load_generator(Path(tmp))
+            question = {
+                "mapel": "Pengetahuan Kuantitatif",
+                "topik": "Aljabar dan Fungsi",
+                "level": "sedang",
+                "soal": "Tentukan nilai x dari persamaan linear.",
+                "pilihan": {"A": "1", "B": "2", "C": "3", "D": "4", "E": "5"},
+                "jawaban": "B",
+                "pembahasan": "Substitusi nilai ke persamaan. Hasilnya x = 2. Maka, jawaban yang tepat adalah B.",
+                "butuh_visual": False,
+            }
+
+            source = generator._latex_explanation_sources(question)[0]
+
+            self.assertIn(r"persamaan.\\Hasilnya", source)
+            self.assertIn("anchor=center", source)
 
 
 if __name__ == "__main__":

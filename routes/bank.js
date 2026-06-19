@@ -4,12 +4,13 @@ import path from "node:path";
 import {
   addEntry,
   createEntryFromMetadata,
+  rebuildIndex,
   readIndex,
   removeEntry,
   updateEntry,
 } from "../lib/filestore.js";
 import {errorStatus, readJsonBody, sendError, sendJson} from "../lib/http.js";
-import {OUTPUTS, ROOT, SAVED, buildStoragePath, buildWebFiles, isValidRunId, pathFromIndexEntry, safeJoin} from "../lib/paths.js";
+import {OUTPUTS, ROOT, SAVED, buildStoragePath, buildWebFiles, canonicalTopic, isValidRunId, pathFromIndexEntry, safeJoin} from "../lib/paths.js";
 
 const DEFAULT_PYTHON = process.env.PYTHON || "python";
 
@@ -129,7 +130,7 @@ async function saveRun(runId) {
 }
 
 async function listSavedRuns() {
-  const index = await readIndex();
+  const index = await rebuildIndex();
   const items = [];
   for (const item of index) {
     if (!isValidRunId(item.run_id)) continue;
@@ -150,6 +151,7 @@ async function listSavedRuns() {
       review_status: metadata?.review_status || null,
       mapel: metadata?.question?.mapel || null,
       topik: metadata?.question?.topik || null,
+      canonical_topik: canonicalTopic(metadata?.question?.mapel, metadata?.question?.topik) || null,
       level: metadata?.question?.level || null,
       soal_excerpt: String(metadata?.question?.soal || "").replace(/\s+/g, " ").trim().slice(0, 180),
       jawaban: metadata?.question?.jawaban || null,
@@ -367,6 +369,7 @@ async function sendSavedMetadata(response, runId) {
     throw requestError(404, "Saved run tidak ditemukan.");
   }
   metadata.web_files = buildWebFiles("/saved", artifactPath, metadata.files);
+  if (metadata.question) metadata.canonical_topik = canonicalTopic(metadata.question.mapel, metadata.question.topik);
   sendJson(response, metadata);
 }
 
