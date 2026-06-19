@@ -1,5 +1,6 @@
 import argparse
 import datetime as dt
+import importlib
 import io
 import json
 import os
@@ -12,55 +13,40 @@ import textwrap
 import urllib.error
 import urllib.request
 from pathlib import Path
+import latsoal_generator.config as generator_config
+import latsoal_generator.storage as generator_storage
 
+generator_config = importlib.reload(generator_config)
+generator_storage = importlib.reload(generator_storage)
 
-ROOT = Path(__file__).resolve().parent
-DATA_ROOT = Path(os.getenv("LATSOAL_DATA_ROOT", ROOT)).resolve()
-OUTPUT_DIR = DATA_ROOT / "outputs"
-BANK_DIR = ROOT / "bank_soal" / "patterns"
-SAVED_DIR = DATA_ROOT / "saved"
-BANK_INDEX_PATH = DATA_ROOT / "bank" / "index.json"
-DEDUP_THRESHOLD = float(os.getenv("DEDUP_THRESHOLD", "0.82"))
-LOGO_PATH = ROOT / "assets" / "near_education_wordmark_v2.svg"
-RENDER_ENGINE = os.getenv("LATSOAL_RENDER_ENGINE", "auto").strip().lower()
-LATEX_COMMAND = os.getenv("LATSOAL_LATEX_COMMAND", "pdflatex").strip() or "pdflatex"
-PDF_CONVERTER = os.getenv("LATSOAL_PDF_CONVERTER", "").strip()
-RENDER_TIMEOUT_SECONDS = int(os.getenv("LATSOAL_RENDER_TIMEOUT_SECONDS", "60"))
+from latsoal_generator.config import (
+    BANK_DIR,
+    BANK_INDEX_PATH,
+    DATA_ROOT,
+    DEDUP_THRESHOLD,
+    LATEX_COMMAND,
+    LOGO_PATH,
+    MAPEL_TOPICS,
+    OUTPUT_DIR,
+    PATTERN_FILES,
+    PDF_CONVERTER,
+    RENDER_ENGINE,
+    RENDER_TIMEOUT_SECONDS,
+    ROOT,
+    SAVED_DIR,
+    TAXONOMY,
+)
+from latsoal_generator.storage import (
+    SUBTEST_CODES,
+    TOPIC_ALIASES,
+    build_storage_path,
+    canonical_topic,
+    slugify,
+    subtest_code,
+)
 
 def json_stdout(payload):
     print(json.dumps(payload, ensure_ascii=False, indent=2))
-
-
-def slugify(value):
-    return re.sub(r"[^a-z0-9]+", "-", str(value or "").lower()).strip("-")
-
-
-TAXONOMY = json.loads((ROOT / "config" / "taxonomy.json").read_text(encoding="utf-8"))
-MAPEL_TOPICS = TAXONOMY.get("topics", {})
-PATTERN_FILES = TAXONOMY.get("pattern_files", {})
-SUBTEST_CODES = {
-    slugify(mapel): code
-    for mapel, code in TAXONOMY.get("subtest_codes", {}).items()
-}
-TOPIC_ALIASES = {
-    (slugify(mapel), slugify(topic)): canonical
-    for mapel, aliases in TAXONOMY.get("topic_aliases", {}).items()
-    for topic, canonical in aliases.items()
-}
-
-
-def subtest_code(mapel):
-    slug = slugify(mapel)
-    return SUBTEST_CODES.get(slug, slug.upper() or "LAINNYA")
-
-
-def canonical_topic(mapel, topic):
-    raw_topic = topic or "umum"
-    return TOPIC_ALIASES.get((slugify(mapel), slugify(raw_topic)), raw_topic)
-
-
-def build_storage_path(question, run_id):
-    return Path(subtest_code(question.get("mapel"))) / slugify(canonical_topic(question.get("mapel"), question.get("topik"))) / run_id
 
 
 def classify_error(exc):
