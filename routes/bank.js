@@ -12,14 +12,9 @@ import {
 } from "../lib/filestore.js";
 import {errorStatus, readJsonBody, sendError, sendJson} from "../lib/http.js";
 import {OUTPUTS, ROOT, SAVED, buildStoragePath, buildWebFiles, canonicalTopic, isValidRunId, pathFromIndexEntry, safeJoin} from "../lib/paths.js";
+import {requestError, wantsJson} from "../lib/route-utils.js";
 
 const DEFAULT_PYTHON = process.env.PYTHON || "python";
-
-function requestError(status, message) {
-  const error = new Error(message);
-  error.status = status;
-  return error;
-}
 
 function retargetMetadataFiles(metadata, targetDir) {
   const artifactName = (file) => String(file || "").split(/[\\/]/).pop();
@@ -377,11 +372,6 @@ async function sendSavedMetadata(response, runId) {
   metadata.web_files = buildWebFiles("/saved", artifactPath, metadata.files);
   if (metadata.question) metadata.canonical_topik = canonicalTopic(metadata.question.mapel, metadata.question.topik);
   sendJson(response, metadata);
-}
-
-function wantsJson(request) {
-  const accept = request.headers.accept || "";
-  return accept.includes("application/json") || !accept.includes("text/html");
 }
 
 function savedRunRoute(route) {

@@ -4,10 +4,7 @@ import {readJsonValidated} from "../lib/dbschema.js";
 import {readIndex, writeIndex} from "../lib/filestore.js";
 import {errorStatus, sendError, sendJson} from "../lib/http.js";
 import {APPROVED, SAVED, isValidRunId, pathFromIndexEntry} from "../lib/paths.js";
-
-function artifactName(file) {
-  return String(file).split(/[\\/]/).pop();
-}
+import {artifactName} from "../lib/route-utils.js";
 
 async function exportApprovedRuns() {
   const index = await readIndex();
