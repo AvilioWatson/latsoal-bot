@@ -16,6 +16,11 @@ const {
   updateEntry,
   writeIndex,
 } = await import("../lib/filestore.js");
+const {
+  validateBankIndex,
+  validateMetadata,
+  validateQuestion,
+} = await import("../lib/dbschema.js");
 
 test.after(async () => {
   await rm(dataRoot, {recursive: true, force: true});
@@ -114,4 +119,34 @@ test("createEntryFromMetadata preserves review patch fields", () => {
   assert.equal(entry.status_updated_at, "2026-05-29T12:00:00.000Z");
   assert.equal(entry.approved_at, "2026-05-29T12:00:00.000Z");
   assert.equal(entry.path, "saved/PU/penalaran-deduktif/20990101-030303");
+});
+
+test("schema validators report warnings without throwing", () => {
+  assert.ok(validateQuestion({mapel: "Penalaran Umum"}, "soal.json").length > 0);
+  assert.ok(validateMetadata({run_id: "bad"}, "metadata.json").length > 0);
+  assert.ok(validateBankIndex([{run_id: "bad", status: "published"}], "bank/index.json").length > 0);
+});
+
+test("legacy Matematika metadata is indexed through compatibility mapping", () => {
+  const entry = createEntryFromMetadata("20990101-040404", metadata("Matematika", "Persamaan Linear"));
+
+  assert.equal(entry.subtes, "pengetahuan-kuantitatif");
+  assert.equal(entry.topik, "aljabar-dan-fungsi");
+  assert.equal(entry.path, "saved/PK/aljabar-dan-fungsi/20990101-040404");
+});
+
+test("index writes are queued across concurrent mutations", async () => {
+  await writeIndex([]);
+
+  await Promise.all([
+    addEntry({run_id: "20990101-050001", status: "saved"}),
+    addEntry({run_id: "20990101-050002", status: "approved"}),
+    addEntry({run_id: "20990101-050003", status: "rejected"}),
+  ]);
+
+  const entries = await readIndex();
+  assert.deepEqual(
+    entries.map((entry) => entry.run_id).sort(),
+    ["20990101-050001", "20990101-050002", "20990101-050003"],
+  );
 });

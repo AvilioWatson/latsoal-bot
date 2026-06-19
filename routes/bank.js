@@ -1,6 +1,7 @@
 import {spawn} from "node:child_process";
-import {access, cp, mkdir, readFile, readdir, rm, writeFile} from "node:fs/promises";
+import {access, cp, mkdir, readdir, rm} from "node:fs/promises";
 import path from "node:path";
+import {readJsonValidated, writeJsonValidated} from "../lib/dbschema.js";
 import {
   addEntry,
   createEntryFromMetadata,
@@ -101,7 +102,12 @@ async function saveRun(runId) {
   if (!sourceRun) {
     throw requestError(404, "Output run tidak ditemukan.");
   }
-  const metadata = JSON.parse(await readFile(path.join(sourceRun.dir, "metadata.json"), "utf-8"));
+  const metadata = await readJsonValidated(path.join(sourceRun.dir, "metadata.json"), "metadata");
+  try {
+    await readJsonValidated(path.join(sourceRun.dir, "soal.json"), "question");
+  } catch (error) {
+    console.warn(`[schema:question] ${path.join(sourceRun.dir, "soal.json")}: ${error.message}`);
+  }
   const artifactPath = buildStoragePath(metadata.question || {}, runId);
   const target = safeJoin(SAVED, artifactPath);
   if (!target) {
@@ -114,7 +120,7 @@ async function saveRun(runId) {
   const savedAt = new Date().toISOString();
   metadata.storage_path = artifactPath;
   retargetMetadataFiles(metadata, target);
-  await writeFile(path.join(target, "metadata.json"), JSON.stringify(metadata, null, 2), "utf-8");
+  await writeJsonValidated(path.join(target, "metadata.json"), metadata, "metadata");
   await addEntry(createEntryFromMetadata(runId, metadata, {
     saved_at: savedAt,
     status: "saved",
@@ -138,7 +144,7 @@ async function listSavedRuns() {
     const metadataPath = path.join(SAVED, artifactPath, "metadata.json");
     let metadata = null;
     try {
-      metadata = JSON.parse(await readFile(metadataPath, "utf-8"));
+      metadata = await readJsonValidated(metadataPath, "metadata");
     } catch {
       metadata = null;
     }
@@ -313,7 +319,7 @@ async function deleteSavedImages(runId) {
   const metadataPath = path.join(runDir, "metadata.json");
   let metadata;
   try {
-    metadata = JSON.parse(await readFile(metadataPath, "utf-8"));
+    metadata = await readJsonValidated(metadataPath, "metadata");
   } catch {
     throw requestError(404, "Saved run tidak ditemukan.");
   }
@@ -343,7 +349,7 @@ async function deleteSavedImages(runId) {
   metadata.files.images = [];
   metadata.files.explanations = [];
   metadata.image_deleted_at = new Date().toISOString();
-  await writeFile(metadataPath, JSON.stringify(metadata, null, 2), "utf-8");
+  await writeJsonValidated(metadataPath, metadata, "metadata");
 
   return {
     run_id: runId,
@@ -364,7 +370,7 @@ async function sendSavedMetadata(response, runId) {
   }
   let metadata;
   try {
-    metadata = JSON.parse(await readFile(path.join(runDir, "metadata.json"), "utf-8"));
+    metadata = await readJsonValidated(path.join(runDir, "metadata.json"), "metadata");
   } catch {
     throw requestError(404, "Saved run tidak ditemukan.");
   }

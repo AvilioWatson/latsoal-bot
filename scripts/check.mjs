@@ -41,7 +41,7 @@ function gitProjectFiles() {
 }
 
 function listJsFiles() {
-  const files = ["server.js"];
+  const files = ["server.js", path.join("scripts", "audit-db.mjs")];
   for (const dir of ["lib", "routes", "frontend"]) {
     for (const entry of readdirSync(path.join(ROOT, dir), {withFileTypes: true})) {
       if (entry.isFile() && entry.name.endsWith(".js")) {

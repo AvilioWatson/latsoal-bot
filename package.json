@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
+    "audit-db": "node scripts/audit-db.mjs",
     "check": "node scripts/check.mjs",
     "test": "node scripts/check.mjs"
   },

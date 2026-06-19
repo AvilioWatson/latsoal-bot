@@ -1,5 +1,6 @@
-import {access, cp, mkdir, readFile, writeFile} from "node:fs/promises";
+import {access, cp, mkdir, writeFile} from "node:fs/promises";
 import path from "node:path";
+import {readJsonValidated} from "../lib/dbschema.js";
 import {readIndex, writeIndex} from "../lib/filestore.js";
 import {errorStatus, sendError, sendJson} from "../lib/http.js";
 import {APPROVED, SAVED, isValidRunId, pathFromIndexEntry} from "../lib/paths.js";
@@ -23,7 +24,7 @@ async function exportApprovedRuns() {
     try {
       await access(path.join(sourceDir, "metadata.json"));
       await cp(sourceDir, destinationDir, {recursive: true, force: true});
-      const metadata = JSON.parse(await readFile(path.join(sourceDir, "metadata.json"), "utf-8"));
+      const metadata = await readJsonValidated(path.join(sourceDir, "metadata.json"), "metadata");
       manifest.push({
         run_id: item.run_id,
         saved_at: item.saved_at || null,
