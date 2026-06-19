@@ -37,6 +37,21 @@ function validPayload() {
       catatan: {},
       saran_perbaikan: "",
     },
+    files: {
+      question: "C:\\repo\\outputs\\PU\\penalaran-deduktif\\20990101-010101\\soal.json",
+      caption: "C:\\repo\\outputs\\PU\\penalaran-deduktif\\20990101-010101\\caption.txt",
+      image: "C:\\repo\\outputs\\PU\\penalaran-deduktif\\20990101-010101\\1.jpg",
+      images: [
+        "C:\\repo\\outputs\\PU\\penalaran-deduktif\\20990101-010101\\1.jpg",
+        "C:\\repo\\outputs\\PU\\penalaran-deduktif\\20990101-010101\\2.jpg",
+        "C:\\repo\\outputs\\PU\\penalaran-deduktif\\20990101-010101\\3.jpg",
+      ],
+      thumbnail: "C:\\repo\\outputs\\PU\\penalaran-deduktif\\20990101-010101\\1.jpg",
+      explanation: "C:\\repo\\outputs\\PU\\penalaran-deduktif\\20990101-010101\\3.jpg",
+      explanations: [
+        "C:\\repo\\outputs\\PU\\penalaran-deduktif\\20990101-010101\\3.jpg",
+      ],
+    },
   };
 }
 
@@ -83,6 +98,17 @@ test("runGenerator resolves valid JSON payload and adds web files", async () => 
       question: "/outputs/PU/penalaran-deduktif/20990101-010101/soal.json",
       caption: "/outputs/PU/penalaran-deduktif/20990101-010101/caption.txt",
       metadata: "/outputs/PU/penalaran-deduktif/20990101-010101/metadata.json",
+      images: [
+        "/outputs/PU/penalaran-deduktif/20990101-010101/1.jpg",
+        "/outputs/PU/penalaran-deduktif/20990101-010101/2.jpg",
+        "/outputs/PU/penalaran-deduktif/20990101-010101/3.jpg",
+      ],
+      image: "/outputs/PU/penalaran-deduktif/20990101-010101/1.jpg",
+      thumbnail: "/outputs/PU/penalaran-deduktif/20990101-010101/1.jpg",
+      explanation: "/outputs/PU/penalaran-deduktif/20990101-010101/3.jpg",
+      explanations: [
+        "/outputs/PU/penalaran-deduktif/20990101-010101/3.jpg",
+      ],
     });
   });
 });

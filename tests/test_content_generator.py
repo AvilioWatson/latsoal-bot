@@ -82,6 +82,10 @@ class ContentGeneratorTest(unittest.TestCase):
             self.assertEqual(result["source"], "draft")
             self.assertEqual(result["question"]["akun"], "@quality")
             run_dir = data_root / "outputs" / result["storage_path"]
+            metadata = json.loads((run_dir / "metadata.json").read_text(encoding="utf-8"))
+            question = json.loads((run_dir / "soal.json").read_text(encoding="utf-8"))
+            caption_text = (run_dir / "caption.txt").read_text(encoding="utf-8")
+
             self.assertTrue((run_dir / "metadata.json").exists())
             self.assertTrue((run_dir / "soal.json").exists())
             self.assertTrue((run_dir / "caption.txt").exists())
@@ -89,14 +93,53 @@ class ContentGeneratorTest(unittest.TestCase):
             self.assertTrue((run_dir / "post-1.png").exists())
             self.assertTrue((run_dir / "pembahasan-1.jpg").exists())
             self.assertTrue((run_dir / "1.jpg").exists())
+
+            self.assertEqual(metadata["run_id"], result["run_id"])
+            self.assertEqual(metadata["storage_path"], result["storage_path"])
+            self.assertEqual(metadata["question"], question)
+            self.assertEqual(metadata["caption"], result["caption"])
+            self.assertEqual(metadata["files"], result["files"])
+            self.assertEqual(question, result["question"])
+            self.assertIn(result["caption"]["caption"], caption_text)
+            for hashtag in result["caption"]["hashtag"]:
+                self.assertIn(hashtag, caption_text)
+
+            expected_file_keys = {
+                "question",
+                "caption",
+                "image",
+                "images",
+                "thumbnail",
+                "explanation",
+                "explanations",
+            }
+            self.assertEqual(set(result["files"].keys()), expected_file_keys)
+            self.assertEqual(Path(result["files"]["question"]).name, "soal.json")
+            self.assertEqual(Path(result["files"]["caption"]).name, "caption.txt")
+
+            numbered_names = [Path(path).name for path in result["files"]["images"]]
+            self.assertEqual(
+                numbered_names,
+                [f"{index}.jpg" for index in range(1, len(numbered_names) + 1)],
+            )
+            self.assertEqual(Path(result["files"]["image"]).name, "1.jpg")
+            self.assertEqual(Path(result["files"]["thumbnail"]).name, "1.jpg")
+            self.assertTrue(set(result["files"]["explanations"]).issubset(set(result["files"]["images"])))
+            self.assertEqual(result["files"]["explanation"], result["files"]["explanations"][0])
+
             from PIL import Image
             with Image.open(run_dir / "thumbnail.png") as image:
                 self.assertEqual(image.size, (1080, 1080))
-            with Image.open(run_dir / "1.jpg") as image:
-                self.assertEqual(image.size, (1080, 1080))
+            with Image.open(run_dir / "post-1.png") as image:
+                self.assertEqual(image.size, (1000, 1000))
+            with Image.open(run_dir / "pembahasan-1.jpg") as image:
+                self.assertEqual(image.size, (1000, 1000))
+            for index, image_path in enumerate(result["files"]["images"], start=1):
+                self.assertEqual(Path(image_path).suffix.lower(), ".jpg")
+                with Image.open(image_path) as image:
+                    expected_size = (1080, 1080) if index == 1 else (1000, 1000)
+                    self.assertEqual(image.size, expected_size)
             self.assertTrue(result["files"]["images"])
-            self.assertTrue(all(Path(path).suffix.lower() == ".jpg" for path in result["files"]["images"]))
-            self.assertTrue(Path(result["files"]["images"][0]).name == "1.jpg")
             self.assertTrue(result["files"]["thumbnail"])
             self.assertTrue(result["files"]["explanations"])
 
