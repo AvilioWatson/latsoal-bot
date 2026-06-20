@@ -26,8 +26,9 @@
       </div>
       <nav class="main-nav" aria-label="Navigasi utama">
         <a class="nav-link" href="/">Generator</a>
+        <a class="nav-link" href="/saved" aria-current="page">Bank Review</a>
         <a class="nav-link" href="/dashboard">Dashboard</a>
-        <a class="nav-link" href="/stats">Stats</a>
+        <a class="nav-link" href="/stats">Monitoring</a>
       </nav>
       <div class="top-status">
         <div class="status-pill" id="sourceStatus">Siap</div>
@@ -66,12 +67,33 @@
               </div>
               <div class="review-actions">
                 <button id="reviewExplanationButton" class="secondary" type="button" disabled>Cek pembahasan AI</button>
+                <button id="approvePreviewButton" class="secondary" type="button" aria-pressed="false" disabled>Approve</button>
+                <button id="rejectPreviewButton" class="secondary" type="button" aria-pressed="false" disabled>Reject</button>
+                <button id="markUploadedPreviewButton" class="secondary" type="button" aria-pressed="false" disabled>Upload</button>
+                <button id="deletePreviewButton" class="secondary danger-button" type="button" disabled>Hapus</button>
+                <a id="editJsonLink" class="secondary link-button" href="#" hidden>Edit gambar</a>
                 <button id="copyCaptionButton" class="secondary" type="button" disabled>Copy caption</button>
                 <a id="downloadAllLink" class="secondary link-button" href="#" hidden>Download folder</a>
                 <a id="metadataLink" class="ghost-link" href="#" hidden>Metadata</a>
                 <button id="closePreviewButton" class="preview-close-button" type="button" aria-label="Tutup preview">&times;</button>
               </div>
             </div>
+
+            <section id="aiReviewDraft" class="ai-review-draft" hidden>
+              <div class="ai-review-draft-header">
+                <div>
+                  <p class="eyebrow">Draft AI</p>
+                  <h3>Revisi JSON belum diterapkan</h3>
+                </div>
+                <span id="aiReviewDraftScore" class="ai-review-score">-</span>
+              </div>
+              <p id="aiReviewDraftSummary" class="body-copy"></p>
+              <pre id="aiReviewDraftJson" aria-label="Preview JSON revisi AI"></pre>
+              <div class="ai-review-draft-actions">
+                <button id="applyAiReviewButton" class="primary" type="button">Terapkan revisi</button>
+                <button id="cancelAiReviewButton" class="secondary" type="button">Cancel</button>
+              </div>
+            </section>
 
             <div class="detail-grid">
               <section class="detail-block image-block">

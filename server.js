@@ -38,6 +38,11 @@ async function handleStaticPage(request, response, route) {
     return true;
   }
 
+  if (request.method === "GET" && /^\/edit\/\d{8}-\d{6}$/.test(route)) {
+    await sendFile(response, path.join(FRONTEND, "edit.html"));
+    return true;
+  }
+
   return false;
 }
 

@@ -17,6 +17,11 @@ TOPIC_ALIASES = {
     for mapel, aliases in TAXONOMY.get("topic_aliases", {}).items()
     for topic, canonical in aliases.items()
 }
+CANONICAL_TOPICS = {
+    (slugify(mapel), slugify(topic)): topic
+    for mapel, topics in TAXONOMY.get("topics", {}).items()
+    for topic in topics
+}
 
 
 def subtest_code(mapel):
@@ -26,7 +31,8 @@ def subtest_code(mapel):
 
 def canonical_topic(mapel, topic):
     raw_topic = topic or "umum"
-    return TOPIC_ALIASES.get((slugify(mapel), slugify(raw_topic)), raw_topic)
+    key = (slugify(mapel), slugify(raw_topic))
+    return TOPIC_ALIASES.get(key, CANONICAL_TOPICS.get(key, raw_topic))
 
 
 def build_storage_path(question, run_id):

@@ -115,7 +115,7 @@ Dependency Python lokal minimal:
 python -m pip install pillow
 ```
 
-Renderer PIL hanya membutuhkan Pillow. Renderer LaTeX membutuhkan `pdflatex` dan converter PDF seperti `pdftoppm` atau ImageMagick `magick`.
+Renderer PIL hanya membutuhkan Pillow. Source code renderer LaTeX sudah ada di project, sedangkan executable `pdflatex` dan `pdftoppm` disediakan oleh image Docker melalui paket `texlive-*` dan `poppler-utils`. Executable tersebut tidak dibundel di folder project atau di dalam `LatsoalBot.exe`.
 
 Jalankan server lokal:
 
@@ -129,7 +129,7 @@ Lalu buka:
 http://127.0.0.1:8765
 ```
 
-Alternatif di Windows, klik dua kali `LatsoalBot.exe` dari root project. Launcher ini menghentikan server Node.js lama yang masih memakai port `8765`, menjalankan `node server.js` dari folder project saat ini, menyetel `LATSOAL_RENDER_ENGINE=pil` jika belum ada konfigurasi render, lalu membuka browser ke alamat lokal di atas.
+Alternatif di Windows, klik dua kali `LatsoalBot.exe` dari root project. Setiap dijalankan, launcher menghentikan server Node.js lama pada port `8765`. Jika port tersebut sedang dipublikasikan oleh service Docker project, launcher menjalankan `docker compose stop latsoal-bot` tanpa mematikan Docker Desktop. Setelah port benar-benar bebas, launcher membersihkan cache runtime Python (`__pycache__` dan `.pyc`), lalu menjalankan proses `node server.js` yang baru pada port yang sama. Browser dibuka dengan URL restart unik dan server mengirim header `no-store`, sehingga HTML, JavaScript, CSS, JSON, dan gambar selalu dimuat ulang. Data soal di `saved/`, indeks `bank/`, hasil `outputs/`, dan file kerja `.tmp/` tidak dihapus. Launcher juga menyetel `LATSOAL_RENDER_ENGINE=pil` jika belum ada konfigurasi render. Karena itu, menjalankan aplikasi melalui EXE tidak memakai toolchain LaTeX milik Docker.
 
 Kebijakan repo: `LatsoalBot.exe` tetap tracked sebagai launcher Windows kecil. Source launcher ada di `scripts/LatsoalBotLauncher.cs`; file `.cs` memakai CRLF lewat `.gitattributes`, sementara source lain tetap LF.
 
@@ -144,6 +144,8 @@ npm.cmd start
 ## Menjalankan Dengan Docker
 
 Docker menjaga dependency Node.js, Python, LaTeX, dan PDF converter tetap di dalam container, sehingga environment laptop tidak perlu dipasangi toolchain LaTeX.
+
+Ini adalah cara bawaan project untuk menjalankan renderer LaTeX. `Dockerfile` memasang TeX Live dan Poppler, sedangkan `docker-compose.yml` menetapkan renderer ke `latex`. Menjalankan `node server.js` atau `LatsoalBot.exe` langsung di Windows tidak menggunakan dependency yang berada di dalam container.
 
 Build dan jalankan:
 
@@ -182,6 +184,18 @@ Di dalam container, renderer default adalah:
 LATSOAL_RENDER_ENGINE=latex
 LATSOAL_LATEX_COMMAND=pdflatex
 LATSOAL_PDF_CONVERTER=pdftoppm
+```
+
+Verifikasi toolchain dan konfigurasi aktif di dalam container:
+
+```powershell
+docker compose exec latsoal-bot sh -lc "which pdflatex && which pdftoppm && printenv LATSOAL_RENDER_ENGINE"
+```
+
+Output yang diharapkan memuat path `pdflatex`, path `pdftoppm`, dan nilai `latex`. Metadata soal yang berhasil dirender juga akan berisi:
+
+```json
+"render_engine": "latex"
 ```
 
 Di Windows lewat `LatsoalBot.exe`, launcher memakai renderer PIL agar aplikasi tetap jalan tanpa instalasi LaTeX lokal. Jika ingin memaksa LaTeX di mesin lokal, set environment variable sendiri sebelum menjalankan server:
@@ -428,6 +442,8 @@ Mode LaTeX membutuhkan:
 - LaTeX compiler, default `pdflatex`.
 - PDF converter, salah satu dari ImageMagick `magick` atau Poppler `pdftoppm`.
 
+Dependency tersebut sudah dideklarasikan di `Dockerfile`, tetapi hanya tersedia setelah image berhasil dibangun. Di Windows lokal, periksa dengan `where.exe pdflatex` dan `where.exe pdftoppm`. Jika kedua command tidak ditemukan, gunakan Docker atau instal toolchain secara lokal.
+
 Konfigurasi terkait:
 
 ```text
@@ -437,7 +453,7 @@ LATSOAL_PDF_CONVERTER=
 LATSOAL_RENDER_TIMEOUT_SECONDS=60
 ```
 
-Jika mesin belum punya LaTeX/converter, pakai `LATSOAL_RENDER_ENGINE=pil` atau jalankan lewat `LatsoalBot.exe`.
+Jika mesin belum punya LaTeX/converter, jalankan `docker compose up --build` untuk memakai LaTeX bawaan image. Gunakan `LATSOAL_RENDER_ENGINE=pil` atau `LatsoalBot.exe` hanya jika memang menginginkan renderer PIL.
 
 Tombol `Download folder` mengunduh ZIP yang hanya berisi JPG bernomor:
 

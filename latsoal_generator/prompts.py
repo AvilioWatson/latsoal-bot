@@ -101,9 +101,19 @@ Buat soal orisinal sesuai format SNBT modern, bukan format mapel Saintek/Soshum 
 Gunakan bahasa Indonesia baku. Setiap soal punya tepat 5 pilihan A sampai E,
 hanya 1 jawaban benar, dan pembahasan jelas untuk pelajar SMA.
 Pembahasan wajib memakai bahasa Indonesia formal, baku, objektif, dan tidak memakai gaya percakapan.
+Susun pembahasan menjadi 3 sampai 6 langkah ringkas. Awali setiap langkah dengan teks
+"Langkah 1:", "Langkah 2:", dan seterusnya, masing-masing dipisahkan newline.
+Letakkan persamaan atau rumus penting pada baris tersendiri setelah kalimat penjelasnya.
+Tutup dengan "Kesimpulan:" yang menyatakan jawaban akhir secara singkat.
+Jangan memakai markdown, bullet, heading dekoratif, emoji, atau sapaan kepada pembaca.
 Jika memakai pola referensi, gunakan hanya struktur konsepnya. Jangan menyalin kalimat,
 angka, konteks, atau pilihan dari contoh/pola referensi.
 Jangan menambahkan hint/petunjuk dalam tanda kurung pada teks soal.
+Untuk Pengetahuan Kuantitatif dan Penalaran Matematika yang membutuhkan grafik,
+gunakan hanya grafik 2 dimensi kartesius yang dapat dinyatakan sebagai garis,
+pertidaksamaan garis, atau parabola sederhana. Jangan menulis kode LaTeX/TikZ mentah.
+Isi butuh_visual=true dan tuliskan persamaan/pertidaksamaan eksplisit di deskripsi_visual,
+misalnya "bidang kartesius dengan y = 2x + 1" atau "daerah solusi y >= 2x + 1".
 Output harus JSON valid tanpa markdown.
 """.strip()
 
@@ -162,12 +172,23 @@ def build_explanation_review_prompt(question):
         "Periksa pembahasan soal berikut sebelum soal di-approve. "
         "Nilai apakah jawaban benar, langkah pembahasan valid, tidak ada lompatan logika, "
         "dan bahasa pembahasan formal, baku, objektif, serta tidak memakai gaya percakapan. "
-        "Jika pembahasan kurang formal atau kurang tepat, berikan versi revisi yang formal. "
+        "Susun pembahasan revisi menjadi 3 sampai 6 langkah berlabel 'Langkah 1:', 'Langkah 2:', dan seterusnya. "
+        "Letakkan rumus penting pada baris tersendiri dan tutup dengan 'Kesimpulan:' yang singkat. "
+        "Jangan hanya memberi saran. Buat question_revisi berupa salinan JSON soal lengkap yang sudah diperbaiki. "
+        "Pertahankan mapel, kelompok_tes, topik, dan level kecuali jelas salah. "
+        "Perbaiki soal, pilihan, kunci jawaban, pembahasan, konsep_kunci, tips_pengerjaan, "
+        "butuh_visual, dan deskripsi_visual bila diperlukan agar konsisten dan akurat. "
+        "Nilai lolos dan skor harus merujuk pada question_revisi final, bukan versi awal. "
+        "pembahasan_revisi harus sama dengan question_revisi.pembahasan. "
         "Output harus JSON valid tanpa markdown.\n\n"
         f"{json.dumps(question, ensure_ascii=False, indent=2)}\n\n"
         "Kembalikan JSON: "
         '{"lolos": false, "skor": 0, "akurasi": "", "bahasa_formal": "", '
-        '"catatan": [], "saran_revisi": [], "pembahasan_revisi": ""}'
+        '"catatan": [], "saran_revisi": [], "pembahasan_revisi": "", '
+        '"question_revisi": {"mapel": "", "kelompok_tes": "", "topik": "", "level": "", '
+        '"soal": "", "pilihan": {"A": "", "B": "", "C": "", "D": "", "E": ""}, '
+        '"jawaban": "", "pembahasan": "", "konsep_kunci": "", "tips_pengerjaan": "", '
+        '"butuh_visual": false, "deskripsi_visual": ""}}'
     )
 
 

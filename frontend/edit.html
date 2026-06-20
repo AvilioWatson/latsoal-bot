@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Edit Gambar - UTBK Content Desk</title>
+    <meta name="description" content="Edit isi soal dan render ulang gambar Bank Review.">
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="/assets/styles.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar-brand">
+        <div class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="2" y="2" width="5" height="5" rx="1.5" fill="#0c0c0e"/>
+            <rect x="9" y="2" width="5" height="5" rx="1.5" fill="#0c0c0e"/>
+            <rect x="2" y="9" width="5" height="5" rx="1.5" fill="#0c0c0e"/>
+            <rect x="9" y="9" width="5" height="5" rx="1.5" fill="rgba(12,12,14,0.4)"/>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <p class="eyebrow">UTBK Content Desk</p>
+          <h1>Edit Gambar</h1>
+        </div>
+      </div>
+      <nav class="main-nav" aria-label="Navigasi utama">
+        <a class="nav-link" href="/">Generator</a>
+        <a class="nav-link" href="/saved" aria-current="page">Bank Review</a>
+        <a class="nav-link" href="/dashboard">Dashboard</a>
+        <a class="nav-link" href="/stats">Monitoring</a>
+      </nav>
+      <div class="top-status">
+        <div class="status-pill" id="editStatus">Memuat</div>
+      </div>
+    </header>
+
+    <main class="edit-page">
+      <section class="edit-shell">
+        <div class="edit-header">
+          <div>
+            <p class="eyebrow">Editor visual</p>
+            <h2 id="editTitle">Memuat soal</h2>
+            <p id="editNote" class="run-note">Ubah isi soal, lalu simpan untuk merender ulang gambar.</p>
+          </div>
+          <div class="edit-actions">
+            <a id="backToPreviewLink" class="secondary link-button" href="/saved">Bank Review</a>
+            <button id="reloadEditorButton" class="secondary" type="button">Muat ulang</button>
+            <button id="saveAndRenderButton" class="primary" type="submit" form="questionEditorForm">Simpan &amp; render ulang</button>
+          </div>
+        </div>
+        <div class="visual-editor-layout">
+          <form id="questionEditorForm" class="question-editor-form">
+            <section class="editor-section" aria-labelledby="editorIdentityTitle">
+              <div class="editor-section-heading">
+                <p class="eyebrow">Identitas</p>
+                <h3 id="editorIdentityTitle">Kategori soal</h3>
+              </div>
+              <div class="editor-field-grid">
+                <label>
+                  Subtes
+                  <select id="editMapel" required></select>
+                </label>
+                <label>
+                  Topik
+                  <select id="editTopik" required></select>
+                </label>
+                <label>
+                  Level
+                  <select id="editLevel" required>
+                    <option value="mudah">Mudah</option>
+                    <option value="sedang">Sedang</option>
+                    <option value="sulit">Sulit</option>
+                  </select>
+                </label>
+                <label>
+                  Kunci jawaban
+                  <select id="editAnswer" required>
+                    <option value="A">A</option>
+                    <option value="B">B</option>
+                    <option value="C">C</option>
+                    <option value="D">D</option>
+                    <option value="E">E</option>
+                  </select>
+                </label>
+                <label class="editor-field-wide">
+                  Akun
+                  <input id="editAccount" autocomplete="off">
+                </label>
+              </div>
+            </section>
+
+            <section class="editor-section" aria-labelledby="editorQuestionTitle">
+              <div class="editor-section-heading">
+                <p class="eyebrow">Konten utama</p>
+                <h3 id="editorQuestionTitle">Soal dan pilihan</h3>
+              </div>
+              <label class="editor-field-wide">
+                Teks soal
+                <textarea id="editQuestion" rows="6" required></textarea>
+              </label>
+              <div class="choice-editor-grid">
+                <label><span class="choice-editor-label">A</span><textarea id="editChoiceA" rows="2" required></textarea></label>
+                <label><span class="choice-editor-label">B</span><textarea id="editChoiceB" rows="2" required></textarea></label>
+                <label><span class="choice-editor-label">C</span><textarea id="editChoiceC" rows="2" required></textarea></label>
+                <label><span class="choice-editor-label">D</span><textarea id="editChoiceD" rows="2" required></textarea></label>
+                <label><span class="choice-editor-label">E</span><textarea id="editChoiceE" rows="2" required></textarea></label>
+              </div>
+            </section>
+
+            <section class="editor-section" aria-labelledby="editorSupportTitle">
+              <div class="editor-section-heading">
+                <p class="eyebrow">Pelengkap</p>
+                <h3 id="editorSupportTitle">Pembahasan dan caption</h3>
+              </div>
+              <label class="editor-field-wide">
+                Pembahasan
+                <textarea id="editExplanation" rows="8" required></textarea>
+              </label>
+              <label class="editor-field-wide">
+                Caption
+                <textarea id="editCaption" rows="5"></textarea>
+              </label>
+              <label class="editor-field-wide">
+                Hashtag, pisahkan dengan spasi
+                <input id="editHashtags" autocomplete="off">
+              </label>
+              <label class="editor-check-field">
+                <input id="editNeedsVisual" type="checkbox">
+                <span>Soal membutuhkan visual atau grafik</span>
+              </label>
+            </section>
+          </form>
+
+          <aside class="editor-image-panel" aria-labelledby="imagePreviewTitle">
+            <div class="editor-image-heading">
+              <div>
+                <p class="eyebrow">Preview</p>
+                <h3 id="imagePreviewTitle">Gambar saat ini</h3>
+              </div>
+              <span id="editImageCount">0 halaman</span>
+            </div>
+            <p id="imagePreviewNote" class="run-note">Preview diperbarui setelah disimpan dan dirender ulang.</p>
+            <div id="editImagePreviewList" class="editor-image-list">
+              <p class="body-copy">Belum ada gambar.</p>
+            </div>
+          </aside>
+        </div>
+        <pre id="editError" class="edit-error" hidden></pre>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <span>UTBK Content Desk</span> &bull; &copy; 2026
+    </footer>
+
+    <script src="/assets/edit.js"></script>
+  </body>
+</html>

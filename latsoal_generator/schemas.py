@@ -89,6 +89,7 @@ EXPLANATION_REVIEW_SCHEMA = {
             "items": {"type": "STRING"},
         },
         "pembahasan_revisi": {"type": "STRING"},
+        "question_revisi": QUESTION_SCHEMA,
     },
     "required": [
         "lolos",
@@ -98,5 +99,6 @@ EXPLANATION_REVIEW_SCHEMA = {
         "catatan",
         "saran_revisi",
         "pembahasan_revisi",
+        "question_revisi",
     ],
 }

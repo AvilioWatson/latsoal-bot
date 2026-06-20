@@ -9,14 +9,66 @@
     "Literasi Bahasa Inggris": "LBE"
   },
   "topic_aliases": {
+    "Pengetahuan dan Pemahaman Umum": {
+      "Hubungan antarkalimat": "Wacana"
+    },
+    "Literasi Bahasa Indonesia": {
+      "Pemahaman teks informatif": "Memahami Informasi"
+    },
+    "Literasi Bahasa Inggris": {
+      "Main idea": "General Information"
+    },
     "Pengetahuan Kuantitatif": {
+      "Aljabar": "Aljabar dan Fungsi",
+      "Barisan dan Deret": "Aljabar dan Fungsi",
+      "Eksponen": "Aljabar dan Fungsi",
+      "Ekspresi matematika": "Aljabar dan Fungsi",
+      "Fungsi": "Aljabar dan Fungsi",
+      "Fungsi Aljabar": "Aljabar dan Fungsi",
+      "Fungsi eksponen": "Aljabar dan Fungsi",
+      "Fungsi Invers dan Komposisi": "Aljabar dan Fungsi",
+      "Fungsi komposisi": "Aljabar dan Fungsi",
+      "Fungsi Komposisi dan Invers": "Aljabar dan Fungsi",
+      "Fungsi Linear dan Kuadrat": "Aljabar dan Fungsi",
+      "Kedudukan garis terhadap kurva": "Aljabar dan Fungsi",
+      "Operasi eksponen": "Aljabar dan Fungsi",
+      "Persamaan Eksponen": "Aljabar dan Fungsi",
+      "Persamaan garis": "Aljabar dan Fungsi",
       "Persamaan Linear": "Aljabar dan Fungsi",
       "Persamaan Kuadrat": "Aljabar dan Fungsi",
       "Fungsi Linear": "Aljabar dan Fungsi",
       "Fungsi Kuadrat": "Aljabar dan Fungsi",
       "Aljabar Linear": "Aljabar dan Fungsi",
       "Sistem Persamaan Linear": "Aljabar dan Fungsi",
-      "Pertidaksamaan Linear": "Aljabar dan Fungsi"
+      "Sistem Persamaan Linear Dua Variabel": "Aljabar dan Fungsi",
+      "SPLDV": "Aljabar dan Fungsi",
+      "SPLTV": "Aljabar dan Fungsi",
+      "Pertidaksamaan": "Aljabar dan Fungsi",
+      "Pertidaksamaan Irrasional": "Aljabar dan Fungsi",
+      "Pertidaksamaan Linear": "Aljabar dan Fungsi",
+      "Pertidaksamaan linear satu variabel": "Aljabar dan Fungsi",
+      "Pertidaksamaan Rasional": "Aljabar dan Fungsi",
+      "Program linear": "Aljabar dan Fungsi",
+      "Relasi dan Fungsi": "Aljabar dan Fungsi",
+      "Turunan Fungsi Aljabar": "Aljabar dan Fungsi",
+      "Aritmetika": "Bilangan",
+      "Bilangan bentuk akar": "Bilangan",
+      "Bilangan berpangkat": "Bilangan",
+      "Operasi bilangan": "Bilangan",
+      "Perbandingan": "Bilangan",
+      "Bangun ruang": "Geometri dan Pengukuran",
+      "Garis dan segitiga": "Geometri dan Pengukuran",
+      "Geometri": "Geometri dan Pengukuran",
+      "Geometri 3 dimensi": "Geometri dan Pengukuran",
+      "Segitiga": "Geometri dan Pengukuran",
+      "Segitiga dan sudut": "Geometri dan Pengukuran",
+      "Sudut dan segitiga": "Geometri dan Pengukuran",
+      "Trigonometri": "Geometri dan Pengukuran",
+      "Kaidah Pencacahan": "Statistika dan Peluang",
+      "Kombinasi dan permutasi": "Statistika dan Peluang",
+      "Peluang": "Statistika dan Peluang",
+      "Peluang dan kaidah pencacahan": "Statistika dan Peluang",
+      "Statistika": "Statistika dan Peluang"
     },
     "Penalaran Matematika": {
       "Persamaan Linear": "Aljabar dan Fungsi",

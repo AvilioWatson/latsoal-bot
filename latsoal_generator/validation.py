@@ -144,7 +144,7 @@ def _is_removable_question_parenthetical(body, context):
         return True
     if PAREN_MATH_RE.search(body):
         return False
-    if re.fullmatch(r"[A-Ea-e]", body):
+    if re.fullmatch(r"[A-Za-z]", body):
         return False
 
     context_lower = str(context or "").lower()
@@ -176,11 +176,25 @@ def _remove_question_hint_parentheses(text, context=""):
     return cleaned.strip()
 
 
+def _normalize_equals_spacing(value):
+    return re.sub(r"(?<![<>=!])\s*=\s*(?![=>])", " = ", str(value or "")).strip()
+
+
 def normalize_question(question):
     normalized = dict(question or {})
     context = " ".join(
         str(normalized.get(key, ""))
         for key in ("mapel", "topik", "level", "soal")
     )
-    normalized["soal"] = _remove_question_hint_parentheses(normalized.get("soal", ""), context)
+    normalized["soal"] = _normalize_equals_spacing(
+        _remove_question_hint_parentheses(normalized.get("soal", ""), context)
+    )
+    for field in ("pembahasan", "konsep_kunci", "tips_pengerjaan", "deskripsi_visual"):
+        if field in normalized:
+            normalized[field] = _normalize_equals_spacing(normalized.get(field, ""))
+    if isinstance(normalized.get("pilihan"), dict):
+        normalized["pilihan"] = {
+            key: _normalize_equals_spacing(value)
+            for key, value in normalized["pilihan"].items()
+        }
     return normalized

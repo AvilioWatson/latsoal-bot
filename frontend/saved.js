@@ -10,6 +10,17 @@ const subtestTabs = document.querySelector("#subtestTabs");
 const subtopicTabs = document.querySelector("#subtopicTabs");
 const closePreviewButton = document.querySelector("#closePreviewButton");
 const reviewExplanationButton = document.querySelector("#reviewExplanationButton");
+const aiReviewDraft = document.querySelector("#aiReviewDraft");
+const aiReviewDraftScore = document.querySelector("#aiReviewDraftScore");
+const aiReviewDraftSummary = document.querySelector("#aiReviewDraftSummary");
+const aiReviewDraftJson = document.querySelector("#aiReviewDraftJson");
+const applyAiReviewButton = document.querySelector("#applyAiReviewButton");
+const cancelAiReviewButton = document.querySelector("#cancelAiReviewButton");
+const approvePreviewButton = document.querySelector("#approvePreviewButton");
+const rejectPreviewButton = document.querySelector("#rejectPreviewButton");
+const markUploadedPreviewButton = document.querySelector("#markUploadedPreviewButton");
+const deletePreviewButton = document.querySelector("#deletePreviewButton");
+const editJsonLink = document.querySelector("#editJsonLink");
 const copyCaptionButton = document.querySelector("#copyCaptionButton");
 const previewTitle = document.querySelector("#previewTitle");
 const runNote = document.querySelector("#runNote");
@@ -35,6 +46,7 @@ let activeSubtopic = "all";
 let activePreviewRunId = "";
 let activePreviewStatus = "";
 let activePreviewSource = "";
+let pendingExplanationReview = null;
 let subtests = [];
 const {
   copyCaption: sharedCopyCaption = async (elements, setStatusCallback) => {
@@ -108,6 +120,8 @@ function openPreviewPanel(runId) {
 
 function closePreviewPanel() {
   activePreviewRunId = "";
+  clearAiReviewDraft();
+  setPreviewActionState(null);
   savedLayout?.classList.remove("has-preview");
   savedPreview?.setAttribute("aria-hidden", "true");
   savedList.querySelectorAll(".saved-item").forEach((card) => {
@@ -121,6 +135,56 @@ function setPreviewStatus(status) {
   sourceLabel.textContent = activePreviewStatus
     ? `${source} / ${statusLabel(activePreviewStatus)}`
     : source;
+}
+
+function selectedPreviewItem() {
+  return savedItems.find((item) => item.run_id === activePreviewRunId) || null;
+}
+
+function clearAiReviewDraft() {
+  pendingExplanationReview = null;
+  aiReviewDraft.hidden = true;
+  aiReviewDraftScore.textContent = "-";
+  aiReviewDraftSummary.textContent = "";
+  aiReviewDraftJson.textContent = "";
+  applyAiReviewButton.disabled = false;
+  cancelAiReviewButton.disabled = false;
+  applyAiReviewButton.textContent = "Terapkan revisi";
+}
+
+function showAiReviewDraft(review) {
+  pendingExplanationReview = review;
+  const notes = [...(review.catatan || []), ...(review.saran_revisi || [])].filter(Boolean);
+  aiReviewDraftScore.textContent = `Skor ${review.skor ?? "-"}`;
+  aiReviewDraftSummary.textContent = notes[0]
+    || "AI sudah menyiapkan JSON revisi. Periksa isinya sebelum diterapkan.";
+  aiReviewDraftJson.textContent = JSON.stringify(review.question_revisi, null, 2);
+  aiReviewDraft.hidden = false;
+  aiReviewDraft.scrollIntoView({behavior: "smooth", block: "nearest"});
+}
+
+function setPreviewActionState(item = selectedPreviewItem()) {
+  const hasPreview = Boolean(activePreviewRunId && item);
+  const reviewPassed = Boolean(item?.explanation_review?.lolos);
+  const isApproved = item?.status === "approved";
+  const isRejected = item?.status === "rejected";
+  const isUploaded = Boolean(item?.uploaded_at);
+  approvePreviewButton.disabled = !hasPreview || (!isApproved && !reviewPassed);
+  approvePreviewButton.setAttribute("aria-pressed", String(isApproved));
+  approvePreviewButton.title = isApproved
+    ? "Batalkan approve dan kembalikan ke Saved"
+    : reviewPassed ? "Approve soal" : "Cek pembahasan AI sampai lolos sebelum approve.";
+  rejectPreviewButton.disabled = !hasPreview;
+  rejectPreviewButton.setAttribute("aria-pressed", String(isRejected));
+  rejectPreviewButton.title = isRejected
+    ? "Batalkan reject dan kembalikan ke Saved"
+    : "Reject soal";
+  markUploadedPreviewButton.disabled = !hasPreview;
+  markUploadedPreviewButton.setAttribute("aria-pressed", String(isUploaded));
+  markUploadedPreviewButton.title = isUploaded
+    ? "Batalkan status upload"
+    : "Tandai soal sudah diupload";
+  deletePreviewButton.disabled = !hasPreview;
 }
 
 function reviewNote(data) {
@@ -269,13 +333,6 @@ function renderSavedList(items = filteredSavedItems()) {
         <span data-upload-state></span>
         <span data-run-id></span>
       </div>
-      <div class="saved-actions">
-        <button type="button" data-action="approved">Approve</button>
-        <button type="button" data-action="rejected">Reject</button>
-        <button type="button" data-uploaded="true">Sudah diupload</button>
-        <button type="button" data-unuploaded="true">Tidak jadi diupload</button>
-        <button type="button" data-delete="true">Hapus</button>
-      </div>
     `;
     row.tabIndex = 0;
     row.setAttribute("role", "button");
@@ -287,38 +344,11 @@ function renderSavedList(items = filteredSavedItems()) {
     row.querySelector("[data-level]").textContent = item.level || "-";
     row.querySelector("[data-upload-state]").textContent = item.uploaded_at ? "Uploaded" : "Belum upload";
     row.querySelector("[data-run-id]").textContent = item.run_id;
-    const approveButton = row.querySelector("[data-action='approved']");
-    const reviewPassed = Boolean(item.explanation_review?.lolos);
-    approveButton.disabled = item.status === "approved" || !reviewPassed;
-    approveButton.title = reviewPassed ? "Approve soal" : "Cek pembahasan AI sampai lolos sebelum approve.";
-    row.querySelector("[data-action='rejected']").disabled = item.status === "rejected";
-    row.querySelector("[data-uploaded='true']").disabled = Boolean(item.uploaded_at);
-    row.querySelector("[data-unuploaded='true']").disabled = !item.uploaded_at;
     row.addEventListener("click", () => loadSavedPreview(item.run_id));
     row.addEventListener("keydown", (event) => {
       if (event.key !== "Enter" && event.key !== " ") return;
       event.preventDefault();
       loadSavedPreview(item.run_id);
-    });
-    row.querySelector("[data-delete='true']").addEventListener("click", (event) => {
-      event.stopPropagation();
-      deleteSavedRun(item.run_id);
-    });
-    row.querySelector("[data-uploaded='true']").addEventListener("click", (event) => {
-      event.stopPropagation();
-      markUploaded(item.run_id);
-    });
-    row.querySelector("[data-unuploaded='true']").addEventListener("click", (event) => {
-      event.stopPropagation();
-      unmarkUploaded(item.run_id);
-    });
-    row.querySelectorAll("button").forEach((button) => {
-      if (button.dataset.action) {
-        button.addEventListener("click", (event) => {
-          event.stopPropagation();
-          updateSavedStatus(item.run_id, button.dataset.action);
-        });
-      }
     });
     savedList.append(row);
   });
@@ -336,6 +366,7 @@ async function loadSavedList() {
 }
 
 async function loadSavedPreview(runId) {
+  clearAiReviewDraft();
   setStatus("Loading");
   activePreviewRunId = runId;
   openPreviewPanel(runId);
@@ -366,6 +397,7 @@ async function loadSavedPreview(runId) {
   previewTitle.textContent = `${question.mapel}: ${question.topik}`;
   activePreviewSource = sharedSourceText(data);
   setPreviewStatus(savedItems.find((item) => item.run_id === runId)?.status || "saved");
+  setPreviewActionState(selectedItem);
   validationScore.textContent = `Skor ${validation.skor ?? "-"}`;
   runNote.textContent = reviewNote(data);
   renderImages(data);
@@ -385,6 +417,8 @@ async function loadSavedPreview(runId) {
   copyCaptionButton.disabled = false;
   metadataLink.href = data.web_files.metadata;
   metadataLink.hidden = false;
+  editJsonLink.href = `/edit/${runId}`;
+  editJsonLink.hidden = false;
   downloadAllLink.href = `/download/saved/${runId}`;
   downloadAllLink.hidden = false;
   renderDebug(data);
@@ -412,10 +446,13 @@ function clearPreviewIfDeleted(runId) {
   deleteImageButton.disabled = true;
   metadataLink.hidden = true;
   metadataLink.href = "#";
+  editJsonLink.hidden = true;
+  editJsonLink.href = "#";
   downloadAllLink.hidden = true;
   downloadAllLink.href = "#";
   copyCaptionButton.disabled = true;
   reviewExplanationButton.disabled = true;
+  setPreviewActionState(null);
   debugPanel.hidden = true;
   closePreviewPanel();
 }
@@ -433,16 +470,12 @@ async function reviewExplanation() {
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Cek pembahasan gagal.");
-    const selected = savedItems.find((item) => item.run_id === activePreviewRunId);
-    if (selected) selected.explanation_review = data.explanation_review;
-    setStatus(data.explanation_review?.lolos ? "Review passed" : "Review failed");
-    runNote.textContent = data.explanation_review?.lolos
-      ? `Pembahasan lolos cek AI dengan skor ${data.explanation_review.skor ?? "-"}.`
-      : `Pembahasan belum lolos cek AI: ${(data.explanation_review?.catatan || [])[0] || "perlu revisi."}`;
-    debugPanel.hidden = false;
-    debugSource.textContent = "explanation-review";
-    debugText.textContent = JSON.stringify(data.explanation_review, null, 2);
-    renderSavedList();
+    if (!data.explanation_review?.question_revisi) {
+      throw new Error("AI tidak mengembalikan draft JSON revisi.");
+    }
+    showAiReviewDraft(data.explanation_review);
+    setStatus("Draft ready");
+    runNote.textContent = "Review selesai. JSON asli belum berubah; periksa draft lalu pilih Terapkan atau Cancel.";
   } catch (error) {
     setStatus("Error");
     debugPanel.hidden = false;
@@ -452,6 +485,48 @@ async function reviewExplanation() {
     reviewExplanationButton.disabled = false;
     reviewExplanationButton.textContent = "Cek pembahasan AI";
   }
+}
+
+async function applyAiReviewDraft() {
+  if (!activePreviewRunId || !pendingExplanationReview) return;
+  const runId = activePreviewRunId;
+  applyAiReviewButton.disabled = true;
+  cancelAiReviewButton.disabled = true;
+  applyAiReviewButton.textContent = "Menerapkan";
+  setStatus("Applying");
+  try {
+    const response = await fetch(`/saved/${runId}/explanation-review/apply`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        question_revisi: pendingExplanationReview.question_revisi,
+        explanation_review: pendingExplanationReview,
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Penerapan revisi gagal.");
+    clearAiReviewDraft();
+    await loadSavedList();
+    await loadSavedPreview(runId);
+    setStatus("Applied");
+    runNote.textContent = "Revisi AI sudah diterapkan ke metadata.json dan soal.json.";
+  } catch (error) {
+    setStatus("Error");
+    debugPanel.hidden = false;
+    debugSource.textContent = "explanation-review/apply";
+    debugText.textContent = error.stack || error.message;
+  } finally {
+    applyAiReviewButton.disabled = false;
+    cancelAiReviewButton.disabled = false;
+    applyAiReviewButton.textContent = "Terapkan revisi";
+  }
+}
+
+function cancelAiReviewDraft() {
+  if (!pendingExplanationReview) return;
+  clearAiReviewDraft();
+  setStatus("Canceled");
+  runNote.textContent = "Draft AI dibatalkan. JSON asli tidak berubah.";
 }
 
 async function updateSavedStatus(runId, status) {
@@ -469,17 +544,21 @@ async function updateSavedStatus(runId, status) {
     debugText.textContent = data.error || "Update status gagal.";
     return;
   }
-  setStatus(status === "approved" ? "Approved" : "Rejected");
+  setStatus(status === "approved" ? "Approved" : status === "rejected" ? "Rejected" : "Saved");
   await loadSavedList();
   if (activePreviewRunId === runId) {
     setPreviewStatus(status);
     runNote.textContent = `Status review sekarang ${statusLabel(status)}.`;
+    setPreviewActionState(selectedPreviewItem());
   }
 }
 
-async function markUploaded(runId) {
+async function toggleUploaded(runId) {
+  const item = savedItems.find((entry) => entry.run_id === runId);
+  const wasUploaded = Boolean(item?.uploaded_at);
+  const action = wasUploaded ? "unuploaded" : "uploaded";
   setStatus("Updating");
-  const response = await fetch(`/saved/${runId}/uploaded`, {
+  const response = await fetch(`/saved/${runId}/${action}`, {
     method: "POST",
     headers: {"Content-Type": "application/json"},
   });
@@ -487,35 +566,17 @@ async function markUploaded(runId) {
   if (!response.ok) {
     setStatus("Error");
     debugPanel.hidden = false;
-    debugSource.textContent = "saved/uploaded";
+    debugSource.textContent = `saved/${action}`;
     debugText.textContent = data.error || "Update upload gagal.";
     return;
   }
-  setStatus("Uploaded");
+  setStatus(wasUploaded ? "Not uploaded" : "Uploaded");
   await loadSavedList();
   if (activePreviewRunId === runId) {
-    runNote.textContent = `Sudah diupload pada ${new Date(data.uploaded_at).toLocaleString("id-ID")}.`;
-  }
-}
-
-async function unmarkUploaded(runId) {
-  setStatus("Updating");
-  const response = await fetch(`/saved/${runId}/unuploaded`, {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-  });
-  const data = await response.json();
-  if (!response.ok) {
-    setStatus("Error");
-    debugPanel.hidden = false;
-    debugSource.textContent = "saved/unuploaded";
-    debugText.textContent = data.error || "Pembatalan upload gagal.";
-    return;
-  }
-  setStatus("Not uploaded");
-  await loadSavedList();
-  if (activePreviewRunId === runId) {
-    runNote.textContent = "Status upload dibatalkan.";
+    runNote.textContent = wasUploaded
+      ? "Status upload dibatalkan."
+      : `Sudah diupload pada ${new Date(data.uploaded_at).toLocaleString("id-ID")}.`;
+    setPreviewActionState(selectedPreviewItem());
   }
 }
 
@@ -610,6 +671,24 @@ refreshSavedButton.addEventListener("click", () => {
 generateImageButton.addEventListener("click", generateSavedImages);
 deleteImageButton.addEventListener("click", deleteSavedImages);
 reviewExplanationButton.addEventListener("click", reviewExplanation);
+applyAiReviewButton.addEventListener("click", applyAiReviewDraft);
+cancelAiReviewButton.addEventListener("click", cancelAiReviewDraft);
+approvePreviewButton.addEventListener("click", () => {
+  if (!activePreviewRunId) return;
+  const nextStatus = activePreviewStatus === "approved" ? "saved" : "approved";
+  updateSavedStatus(activePreviewRunId, nextStatus);
+});
+rejectPreviewButton.addEventListener("click", () => {
+  if (!activePreviewRunId) return;
+  const nextStatus = activePreviewStatus === "rejected" ? "saved" : "rejected";
+  updateSavedStatus(activePreviewRunId, nextStatus);
+});
+markUploadedPreviewButton.addEventListener("click", () => {
+  if (activePreviewRunId) toggleUploaded(activePreviewRunId);
+});
+deletePreviewButton.addEventListener("click", () => {
+  if (activePreviewRunId) deleteSavedRun(activePreviewRunId);
+});
 closePreviewButton.addEventListener("click", closePreviewPanel);
 
 savedSearch.addEventListener("input", () => renderSavedList());

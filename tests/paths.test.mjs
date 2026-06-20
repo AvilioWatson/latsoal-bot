@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import path from "node:path";
 import test from "node:test";
-import {buildStoragePath, buildWebFiles, isValidRunId, safeJoin, subtestCode} from "../lib/paths.js";
+import {buildStoragePath, buildWebFiles, canonicalTopic, isValidRunId, safeJoin, subtestCode} from "../lib/paths.js";
 
 test("safeJoin allows paths inside the base directory", () => {
   const base = path.resolve("tmp-base");
@@ -64,4 +64,11 @@ test("buildStoragePath groups question artifacts by subtest code and topic", () 
     buildStoragePath({mapel: "Pengetahuan Kuantitatif", topik: "Persamaan Linear"}, "20260529-123456"),
     "PK/aljabar-dan-fungsi/20260529-123456",
   );
+});
+
+test("canonicalTopic merges related labels and normalizes canonical casing", () => {
+  assert.equal(canonicalTopic("Pengetahuan Kuantitatif", "fungsi komposisi"), "Aljabar dan Fungsi");
+  assert.equal(canonicalTopic("Pengetahuan Kuantitatif", "SPLDV"), "Aljabar dan Fungsi");
+  assert.equal(canonicalTopic("Pengetahuan Kuantitatif", "peluang"), "Statistika dan Peluang");
+  assert.equal(canonicalTopic("Penalaran Umum", "Penalaran deduktif"), "Penalaran Deduktif");
 });

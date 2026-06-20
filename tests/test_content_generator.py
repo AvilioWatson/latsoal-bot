@@ -116,6 +116,8 @@ class ContentGeneratorTest(unittest.TestCase):
             ]
             self.assertEqual(len(included), 3)
             self.assertIn("Contoh soal database untuk topik yang sama", prompt)
+            self.assertIn('"Langkah 1:"', prompt)
+            self.assertIn('"Kesimpulan:"', prompt)
             self.assertNotIn("Contoh database statistika yang tidak boleh masuk", prompt)
 
     def test_generate_content_auto_blocks_when_same_topic_examples_are_insufficient(self):
@@ -170,6 +172,9 @@ class ContentGeneratorTest(unittest.TestCase):
             self.assertEqual(metadata["caption"], result["caption"])
             self.assertEqual(metadata["files"], result["files"])
             self.assertEqual(question, result["question"])
+            self.assertIn("visual_latex", question)
+            self.assertEqual(question["visual_latex"]["type"], "cartesian_2d")
+            self.assertFalse(question["visual_latex"]["generated"])
             self.assertIn(result["caption"]["caption"], caption_text)
             for hashtag in result["caption"]["hashtag"]:
                 self.assertIn(hashtag, caption_text)
@@ -299,6 +304,25 @@ class ContentGeneratorTest(unittest.TestCase):
             self.assertIn("(x - 1)^2", normalized["soal"])
             self.assertIn("(0, 1)", normalized["soal"])
 
+    def test_normalize_question_spaces_equals_signs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            generator = load_generator(Path(tmp))
+            question = {
+                "mapel": "Pengetahuan Kuantitatif",
+                "topik": "Aljabar dan Fungsi",
+                "level": "sedang",
+                "soal": "Jika f(x)=2x+1 dan x>=2, tentukan f(2).",
+                "pilihan": {"A": "f(2)=3", "B": "5", "C": "6", "D": "7", "E": "8"},
+                "jawaban": "B",
+                "pembahasan": "f(2)=2(2)+1=5.",
+            }
+
+            normalized = generator.normalize_question(question)
+
+            self.assertEqual(normalized["soal"], "Jika f(x) = 2x+1 dan x>=2, tentukan f(2).")
+            self.assertEqual(normalized["pilihan"]["A"], "f(2) = 3")
+            self.assertEqual(normalized["pembahasan"], "f(2) = 2(2)+1 = 5.")
+
     def test_latex_explanation_uses_consistent_cartesian_visual(self):
         with tempfile.TemporaryDirectory() as tmp:
             generator = load_generator(Path(tmp))
@@ -409,6 +433,175 @@ class ContentGeneratorTest(unittest.TestCase):
             self.assertIn("3:4:7", formatted)
             self.assertNotIn("3 : 4", formatted)
 
+    def test_question_removes_arbitrary_line_breaks_inside_sentence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            generator = load_generator(Path(tmp))
+
+            formatted = generator._format_question_text(
+                "7% dari a adalah 490 dan 1,5% dari b adalah\n\n"
+                "45. Maka nilai (2/7000)a - (1/900)b adalah...."
+            )
+
+            self.assertEqual(
+                formatted,
+                "7% dari a adalah 490 dan 1,5% dari b adalah 45. "
+                "Maka nilai (2/7000)a - (1/900)b adalah....",
+            )
+            self.assertNotIn("\n", formatted)
+
+    def test_numbered_statements_start_on_separate_lines(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            generator = load_generator(Path(tmp))
+
+            formatted = generator._format_question_text(
+                "Berapakah nilai xy jika x > 0? (1) y = x^2. (2) 2y+6=2(x+3)."
+            )
+
+            self.assertEqual(
+                formatted,
+                "Berapakah nilai xy jika x > 0?\n(1) y = x^2.\n(2) 2y+6 = 2(x+3).",
+            )
+
+    def test_single_parenthetical_number_stays_inline(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            generator = load_generator(Path(tmp))
+
+            formatted = generator._format_question_text("Nilai fungsi pada x = (1) adalah 2.")
+
+            self.assertEqual(formatted, "Nilai fungsi pada x = (1) adalah 2.")
+
+    def test_data_sufficiency_explanation_keeps_logical_blocks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            generator = load_generator(Path(tmp))
+            explanation = (
+                "(1) y = x^2. xy = x^3. Tergantung nilai x, tidak bisa ditentukan nilai pasti. "
+                "TIDAK CUKUP. (2) 2y+6=2x+6 menghasilkan y=x. xy=x^2. "
+                "Tergantung nilai x, tidak bisa ditentukan nilai pasti. TIDAK CUKUP. "
+                "Bersama-sama: y=x^2 dan y=x menghasilkan x=1. "
+                "Diketahui x>0, jadi x=1 dan y=1. BERSAMA-SAMA CUKUP. Jawaban C."
+            )
+
+            formatted = generator._format_explanation_text(explanation, sentence_per_line=True)
+
+            self.assertIn("\n\n(2) 2y+6=2x+6", formatted)
+            self.assertIn("\n\nTIDAK CUKUP.", formatted)
+            self.assertIn("\n\nBersama-sama:", formatted)
+            self.assertIn("\n\nBERSAMA-SAMA CUKUP.", formatted)
+            self.assertIn("\n\nJawaban C.", formatted)
+
+    def test_pil_explanation_uses_compact_gaps_between_steps(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            generator = load_generator(Path(tmp))
+            from PIL import Image, ImageDraw
+
+            question = {
+                "pembahasan": (
+                    "x = (y+4)/2\n"
+                    "Sehingga, (g o f)(x) = (x+4)/2.\n"
+                    "Substitusikan x = 2 ke dalam fungsi komposisi tersebut:\n"
+                    "g(f(2)) = (2+4)/2 = 3"
+                )
+            }
+            font = generator._load_font(29, family="anthropic_sans")
+            image = Image.new("RGB", (1000, 1000), "#f5f0e8")
+            pages = generator._paginate_explanation_pages(
+                ImageDraw.Draw(image),
+                question,
+                {"body": font},
+            )
+
+            self.assertTrue(pages)
+            self.assertEqual(len(pages), 1)
+            self.assertIn("", pages[0])
+            self.assertEqual(
+                generator._explanation_visual_height(["Langkah 1", "", "Langkah 2"], 40),
+                92,
+            )
+
+            steps = generator._build_explanation_steps(question["pembahasan"])
+            self.assertEqual(len(steps), 3)
+            self.assertFalse(steps[1]["parts"][0]["formula"])
+            self.assertTrue(steps[2]["parts"][1]["formula"])
+
+            groups = generator._structured_explanation_groups(
+                ImageDraw.Draw(image),
+                question["pembahasan"],
+                {
+                    "explanation": generator._load_font(27, family="anthropic_sans"),
+                    "formula": generator._load_font(26, family="anthropic_mono"),
+                },
+            )
+            self.assertEqual(groups[0][0]["label"], "Langkah 1")
+            text_rows = [
+                row
+                for group in groups
+                for row in group
+                if row["kind"] == "text"
+            ]
+            self.assertTrue(text_rows)
+            self.assertGreaterEqual(text_rows[0]["height"], 40)
+
+            labeled_steps = generator._build_explanation_steps(
+                "Langkah 1: Tentukan nilai x.\n"
+                "Langkah 2: Substitusikan nilai x.\n"
+                "Kesimpulan: Jawaban yang benar adalah C."
+            )
+            self.assertEqual(len(labeled_steps), 3)
+            self.assertTrue(labeled_steps[-1]["conclusion"])
+
+    def test_latex_explanation_preserves_paragraph_spacing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            generator = load_generator(Path(tmp))
+            question = {
+                "mapel": "Pengetahuan Kuantitatif",
+                "topik": "Kecukupan Data",
+                "level": "sedang",
+                "soal": "Tentukan nilai xy.",
+                "pilihan": {key: key for key in "ABCDE"},
+                "jawaban": "C",
+                "pembahasan": (
+                    "(1) y=x^2. TIDAK CUKUP. (2) y=x. TIDAK CUKUP. "
+                    "Bersama-sama: x=1 dan y=1. BERSAMA-SAMA CUKUP. Jawaban C."
+                ),
+                "butuh_visual": False,
+            }
+
+            source = generator._latex_explanation_sources(question)[0]
+
+            self.assertIn(r"\mbox{}", source)
+
+    def test_answer_display_text_does_not_repeat_answer_key(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            generator = load_generator(Path(tmp))
+
+            self.assertEqual(generator._answer_display_text("B", "Nilai x adalah 2"), "Nilai x adalah 2")
+            self.assertEqual(generator._answer_display_text("B", "B. Nilai x adalah 2"), "Nilai x adalah 2")
+            self.assertNotIn("B.", generator._answer_display_text("B", "B) Nilai x adalah 2"))
+
+    def test_pil_text_converts_common_latex_instead_of_showing_raw_commands(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            generator = load_generator(Path(tmp))
+
+            rendered = generator._latex_to_plain_text(
+                r"$f^{-1}$ dan $g^{-1}$, $(f^{-1}\circ g^{-1})(x)=2x-4$, "
+                r"$g(x)=\frac{x-1}{x+2}$"
+            )
+
+            self.assertEqual(
+                rendered,
+                "f⁻¹ dan g⁻¹, (f⁻¹∘ g⁻¹)(x)=2x-4, g(x)=(x-1)/(x+2)",
+            )
+            self.assertNotIn("$", rendered)
+            self.assertNotIn(r"\frac", rendered)
+            self.assertNotIn(r"\circ", rendered)
+
+    def test_pil_text_converts_latex_fraction_choices(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            generator = load_generator(Path(tmp))
+
+            self.assertEqual(generator._latex_to_plain_text(r"$-\frac{5}{4}$"), "-5/4")
+            self.assertEqual(generator._latex_to_plain_text(r"$\sqrt{40}=2\sqrt{10}$"), "√40=2√10")
+
     def test_symbolic_quadratic_parameter_does_not_render_cartesian_visual(self):
         with tempfile.TemporaryDirectory() as tmp:
             generator = load_generator(Path(tmp))
@@ -466,6 +659,42 @@ class ContentGeneratorTest(unittest.TestCase):
             self.assertIn(r"\fill[graphgreen]", visual)
             self.assertIn("(160.0,184.6)", visual)
             self.assertNotIn(" grid[", visual)
+
+    def test_math_question_gets_cartesian_latex_visual_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            generator = load_generator(Path(tmp))
+            question = {
+                "mapel": "Penalaran Matematika",
+                "topik": "Grafik Fungsi",
+                "level": "sedang",
+                "soal": "Pada bidang kartesius, grafik garis y = x + 1 memotong sumbu y di titik (0, 1).",
+                "butuh_visual": True,
+            }
+
+            enriched = generator.attach_cartesian_latex_visual(question)
+
+            self.assertTrue(enriched["visual_latex"]["generated"])
+            self.assertEqual(enriched["visual_latex"]["type"], "cartesian_2d")
+            self.assertEqual(enriched["visual_latex"]["format"], "tikz")
+            self.assertIn(r"\begin{scope}", enriched["visual_latex"]["source"])
+            self.assertIn(r"\draw[graphgreen", enriched["visual_latex"]["source"])
+
+    def test_math_question_without_cartesian_graph_gets_empty_visual_latex_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            generator = load_generator(Path(tmp))
+            question = {
+                "mapel": "Pengetahuan Kuantitatif",
+                "topik": "Aritmetika",
+                "level": "mudah",
+                "soal": "Jika 2x + 3 = 11, nilai x adalah...",
+                "butuh_visual": False,
+            }
+
+            enriched = generator.attach_cartesian_latex_visual(question)
+
+            self.assertFalse(enriched["visual_latex"]["generated"])
+            self.assertEqual(enriched["visual_latex"]["source"], "")
+            self.assertEqual(enriched["visual_latex"]["reason"], "not_cartesian_or_unparseable")
 
     def test_explanation_can_graph_after_symbolic_variable_is_solved(self):
         with tempfile.TemporaryDirectory() as tmp:

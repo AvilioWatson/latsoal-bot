@@ -1,7 +1,7 @@
 import {spawn} from "node:child_process";
-import {access, cp, mkdir, readdir, rm} from "node:fs/promises";
+import {access, cp, mkdir, readdir, rm, writeFile} from "node:fs/promises";
 import path from "node:path";
-import {readJsonValidated, writeJsonValidated} from "../lib/dbschema.js";
+import {readJsonValidated, validateQuestion, writeJsonValidated} from "../lib/dbschema.js";
 import {
   addEntry,
   createEntryFromMetadata,
@@ -363,11 +363,69 @@ async function reviewSavedExplanation(runId, provider = "gemini") {
   }
 
   const result = await runExplanationReview(metadataPath, provider);
-  metadata.explanation_review = result.explanation_review;
-  await writeJsonValidated(metadataPath, metadata, "metadata");
   return {
     run_id: runId,
+    explanation_review: result.explanation_review,
+    web_files: buildWebFiles("/saved", artifactPath, metadata.files),
+  };
+}
+
+async function applySavedExplanationReview(runId, payload) {
+  if (!isValidRunId(runId)) {
+    throw requestError(400, "Run ID tidak valid.");
+  }
+  const revisedQuestion = payload?.question_revisi;
+  const review = payload?.explanation_review;
+  if (!revisedQuestion || typeof revisedQuestion !== "object" || Array.isArray(revisedQuestion)) {
+    throw requestError(400, "Draft revisi soal tidak valid.");
+  }
+  if (!review || typeof review !== "object" || Array.isArray(review)) {
+    throw requestError(400, "Hasil review tidak valid.");
+  }
+  if (typeof review.lolos !== "boolean") {
+    throw requestError(400, "Status lolos pada hasil review tidak valid.");
+  }
+  const warnings = validateQuestion(revisedQuestion, "question_revisi");
+  if (warnings.length) {
+    throw requestError(400, `Draft revisi belum valid: ${warnings[0].path} ${warnings[0].message}`);
+  }
+
+  const resolved = await resolveSavedRun(runId);
+  const runDir = resolved?.dir;
+  const artifactPath = resolved?.artifactPath || runId;
+  if (!runDir) {
+    throw requestError(404, "Saved run tidak ditemukan.");
+  }
+  const metadataPath = path.join(runDir, "metadata.json");
+  const metadata = await readJsonValidated(metadataPath, "metadata");
+  const {question_revisi: _ignoredQuestion, ...reviewSummary} = review;
+  const now = new Date().toISOString();
+  metadata.question = revisedQuestion;
+  metadata.explanation_review = {
+    ...reviewSummary,
+    pembahasan_revisi: revisedQuestion.pembahasan,
+    applied_at: now,
+  };
+  metadata.review_status = reviewSummary.lolos ? "ready" : "needs_review";
+  metadata.edited_at = now;
+  await writeJsonValidated(metadataPath, metadata, "metadata");
+  await writeJsonValidated(path.join(runDir, "soal.json"), revisedQuestion, "question");
+
+  const patchedEntry = createEntryFromMetadata(runId, metadata, {
+    ...(resolved.entry || {}),
+    path: `saved/${artifactPath}`,
+    status: "saved",
+    status_updated_at: now,
+    approved_at: null,
+    rejected_at: null,
+  });
+  await updateEntry(runId, patchedEntry);
+  return {
+    ok: true,
+    run_id: runId,
+    question: revisedQuestion,
     explanation_review: metadata.explanation_review,
+    review_status: metadata.review_status,
     web_files: buildWebFiles("/saved", artifactPath, metadata.files),
   };
 }
@@ -445,6 +503,59 @@ async function sendSavedMetadata(response, runId) {
   sendJson(response, metadata);
 }
 
+async function updateSavedMetadataJson(runId, metadata) {
+  if (!isValidRunId(runId)) {
+    throw requestError(400, "Run ID tidak valid.");
+  }
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    throw requestError(400, "Metadata harus berupa JSON object.");
+  }
+  if (metadata.run_id && metadata.run_id !== runId) {
+    throw requestError(400, "run_id metadata tidak boleh berbeda dari URL.");
+  }
+
+  const resolved = await resolveSavedRun(runId);
+  const runDir = resolved?.dir;
+  const artifactPath = resolved?.artifactPath || runId;
+  if (!runDir) {
+    throw requestError(404, "Saved run tidak ditemukan.");
+  }
+
+  const nextMetadata = {
+    ...metadata,
+    run_id: runId,
+    storage_path: artifactPath,
+    edited_at: new Date().toISOString(),
+  };
+  retargetMetadataFiles(nextMetadata, runDir);
+  await writeJsonValidated(path.join(runDir, "metadata.json"), nextMetadata, "metadata");
+  if (nextMetadata.question) {
+    await writeJsonValidated(path.join(runDir, "soal.json"), nextMetadata.question, "question");
+  }
+  if (nextMetadata.caption) {
+    const captionText = nextMetadata.caption.caption || "";
+    const hashtags = Array.isArray(nextMetadata.caption.hashtag) ? nextMetadata.caption.hashtag.join(" ") : "";
+    await writeFile(path.join(runDir, "caption.txt"), `${captionText}\n\n${hashtags}\n`, "utf-8");
+  }
+
+  const patchedEntry = createEntryFromMetadata(runId, nextMetadata, {
+    ...(resolved.entry || {}),
+    path: `saved/${artifactPath}`,
+  });
+  await updateEntry(runId, patchedEntry);
+  return {
+    ok: true,
+    run_id: runId,
+    metadata: {
+      ...nextMetadata,
+      web_files: buildWebFiles("/saved", artifactPath, nextMetadata.files),
+      canonical_topik: nextMetadata.question
+        ? canonicalTopic(nextMetadata.question.mapel, nextMetadata.question.topik)
+        : null,
+    },
+  };
+}
+
 function savedRunRoute(route) {
   const parts = route.split("/").filter(Boolean);
   if (parts[0] !== "saved" || parts.length < 2) return null;
@@ -493,6 +604,16 @@ export async function handle(request, response, route) {
     return true;
   }
 
+  if (request.method === "PUT" && savedRoute?.length === 3 && savedRoute[2] === "json") {
+    try {
+      const payload = await readJsonBody(request);
+      sendJson(response, await updateSavedMetadataJson(savedRoute[1], payload));
+    } catch (error) {
+      sendError(response, errorStatus(error), error.message);
+    }
+    return true;
+  }
+
   if (request.method === "POST" && savedRoute?.length === 3 && savedRoute[2] === "status") {
     try {
       const payload = await readJsonBody(request);
@@ -534,6 +655,21 @@ export async function handle(request, response, route) {
     try {
       const payload = await readJsonBody(request).catch(() => ({}));
       sendJson(response, await reviewSavedExplanation(savedRoute[1], payload.provider || "gemini"));
+    } catch (error) {
+      sendError(response, errorStatus(error), error.message);
+    }
+    return true;
+  }
+
+  if (
+    request.method === "POST"
+    && savedRoute?.length === 4
+    && savedRoute[2] === "explanation-review"
+    && savedRoute[3] === "apply"
+  ) {
+    try {
+      const payload = await readJsonBody(request);
+      sendJson(response, await applySavedExplanationReview(savedRoute[1], payload));
     } catch (error) {
       sendError(response, errorStatus(error), error.message);
     }

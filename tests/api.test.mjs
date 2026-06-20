@@ -108,6 +108,14 @@ test("bank review API can save, approve, export, and delete in an isolated data 
     assert.equal(response.status, 200);
     assert.match(response.headers.get("content-type"), /text\/html/);
 
+    response = await fetch(`${baseUrl}/edit/${RUN_ID}`);
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get("content-type"), /text\/html/);
+    body = await response.text();
+    assert.match(body, /Edit Gambar/);
+    assert.match(body, /questionEditorForm/);
+    assert.doesNotMatch(body, /jsonEditor/);
+
     response = await fetch(`${baseUrl}/dashboard`);
     assert.equal(response.status, 200);
     assert.match(response.headers.get("content-type"), /text\/html/);
@@ -172,6 +180,88 @@ test("bank review API can save, approve, export, and delete in an isolated data 
     assert.equal(body.items.length, 1);
     assert.equal(body.items[0].status, "saved");
     assert.equal(body.items[0].uploaded_at, null);
+
+    response = await fetch(`${baseUrl}/saved/${RUN_ID}`, {headers: {Accept: "application/json"}});
+    assert.equal(response.status, 200);
+    body = await response.json();
+    const revisedExplanation = `${body.question.pembahasan} Revisi AI sudah dibuat lebih formal.`;
+    response = await fetch(`${baseUrl}/saved/${RUN_ID}/explanation-review/apply`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        question_revisi: {...body.question, pembahasan: revisedExplanation},
+        explanation_review: {
+          lolos: true,
+          skor: 95,
+          akurasi: "Akurat",
+          bahasa_formal: "Formal",
+          catatan: [],
+          saran_revisi: ["Pembahasan diformalkan."],
+          pembahasan_revisi: revisedExplanation,
+        },
+      }),
+    });
+    assert.equal(response.status, 200);
+    let reviewBody = await response.json();
+    assert.equal(reviewBody.question.pembahasan, revisedExplanation);
+    assert.equal(reviewBody.explanation_review.lolos, true);
+    assert.equal(reviewBody.review_status, "ready");
+
+    response = await fetch(`${baseUrl}/saved/${RUN_ID}/explanation-review/apply`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({question_revisi: {soal: "tidak lengkap"}, explanation_review: {lolos: false}}),
+    });
+    assert.equal(response.status, 400);
+    assert.match((await response.json()).error, /Draft revisi belum valid/);
+
+    response = await fetch(`${baseUrl}/saved/${RUN_ID}`, {headers: {Accept: "application/json"}});
+    assert.equal(response.status, 200);
+    body = await response.json();
+    assert.equal(body.question.pembahasan, revisedExplanation);
+    const edited = {
+      ...body,
+      question: {
+        ...body.question,
+        topik: "Penalaran induktif",
+        soal: "Jika pola data meningkat secara konsisten, simpulan paling aman adalah pola tersebut berlanjut pada data berikutnya.",
+      },
+      caption: {
+        caption: "Penalaran Umum\nPenalaran induktif",
+        hashtag: ["#UTBK2026", "#LatsoalUTBK", "#SoalUTBK"],
+      },
+    };
+    delete edited.web_files;
+    delete edited.canonical_topik;
+    response = await fetch(`${baseUrl}/saved/${RUN_ID}/json`, {
+      method: "PUT",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(edited),
+    });
+    assert.equal(response.status, 200);
+    body = await response.json();
+    assert.equal(body.metadata.question.topik, "Penalaran induktif");
+    assert.equal(body.metadata.caption.hashtag.length, 3);
+
+    response = await fetch(`${baseUrl}/saved/${RUN_ID}/json`, {
+      method: "PUT",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({...edited, run_id: "20990101-999999"}),
+    });
+    assert.equal(response.status, 400);
+    assert.match((await response.json()).error, /run_id metadata/);
+
+    response = await fetch(`${baseUrl}/saved/${RUN_ID}`, {headers: {Accept: "application/json"}});
+    assert.equal(response.status, 200);
+    body = await response.json();
+    assert.equal(body.question.topik, "Penalaran induktif");
+    const savedIndex = JSON.parse(await readFile(path.join(dataRoot, "bank", "index.json"), "utf-8"));
+    const savedMetadata = JSON.parse(await readFile(path.join(dataRoot, savedIndex[0].path, "metadata.json"), "utf-8"));
+    const savedQuestion = JSON.parse(await readFile(path.join(dataRoot, savedIndex[0].path, "soal.json"), "utf-8"));
+    const savedCaption = await readFile(path.join(dataRoot, savedIndex[0].path, "caption.txt"), "utf-8");
+    assert.equal(savedMetadata.question.topik, "Penalaran induktif");
+    assert.equal(savedQuestion.topik, "Penalaran induktif");
+    assert.match(savedCaption, /#SoalUTBK/);
 
     response = await fetch(`${baseUrl}/saved/${RUN_ID}/status`, {
       method: "POST",

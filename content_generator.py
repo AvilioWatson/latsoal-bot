@@ -185,7 +185,25 @@ def _load_font(size, bold=False, family="sans"):
     except ImportError:
         return None
 
-    if family == "lora":
+    if family == "anthropic_sans":
+        font_names = [
+            "AnthropicSans-Bold.otf" if bold else "AnthropicSans-Regular.otf",
+            "AnthropicSans-Bold.ttf" if bold else "AnthropicSans-Regular.ttf",
+            "Anthropic Sans Bold.otf" if bold else "Anthropic Sans Regular.otf",
+            "Anthropic Sans Bold.ttf" if bold else "Anthropic Sans Regular.ttf",
+            "arialbd.ttf" if bold else "arial.ttf",
+            "segoeuib.ttf" if bold else "segoeui.ttf",
+        ]
+    elif family == "anthropic_mono":
+        font_names = [
+            "AnthropicMono-Bold.otf" if bold else "AnthropicMono-Regular.otf",
+            "AnthropicMono-Bold.ttf" if bold else "AnthropicMono-Regular.ttf",
+            "Anthropic Mono Bold.otf" if bold else "Anthropic Mono Regular.otf",
+            "Anthropic Mono Bold.ttf" if bold else "Anthropic Mono Regular.ttf",
+            "consolab.ttf" if bold else "consola.ttf",
+            "courbd.ttf" if bold else "cour.ttf",
+        ]
+    elif family == "lora":
         font_names = [
             "Lora-Bold.ttf" if bold else "Lora-Regular.ttf",
             "Lora-Bold.otf" if bold else "Lora-Regular.otf",
@@ -248,7 +266,116 @@ def _load_font(size, bold=False, family="sans"):
 
 
 MATH_TEXT_CHARS = set("∩∪⊂⊆⊄⊈∅≠≤≥∈∉⇒→←↔×÷±√∞≈∑∏∆∠°")
+MATH_TEXT_CHARS.update("∘·πθαβγ∥△∼≡…⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎")
 _MATH_FONT_CACHE = {}
+
+LATEX_PLAIN_SYMBOLS = {
+    "circ": "∘", "cdot": "·", "times": "×", "div": "÷", "pm": "±",
+    "pi": "π", "theta": "θ", "alpha": "α", "beta": "β", "gamma": "γ",
+    "le": "≤", "leq": "≤", "ge": "≥", "geq": "≥", "ne": "≠", "neq": "≠",
+    "approx": "≈", "equiv": "≡", "in": "∈", "notin": "∉", "parallel": "∥",
+    "angle": "∠", "triangle": "△", "sim": "∼", "ldots": "…", "infty": "∞",
+    "to": "→", "rightarrow": "→", "Rightarrow": "⇒", "cap": "∩", "cup": "∪",
+    "sin": "sin", "cos": "cos", "tan": "tan", "log": "log", "ln": "ln",
+}
+SUPERSCRIPT_CHARS = str.maketrans("0123456789+-=()n", "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ")
+SUBSCRIPT_CHARS = str.maketrans("0123456789+-=()", "₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎")
+
+
+def _latex_group(source, index):
+    if index >= len(source) or source[index] != "{":
+        return "", index
+    depth = 1
+    cursor = index + 1
+    while cursor < len(source) and depth:
+        if source[cursor] == "{":
+            depth += 1
+        elif source[cursor] == "}":
+            depth -= 1
+        cursor += 1
+    return source[index + 1:cursor - 1], cursor
+
+
+def _plain_math_operand(value):
+    value = value.strip()
+    return value if re.fullmatch(r"[A-Za-z0-9πθαβγ√.⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]+", value) else f"({value})"
+
+
+def _latex_to_plain_text(value):
+    source = str(value or "").replace("\r\n", "\n").replace("\r", "\n")
+    output = []
+    index = 0
+    while index < len(source):
+        char = source[index]
+        if char == "$":
+            index += 1
+            continue
+        if char == "\\":
+            if index + 1 < len(source) and source[index + 1] == "\\":
+                output.append("\n")
+                index += 2
+                continue
+            match = re.match(r"\\([A-Za-z]+)", source[index:])
+            if not match:
+                if index + 1 < len(source):
+                    output.append(source[index + 1])
+                index += 2
+                continue
+            command = match.group(1)
+            index += len(match.group(0))
+            if command in {"left", "right"}:
+                continue
+            if command in {"quad", "qquad", "enspace", "space"}:
+                output.append(" ")
+                continue
+            if command in {"frac", "dfrac", "tfrac"}:
+                numerator, index = _latex_group(source, index)
+                denominator, index = _latex_group(source, index)
+                top = _plain_math_operand(_latex_to_plain_text(numerator))
+                bottom = _plain_math_operand(_latex_to_plain_text(denominator))
+                output.append(f"{top}/{bottom}")
+                continue
+            if command == "sqrt":
+                radicand, index = _latex_group(source, index)
+                rendered = _latex_to_plain_text(radicand)
+                output.append(f"√{_plain_math_operand(rendered)}")
+                continue
+            if command == "binom":
+                total, index = _latex_group(source, index)
+                selected, index = _latex_group(source, index)
+                output.append(f"C({_latex_to_plain_text(total)}, {_latex_to_plain_text(selected)})")
+                continue
+            if command in {"text", "mathrm", "mathbf", "operatorname"}:
+                content, index = _latex_group(source, index)
+                output.append(_latex_to_plain_text(content))
+                continue
+            if command in {",", ";", ":", "!"}:
+                continue
+            output.append(LATEX_PLAIN_SYMBOLS.get(command, command))
+            continue
+        if char in "^_":
+            is_super = char == "^"
+            index += 1
+            if index < len(source) and source[index] == "{":
+                content, index = _latex_group(source, index)
+            else:
+                content = source[index:index + 1]
+                index += 1
+            rendered = _latex_to_plain_text(content)
+            translated = rendered.translate(SUPERSCRIPT_CHARS if is_super else SUBSCRIPT_CHARS)
+            if translated == rendered and not rendered.isalpha():
+                translated = f"^({rendered})" if is_super else f"_({rendered})"
+            output.append(translated)
+            continue
+        if char in "{}":
+            index += 1
+            continue
+        output.append(" " if char == "~" else char)
+        index += 1
+    rendered = "".join(output)
+    rendered = re.sub(r"(?<![<>=!])\s*=\s*(?![=>])", " = ", rendered)
+    rendered = re.sub(r"[ \t]{2,}", " ", rendered)
+    return rendered.strip()
 
 
 def _font_size(font):
@@ -305,7 +432,8 @@ def _lines_visual_height(draw, lines, font, gap=8):
 
 def _wrap_text(draw, text, font, max_width):
     lines = []
-    for source_line in str(text).replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+    normalized_text = _latex_to_plain_text(text)
+    for source_line in normalized_text.split("\n"):
         words = source_line.split()
         current = ""
         for word in words:
@@ -327,14 +455,55 @@ def _split_sentences(text):
 
 def _format_question_text(text):
     formatted = str(text).replace("\r\n", "\n").replace("\r", "\n")
+    # LLM output can contain arbitrary hard wraps or blank lines in the middle
+    # of a sentence. Treat those as spaces, then add back only the structural
+    # line breaks that the renderer intentionally supports below.
+    formatted = re.sub(r"\s+", " ", formatted).strip()
+    formatted = re.sub(r"(?<![<>=!])\s*=\s*(?![=>])", " = ", formatted)
     formatted = re.sub(
         r"\b\d+(?:\s*:\s*\d+){1,}\b",
         lambda match: re.sub(r"\s*:\s*", ":", match.group(0)),
         formatted,
     )
-    formatted = re.sub(r"\s+([1-9]\d?\.)\s+", r"\n\1 ", formatted)
+    dot_numbered_items = re.findall(r"(?<!\d)([1-9]\d?)\.(?=\s+\S)", formatted)
+    if dot_numbered_items[:2] == ["1", "2"]:
+        formatted = re.sub(r"\s+(?=[1-9]\d?\.\s+)", "\n", formatted)
+    numbered_statements = re.findall(r"\([1-9]\d?\)(?=\s)", formatted)
+    if len(numbered_statements) >= 2:
+        formatted = re.sub(r"\s+(?=\([1-9]\d?\)(?=\s))", "\n", formatted)
     formatted = re.sub(r"\s+(Simpulan\b)", r"\n\1", formatted)
     return re.sub(r"\n{3,}", "\n\n", formatted).strip()
+
+
+def _question_formula_parts(text):
+    """Split a question into intro, formula row, and conclusion when possible."""
+    plain = _latex_to_plain_text(_format_question_text(text))
+    match = re.match(
+        r"^(.*?\bJika)\s*:?[\s,]*(.+?)[\s,]+(?:maka)\s+(.+)$",
+        plain,
+        flags=re.I | re.S,
+    )
+    if not match:
+        return None
+
+    intro = match.group(1).strip().rstrip(" ,.;:") + ":"
+    formula_source = match.group(2).strip().rstrip(" ,.;")
+    conclusion = "Maka " + match.group(3).strip()
+    if "=" not in formula_source:
+        return None
+
+    formulas = [
+        part.strip(" ,.;")
+        for part in re.split(r"\s+dan\s+(?=[^,.;]*=)", formula_source, flags=re.I)
+        if part.strip(" ,.;")
+    ]
+    if not formulas:
+        return None
+    return {
+        "intro": intro,
+        "formulas": formulas[:3],
+        "conclusion": conclusion,
+    }
 
 
 def _wrap_question_paragraphs(draw, text, font, max_width):
@@ -424,6 +593,7 @@ def _chunks(items, size):
 def _paginate_quiz(draw, question, fonts):
     q_paragraphs = _wrap_question_paragraphs(draw, question.get("soal", ""), fonts["question"], 790)
     q_lines = _flatten_paragraphs(q_paragraphs)
+    formula_parts = _question_formula_parts(question.get("soal", ""))
     choices = question.get("pilihan", {})
     choice_page_limit = 460 if len(q_lines) <= 8 else 742
     choice_pages = []
@@ -528,8 +698,8 @@ def _count_quiz_image_pages(question):
 
     width = height = 1000
     fonts = {
-        "question": _load_font(30, family="lora"),
-        "body": _load_font(30, family="lora"),
+        "question": _load_font(30, bold=True, family="anthropic_sans"),
+        "body": _load_font(29, family="anthropic_sans"),
     }
     probe = Image.new("RGB", (width, height), "#f5f0e8")
     return len(_paginate_quiz(ImageDraw.Draw(probe), question, fonts))
@@ -551,9 +721,9 @@ def render_thumbnail_image(question, run_dir):
         "accent": "#26405a",
     }
     fonts = {
-        "category": _load_font(46, family="playfair"),
-        "title": _load_font(28, family="lora"),
-        "small": _load_font(18, family="lora"),
+        "category": _load_font(46, bold=True, family="anthropic_sans"),
+        "title": _load_font(28, family="anthropic_sans"),
+        "small": _load_font(18, family="anthropic_sans"),
     }
 
     image = Image.new("RGB", (width, height), colors["bg"])
@@ -616,12 +786,14 @@ def render_quiz_images(question, run_dir, page_offset=0, total_pages=None):
         "white": "#fffdf8",
     }
     fonts = {
-        "category": _load_font(25, family="lora"),
-        "title": _load_font(36, bold=True, family="playfair"),
-        "question": _load_font(30, family="lora"),
-        "body": _load_font(30, family="lora"),
-        "body_bold": _load_font(30, bold=True, family="playfair"),
-        "small": _load_font(24, family="lora"),
+        "category": _load_font(23, bold=True, family="anthropic_sans"),
+        "title": _load_font(34, bold=True, family="anthropic_sans"),
+        "question": _load_font(29, family="anthropic_sans"),
+        "body": _load_font(29, family="anthropic_sans"),
+        "body_bold": _load_font(29, bold=True, family="anthropic_sans"),
+        "mono": _load_font(27, family="anthropic_mono"),
+        "small": _load_font(22, family="anthropic_sans"),
+        "small_bold": _load_font(22, bold=True, family="anthropic_sans"),
     }
 
     probe = Image.new("RGB", (width, height), colors["bg"])
@@ -629,6 +801,7 @@ def render_quiz_images(question, run_dir, page_offset=0, total_pages=None):
     pages = _paginate_quiz(probe_draw, question, fonts)
     display_total = total_pages or len(pages)
     logo = _load_quiz_logo()
+    formula_parts = _question_formula_parts(question.get("soal", ""))
     output_paths = []
 
     for page_index, page in enumerate(pages, start=1):
@@ -643,14 +816,17 @@ def render_quiz_images(question, run_dir, page_offset=0, total_pages=None):
 
         has_question = bool(page["question_lines"])
         has_choices = bool(page["choices"])
-        q_line_h = _line_height(draw, fonts["question"]) + 16
-        if has_question and not has_choices:
-            q_box_h = min(696, max(320, len(page["question_lines"]) * q_line_h + 120))
+        formula_layout = bool(formula_parts and has_question and page_index == 1)
+        q_line_h = _line_height(draw, fonts["question"]) + 8
+        if formula_layout:
+            question_box = (72, 188, 928, 480)
+        elif has_question and not has_choices:
+            q_box_h = min(696, max(240, len(page["question_lines"]) * q_line_h + 56))
             available_top = 188
             q_box_top = available_top
             question_box = (72, q_box_top, 928, q_box_top + q_box_h)
         elif has_question:
-            q_box_bottom = min(474, 228 + len(page["question_lines"]) * q_line_h + 94)
+            q_box_bottom = min(474, 188 + 24 + len(page["question_lines"]) * q_line_h + 30)
             question_box = (72, 188, 928, max(328, q_box_bottom))
         else:
             question_box = None
@@ -658,26 +834,74 @@ def render_quiz_images(question, run_dir, page_offset=0, total_pages=None):
         q_lines = page["question_lines"]
         if question_box:
             draw.rounded_rectangle(question_box, radius=7, fill=colors["white"], outline=colors["line"], width=2)
-        q_total_h = len(q_lines) * q_line_h
+
         if question_box:
-            if has_choices:
-                q_y = question_box[1] + max(16, (question_box[3] - question_box[1] - q_total_h) // 2)
-            else:
-                q_y = question_box[1] + max(24, (question_box[3] - question_box[1] - q_total_h) // 2)
-            text_x = question_box[0] + 54
-            text_w = question_box[2] - question_box[0] - 108
-            for line_index, line in enumerate(q_lines):
-                _draw_justified_line(
-                    draw,
-                    text_x,
-                    q_y,
-                    line,
-                    fonts["question"],
-                    colors["ink"],
-                    text_w,
-                    justify=False,
+            content_top = question_box[1] + 24
+            if formula_layout:
+                intro_lines = _wrap_text(draw, formula_parts["intro"], fonts["question"], 748)[:2]
+                q_y = content_top
+                for intro_line in intro_lines:
+                    _draw_text_with_math(draw, 112, q_y, intro_line, fonts["question"], colors["ink"])
+                    q_y += q_line_h
+
+                formula_text = "   |   ".join(formula_parts["formulas"])
+                formula_lines = _wrap_text(draw, formula_text, fonts["mono"], 730)[:2]
+                formula_line_h = _line_height(draw, fonts["mono"]) + 10
+                formula_h = max(66, len(formula_lines) * formula_line_h + 24)
+                formula_top = q_y + 8
+                draw.rounded_rectangle(
+                    (104, formula_top, 896, formula_top + formula_h),
+                    radius=10,
+                    fill=colors["panel"],
+                    outline=colors["line"],
+                    width=2,
                 )
-                q_y += q_line_h
+                formula_total_h = _lines_visual_height(draw, formula_lines, fonts["mono"], gap=10)
+                formula_y = formula_top + (formula_h - formula_total_h) / 2
+                for formula_line in formula_lines:
+                    formula_bbox = _text_bbox(draw, formula_line, fonts["mono"])
+                    _draw_text_with_math(
+                        draw,
+                        128,
+                        formula_y - formula_bbox[1],
+                        formula_line,
+                        fonts["mono"],
+                        colors["ink"],
+                    )
+                    formula_y += formula_line_h
+
+                conclusion_lines = _wrap_text(
+                    draw,
+                    formula_parts["conclusion"],
+                    fonts["question"],
+                    748,
+                )[:2]
+                conclusion_y = formula_top + formula_h + 14
+                for conclusion_line in conclusion_lines:
+                    _draw_text_with_math(draw, 112, conclusion_y, conclusion_line, fonts["question"], colors["ink"])
+                    conclusion_y += q_line_h
+            else:
+                glyph_h = _line_height(draw, fonts["question"])
+                q_text_h = glyph_h + max(0, len(q_lines) - 1) * q_line_h
+                q_y = question_box[1] + max(
+                    0,
+                    (question_box[3] - question_box[1] - q_text_h) // 2,
+                )
+            if not formula_layout:
+                text_x = question_box[0] + 40
+                text_w = question_box[2] - question_box[0] - 80
+                for line_index, line in enumerate(q_lines):
+                    _draw_justified_line(
+                        draw,
+                        text_x,
+                        q_y,
+                        line,
+                        fonts["question"],
+                        colors["ink"],
+                        text_w,
+                        justify=False,
+                    )
+                    q_y += q_line_h
 
         GAP = 12
         block_heights = []
@@ -685,28 +909,31 @@ def render_quiz_images(question, run_dir, page_offset=0, total_pages=None):
             content_h = _lines_visual_height(draw, lines, fonts["body"], gap=8)
             block_heights.append(max(74, content_h + 24))
 
-        total_h = sum(block_heights) + GAP * (len(page["choices"]) - 1)
         area_top = (question_box[3] + 28) if question_box else 188
-        area_bottom = 930
-        area_h = area_bottom - area_top
-        if page["choices"] and question_box:
-            y = area_top + max(0, (area_h - total_h) // 2)
-        else:
-            y = area_top
+        y = area_top
         for (key, lines, _), block_h in zip(page["choices"], block_heights):
-            fill = colors["white"]
-            outline = colors["line"]
-            draw.rounded_rectangle((72, y, 928, y + block_h), radius=7, fill=fill, outline=outline, width=2)
-            badge_fill = colors["white"]
-            badge_outline = colors["line"]
-            badge_text = "#26405a"
-
-            badge_top = y + (block_h - 54) // 2
-            draw.rounded_rectangle((104, badge_top, 164, badge_top + 54), radius=4, fill=badge_fill, outline=badge_outline, width=2)
-            key_bbox = _text_bbox(draw, key, fonts["body"])
+            draw.rounded_rectangle(
+                (72, y, 928, y + block_h),
+                radius=7,
+                fill=colors["white"],
+                outline=colors["line"],
+                width=2,
+            )
+            badge_size = 48
+            badge_left = 104
+            badge_top = y + (block_h - badge_size) // 2
+            draw.ellipse(
+                (badge_left, badge_top, badge_left + badge_size, badge_top + badge_size),
+                fill=colors["panel"],
+                outline=colors["line"],
+                width=2,
+            )
+            key_bbox = _text_bbox(draw, key, fonts["body_bold"])
+            key_w = key_bbox[2] - key_bbox[0]
             key_h = key_bbox[3] - key_bbox[1]
-            key_y = badge_top + (54 - key_h) // 2 - key_bbox[1]
-            draw.text((124, key_y), key, font=fonts["body"], fill=badge_text)
+            key_x = badge_left + (badge_size - key_w) / 2 - key_bbox[0]
+            key_y = badge_top + (badge_size - key_h) / 2 - key_bbox[1]
+            draw.text((key_x, key_y), key, font=fonts["body_bold"], fill=colors["ink"])
 
             total_text_h = _lines_visual_height(draw, lines, fonts["body"], gap=8)
             text_y = y + (block_h - total_text_h) // 2
@@ -716,7 +943,7 @@ def render_quiz_images(question, run_dir, page_offset=0, total_pages=None):
                 line_h = line_bbox[3] - line_bbox[1]
                 _draw_justified_line(
                     draw,
-                    190,
+                    178,
                     text_y - line_bbox[1],
                     line,
                     fonts["body"],
@@ -729,10 +956,21 @@ def render_quiz_images(question, run_dir, page_offset=0, total_pages=None):
             y += block_h + GAP
 
         draw.text((72, 942), account, font=fonts["small"], fill="#9ca3af")
+        footer_right = 928
         if display_total > 1:
             page_text = f"{page_offset + page_index}/{display_total}"
             page_w = _text_width(draw, page_text, fonts["small"])
             draw.text((928 - page_w, 942), page_text, font=fonts["small"], fill=colors["muted"])
+            footer_right = 928 - page_w - 32
+        if page_index == len(pages) and str(question.get("pembahasan") or "").strip():
+            discussion_text = "Pembahasan  →"
+            discussion_w = _text_width(draw, discussion_text, fonts["small_bold"])
+            draw.text(
+                (footer_right - discussion_w, 942),
+                discussion_text,
+                font=fonts["small_bold"],
+                fill="#000000",
+            )
 
         output_path = run_dir / f"post-{page_index}.png"
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -746,6 +984,7 @@ def _format_explanation_text(text, max_paragraph_chars=230, sentence_per_line=Fa
     raw = str(text).replace("\r\n", "\n").replace("\r", "\n").strip()
     if not raw:
         return ""
+    raw = re.sub(r"(?<![<>=!])\s*=\s*(?![=>])", " = ", raw)
     symbol_replacements = {}
     for symbol, replacement in symbol_replacements.items():
         raw = raw.replace(symbol, replacement)
@@ -759,6 +998,17 @@ def _format_explanation_text(text, max_paragraph_chars=230, sentence_per_line=Fa
     raw = re.sub(r"\s+(Oleh karena itu,)", r"\n\1", raw)
     raw = re.sub(r"\s+(Maka,)", r"\n\1", raw)
     raw = re.sub(r"\s+(Pilihan [A-E]\b)", r"\n\1", raw)
+    numbered_statements = re.findall(r"\([1-9]\d?\)(?=\s)", raw)
+    if len(numbered_statements) >= 2:
+        raw = re.sub(r"\s+(?=\([1-9]\d?\)(?=\s))", "\n", raw)
+    raw = re.sub(
+        r"\s+(?=(?:TIDAK\s+CUKUP|BERSAMA-SAMA\s+CUKUP|"
+        r"BERSAMA-SAMA\s*:|GABUNGAN\s+(?:PERNYATAAN\s+)?(?:\(1\)|1)|"
+        r"JAWABAN\s*:?\s*[A-E]\b))",
+        "\n",
+        raw,
+        flags=re.I,
+    )
 
     paragraphs = []
     for block in re.split(r"\n{2,}|\n", raw):
@@ -766,9 +1016,10 @@ def _format_explanation_text(text, max_paragraph_chars=230, sentence_per_line=Fa
         if not block:
             continue
         current = ""
+        block_sentences = []
         for sentence in _split_sentences(block):
             if sentence_per_line:
-                paragraphs.append(sentence)
+                block_sentences.append(sentence)
                 continue
             candidate = f"{current} {sentence}".strip()
             if current and len(candidate) > max_paragraph_chars:
@@ -778,6 +1029,8 @@ def _format_explanation_text(text, max_paragraph_chars=230, sentence_per_line=Fa
                 current = candidate
         if current:
             paragraphs.append(current)
+        if block_sentences:
+            paragraphs.append("\n".join(block_sentences))
     return _compact_math_for_line_wrap("\n\n".join(paragraphs))
 
 
@@ -800,10 +1053,18 @@ def _wrap_explanation_paragraphs(draw, text, font, max_width):
     return paragraphs
 
 
-def _explanation_visual_height(line_count, line_h):
-    if line_count <= 0:
+def _explanation_visual_height(lines, line_h, paragraph_gap=12):
+    if not lines:
         return 0
-    return line_count * line_h
+    return sum(paragraph_gap if not line else line_h for line in lines)
+
+
+def _answer_display_text(answer_key, answer_text):
+    text = str(answer_text or "").strip()
+    key = str(answer_key or "").strip().upper()
+    if key and text:
+        text = re.sub(rf"^\s*{re.escape(key)}\s*[.):\-]\s*", "", text, flags=re.I)
+    return text or "Jawaban"
 
 
 def _trim_blank_lines(lines):
@@ -822,47 +1083,153 @@ def _paginate_explanation_pages(draw, question, fonts):
 
     pages = []
     current = []
-    current_count = 0
+    current_height = 0
     paragraphs = _wrap_explanation_paragraphs(draw, explanation, fonts["body"], 748)
+    line_h = _line_height(draw, fonts["body"]) + 8
+    paragraph_gap = 12
 
     def capacity_for_next_page():
-        return 12 if not pages else 15
+        return 442 if not pages else 574
 
     for paragraph_lines in paragraphs:
-        paragraph_count = len(paragraph_lines)
-        gap = 1 if current else 0
-        capacity = capacity_for_next_page()
-
-        if current and current_count + gap + paragraph_count > capacity:
-            pages.append(_trim_blank_lines(current))
-            current = []
-            current_count = 0
-            gap = 0
+        remaining = list(paragraph_lines)
+        while remaining:
             capacity = capacity_for_next_page()
-
-        if paragraph_count > capacity:
-            if current:
+            gap_height = paragraph_gap if current else 0
+            available = capacity - current_height - gap_height
+            fit_count = max(0, int(available // line_h))
+            if fit_count == 0:
                 pages.append(_trim_blank_lines(current))
                 current = []
-                current_count = 0
-            for index in range(0, paragraph_count, capacity):
-                chunk = paragraph_lines[index:index + capacity]
-                if index + capacity >= paragraph_count:
-                    current = chunk
-                    current_count = len(chunk)
-                else:
-                    pages.append(_trim_blank_lines(chunk))
-            continue
+                current_height = 0
+                continue
 
-        if gap:
-            current.append("")
-            current_count += 1
-        current.extend(paragraph_lines)
-        current_count += paragraph_count
+            take_count = min(len(remaining), fit_count)
+            if current:
+                current.append("")
+                current_height += paragraph_gap
+            current.extend(remaining[:take_count])
+            current_height += take_count * line_h
+            remaining = remaining[take_count:]
+
+            if remaining:
+                pages.append(_trim_blank_lines(current))
+                current = []
+                current_height = 0
 
     if current:
         pages.append(_trim_blank_lines(current))
     return [page for page in pages if page]
+
+
+def _is_explanation_formula(text):
+    plain = _latex_to_plain_text(text).strip()
+    if not plain or "=" not in plain:
+        return False
+    identifiers = re.findall(r"[^\W\d_]+", plain, flags=re.UNICODE)
+    math_names = {"sin", "cos", "tan", "log", "ln", "fpb", "kpk"}
+    has_prose = any(len(name) > 1 and name.lower() not in math_names for name in identifiers)
+    return not has_prose and len(plain) <= 140
+
+
+def _build_explanation_steps(text):
+    formatted = _format_explanation_text(text)
+    blocks = [block.strip() for block in formatted.split("\n\n") if block.strip()]
+    steps = []
+    for block in blocks:
+        explicit = re.match(r"^(?:Langkah|Step)\s+(\d+)\s*[:.)-]?\s*(.*)$", block, re.I | re.S)
+        conclusion = re.match(r"^Kesimpulan\s*:\s*(.*)$", block, re.I | re.S)
+        content = (explicit.group(2) if explicit else conclusion.group(1) if conclusion else block).strip()
+        if not content:
+            continue
+        formula = _is_explanation_formula(content)
+        if formula and steps and not explicit:
+            steps[-1]["parts"].append({"text": content, "formula": True})
+            continue
+        is_conclusion = bool(conclusion or re.match(r"^(?:Maka|Jadi|Oleh karena itu)\b", content, re.I))
+        steps.append({
+            "number": len(steps) + 1,
+            "conclusion": is_conclusion,
+            "parts": [{"text": content, "formula": formula}],
+        })
+    return steps
+
+
+def _structured_explanation_groups(draw, text, fonts):
+    groups = []
+    body_font = fonts["explanation"]
+    formula_font = fonts["formula"]
+    body_line_h = max(
+        _line_height(draw, body_font) + 8,
+        int(round(_font_size(body_font) * 1.5)),
+    )
+    formula_line_h = _line_height(draw, formula_font) + 8
+    for step in _build_explanation_steps(text):
+        label = "Kesimpulan" if step["conclusion"] else f"Langkah {step['number']}"
+        rows = [{"kind": "step", "label": label, "number": step["number"], "height": 38}]
+        formula_lines = []
+
+        def flush_formulas():
+            if not formula_lines:
+                return
+            rows.append({
+                "kind": "formula",
+                "lines": list(formula_lines),
+                "line_h": formula_line_h,
+                "height": len(formula_lines) * formula_line_h + 24,
+            })
+            formula_lines.clear()
+
+        for part in step["parts"]:
+            if part["formula"]:
+                formula_lines.extend(_wrap_text(draw, part["text"], formula_font, 680))
+                continue
+            flush_formulas()
+            for line in _wrap_text(draw, part["text"], body_font, 748):
+                rows.append({"kind": "text", "line": line, "height": body_line_h})
+        flush_formulas()
+        rows.append({"kind": "gap", "height": 16})
+        groups.append(rows)
+    return groups
+
+
+def _paginate_structured_explanation(draw, question, fonts):
+    explanation = str(question.get("pembahasan") or "").strip()
+    if not explanation:
+        return []
+    groups = _structured_explanation_groups(draw, explanation, fonts)
+    pages = []
+    current = []
+    used = 0
+
+    def page_capacity():
+        return 390 if not pages else 542
+
+    def finish_page():
+        nonlocal current, used
+        if current:
+            while current and current[-1]["kind"] == "gap":
+                current.pop()
+            pages.append(current)
+        current = []
+        used = 0
+
+    for group in groups:
+        group_height = sum(row["height"] for row in group)
+        if current and used + group_height > page_capacity() and group_height <= page_capacity():
+            finish_page()
+        for row_index, row in enumerate(group):
+            if current and used + row["height"] > page_capacity():
+                finish_page()
+                if row_index > 0 and row["kind"] != "step":
+                    header = dict(group[0])
+                    header["label"] = f"{header['label']} · LANJUTAN"
+                    current.append(header)
+                    used += header["height"]
+            current.append(row)
+            used += row["height"]
+    finish_page()
+    return pages
 
 
 def _count_explanation_image_pages(question):
@@ -872,9 +1239,12 @@ def _count_explanation_image_pages(question):
         return 0
 
     width = height = 1000
-    fonts = {"body": _load_font(29, family="lora")}
+    fonts = {
+        "explanation": _load_font(27, family="anthropic_sans"),
+        "formula": _load_font(26, family="anthropic_mono"),
+    }
     probe = Image.new("RGB", (width, height), "#f5f0e8")
-    return len(_paginate_explanation_pages(ImageDraw.Draw(probe), question, fonts))
+    return len(_paginate_structured_explanation(ImageDraw.Draw(probe), question, fonts))
 
 
 def render_explanation_images(question, run_dir, page_offset=0, total_pages=None):
@@ -887,18 +1257,27 @@ def render_explanation_images(question, run_dir, page_offset=0, total_pages=None
     colors = {
         "bg": "#f5f0e8",
         "panel": "#ede8df",
-        "answer_panel": "#e0d9cb",
-        "ink": "#2a2118",
+        "answer_panel": "#e7f3ee",
+        "answer_badge": "#d6eadf",
+        "answer_line": "#b8d8c8",
+        "ink": "#1f1d1a",
         "muted": "#9c8f7e",
         "line": "#d4cdc2",
         "white": "#fffdf8",
+        "step_accent": "#1f1d1a",
+        "formula_panel": "#f7f0e5",
+        "formula_ink": "#1f1d1a",
     }
     fonts = {
-        "category": _load_font(25, family="lora"),
-        "title": _load_font(36, bold=True, family="playfair"),
-        "body": _load_font(29, family="lora"),
-        "body_bold": _load_font(29, bold=True, family="playfair"),
-        "small": _load_font(24, family="lora"),
+        "category": _load_font(23, bold=True, family="anthropic_sans"),
+        "title": _load_font(34, bold=True, family="anthropic_sans"),
+        "body": _load_font(29, family="anthropic_sans"),
+        "body_bold": _load_font(29, bold=True, family="anthropic_sans"),
+        "explanation": _load_font(27, family="anthropic_sans"),
+        "formula": _load_font(26, family="anthropic_mono"),
+        "step": _load_font(20, bold=True, family="anthropic_sans"),
+        "explanation_title": _load_font(40, bold=True, family="anthropic_sans"),
+        "small": _load_font(22, family="anthropic_sans"),
     }
 
     explanation = str(question.get("pembahasan") or "").strip()
@@ -907,8 +1286,7 @@ def render_explanation_images(question, run_dir, page_offset=0, total_pages=None
 
     probe = Image.new("RGB", (width, height), colors["bg"])
     probe_draw = ImageDraw.Draw(probe)
-    line_h = _line_height(probe_draw, fonts["body"]) + 12
-    pages = _paginate_explanation_pages(probe_draw, question, fonts)
+    pages = _paginate_structured_explanation(probe_draw, question, fonts)
     display_total = total_pages or len(pages)
 
     logo = _load_quiz_logo()
@@ -917,7 +1295,7 @@ def render_explanation_images(question, run_dir, page_offset=0, total_pages=None
     choices = question.get("pilihan") or {}
     answer_text = choices.get(answer_key, "")
 
-    for page_index, lines in enumerate(pages, start=1):
+    for page_index, rows in enumerate(pages, start=1):
         image = Image.new("RGB", (width, height), colors["bg"])
         draw = ImageDraw.Draw(image)
         account = question.get("akun", "@utbk_neareducation")
@@ -925,24 +1303,43 @@ def render_explanation_images(question, run_dir, page_offset=0, total_pages=None
         draw.rectangle((0, 0, width, height), fill=colors["bg"])
         if logo:
             image.paste(logo, (928 - logo.width, 68), logo)
-        _draw_page_header(draw, question, fonts, colors, title_override="Pembahasan")
+        _draw_page_header(draw, question, fonts, colors)
+        explanation_title = "Pembahasan"
+        title_bbox = _text_bbox(draw, explanation_title, fonts["explanation_title"])
+        title_w = title_bbox[2] - title_bbox[0]
+        title_y = 172 if page_index == 1 else 164
+        draw.text(
+            (width / 2 - title_w / 2 - title_bbox[0], title_y),
+            explanation_title,
+            font=fonts["explanation_title"],
+            fill=colors["ink"],
+        )
 
-        panel_top = 210
+        panel_top = 230 if page_index == 1 else 210
         if page_index == 1:
             answer_box = (72, panel_top, 928, panel_top + 104)
-            draw.rounded_rectangle(answer_box, radius=7, fill=colors["white"], outline=colors["line"], width=2)
+            draw.rounded_rectangle(
+                answer_box,
+                radius=7,
+                fill=colors["answer_panel"],
+                outline=colors["answer_line"],
+                width=2,
+            )
             badge = (104, panel_top + 25, 164, panel_top + 79)
-            draw.rounded_rectangle(badge, radius=4, fill=colors["white"], outline=colors["line"], width=2)
+            draw.ellipse(
+                badge,
+                fill=colors["answer_badge"],
+                outline=colors["answer_line"],
+                width=2,
+            )
             if answer_key:
                 key_bbox = _text_bbox(draw, answer_key, fonts["body_bold"])
+                key_w = key_bbox[2] - key_bbox[0]
                 key_y = badge[1] + (54 - (key_bbox[3] - key_bbox[1])) // 2 - key_bbox[1]
-                draw.text((124, key_y), answer_key, font=fonts["body_bold"], fill="#26405a")
+                key_x = badge[0] + (60 - key_w) / 2 - key_bbox[0]
+                draw.text((key_x, key_y), answer_key, font=fonts["body_bold"], fill=colors["ink"])
 
-            answer_label = "Jawaban"
-            if answer_key and answer_text:
-                answer_label = f"{answer_key}. {answer_text}"
-            elif answer_key:
-                answer_label = f"{answer_key}"
+            answer_label = _answer_display_text(answer_key, answer_text)
             answer_lines = _wrap_text(draw, answer_label, fonts["body"], 690)
             answer_h = _lines_visual_height(draw, answer_lines[:2], fonts["body"], gap=8)
             answer_y = panel_top + (104 - answer_h) // 2
@@ -950,25 +1347,51 @@ def render_explanation_images(question, run_dir, page_offset=0, total_pages=None
                 line_bbox = _text_bbox(draw, answer_line, fonts["body"])
                 _draw_text_with_math(draw, 190, answer_y - line_bbox[1], answer_line, fonts["body"], colors["ink"])
                 answer_y += (line_bbox[3] - line_bbox[1]) + 8
-            panel_top = 342
+            panel_top = 362
 
-        content_h = _explanation_visual_height(len(lines), line_h)
-        panel_bottom = min(876, panel_top + content_h + 92)
+        content_h = sum(row["height"] for row in rows)
+        panel_bottom = min(876, panel_top + content_h + 124)
         draw.rounded_rectangle((72, panel_top, 928, panel_bottom), radius=7, fill=colors["white"], outline=colors["line"], width=2)
-        text_y = panel_top + 46
-        for line_index, line in enumerate(lines):
-            if line:
+        section_y = panel_top + 32
+        draw.ellipse((126, section_y + 5, 138, section_y + 17), fill=colors["step_accent"])
+        section_label = "LANGKAH PENGERJAAN" if page_index == 1 else "LANJUTAN PEMBAHASAN"
+        draw.text((150, section_y), section_label, font=fonts["step"], fill=colors["step_accent"])
+        text_y = panel_top + 78
+        for row in rows:
+            if row["kind"] == "step":
+                draw.text((126, text_y + 4), row["label"], font=fonts["step"], fill=colors["ink"])
+            elif row["kind"] == "text":
                 _draw_justified_line(
                     draw,
                     126,
                     text_y,
-                    line,
-                    fonts["body"],
+                    row["line"],
+                    fonts["explanation"],
                     colors["ink"],
                     748,
                     justify=False,
                 )
-            text_y += line_h
+            elif row["kind"] == "formula":
+                formula_bottom = text_y + row["height"] - 4
+                draw.rounded_rectangle(
+                    (116, text_y, 884, formula_bottom),
+                    radius=9,
+                    fill=colors["formula_panel"],
+                    outline=colors["line"],
+                    width=1,
+                )
+                formula_y = text_y + 12
+                for formula_line in row["lines"]:
+                    _draw_text_with_math(
+                        draw,
+                        140,
+                        formula_y,
+                        formula_line,
+                        fonts["formula"],
+                        colors["formula_ink"],
+                    )
+                    formula_y += row["line_h"]
+            text_y += row["height"]
 
         draw.text((72, 942), account, font=fonts["small"], fill="#9ca3af")
         if display_total > 1:
@@ -1004,7 +1427,8 @@ def render_numbered_jpg_images(image_paths, run_dir):
 
 def _wrap_plain_lines(text, width=62, max_lines=None):
     lines = []
-    for paragraph in str(text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+    normalized = re.sub(r"(?<![<>=!])\s*=\s*(?![=>])", " = ", str(text or ""))
+    for paragraph in normalized.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
         paragraph = re.sub(r"\s+", " ", paragraph).strip()
         if not paragraph:
             if lines:
@@ -1225,8 +1649,9 @@ def _latex_lines(lines):
     return r"\\".join(_latex_format_inline(line) if line else r"\mbox{}" for line in lines)
 
 
-def _node(x, y, width, lines, size=30, color="ink", align="left", weight=""):
+def _node(x, y, width, lines, size=30, color="ink", align="left", weight="", family="sans"):
     font = rf"\fontsize{{{size}pt}}{{{int(size * 1.28)}pt}}\selectfont"
+    font = (r"\ttfamily " if family == "mono" else r"\sffamily ") + font
     if weight == "bold":
         font = r"\bfseries " + font
     return (
@@ -1254,6 +1679,13 @@ def _rect(x1, y1, x2, y2, fill="panel", draw="line", radius=7):
     )
 
 
+def _circle(center_x, center_y, radius, fill="softpanel", draw="line"):
+    return (
+        rf"\draw[fill={fill}, draw={draw}, line width=2pt] "
+        rf"({center_x},{1080 - center_y}) circle ({radius}pt);"
+    )
+
+
 def _latex_quiz_logo(x=800, y=82, width=190):
     return (
         rf"\node[anchor=north west, inner sep=0pt] at ({x},{1080 - y}) "
@@ -1267,20 +1699,24 @@ def _latex_document(body):
 \usepackage[utf8]{{inputenc}}
 \usepackage[T1]{{fontenc}}
 \usepackage{{lmodern}}
+\renewcommand{{\familydefault}}{{\sfdefault}}
 \usepackage{{graphicx}}
 \usepackage{{tikz}}
 \usetikzlibrary{{arrows.meta}}
 \pagestyle{{empty}}
-\definecolor{{bg}}{{HTML}}{{F7F2EA}}
+\definecolor{{bg}}{{HTML}}{{F5F1E8}}
 \definecolor{{panel}}{{HTML}}{{FFFDF8}}
-\definecolor{{softpanel}}{{HTML}}{{FBFAF6}}
+\definecolor{{softpanel}}{{HTML}}{{F3EDE2}}
 \definecolor{{answerpanel}}{{HTML}}{{E7F3EE}}
-\definecolor{{ink}}{{HTML}}{{1F2933}}
-\definecolor{{muted}}{{HTML}}{{697586}}
-\definecolor{{line}}{{HTML}}{{D7D0C4}}
+\definecolor{{answerbadge}}{{HTML}}{{D6EADF}}
+\definecolor{{answerline}}{{HTML}}{{B8D8C8}}
+\definecolor{{black}}{{HTML}}{{000000}}
+\definecolor{{ink}}{{HTML}}{{342D25}}
+\definecolor{{muted}}{{HTML}}{{786F64}}
+\definecolor{{line}}{{HTML}}{{DCD3C3}}
 \definecolor{{grid}}{{HTML}}{{E9E4DA}}
-\definecolor{{accent}}{{HTML}}{{176B87}}
-\definecolor{{accenttwo}}{{HTML}}{{315A89}}
+\definecolor{{accent}}{{HTML}}{{A88452}}
+\definecolor{{accenttwo}}{{HTML}}{{745D3D}}
 \definecolor{{solution}}{{HTML}}{{CFE8F3}}
 \definecolor{{danger}}{{HTML}}{{B45309}}
 \definecolor{{graphgreen}}{{HTML}}{{159947}}
@@ -1587,9 +2023,47 @@ def _cartesian_visual_code(question, x=570, y=198, w=438, h=352, include_explana
     return "\n".join(body)
 
 
+def attach_cartesian_latex_visual(question):
+    enriched = dict(question or {})
+    mapel = slugify(enriched.get("mapel"))
+    if mapel not in {"pengetahuan-kuantitatif", "penalaran-matematika"}:
+        return enriched
+
+    source_scope = "question"
+    source = _cartesian_visual_code(enriched)
+    if not source:
+        source_scope = "explanation"
+        source = _cartesian_visual_code(enriched, include_explanation=True)
+
+    if source:
+        enriched["visual_latex"] = {
+            "type": "cartesian_2d",
+            "format": "tikz",
+            "source_scope": source_scope,
+            "generated": True,
+            "source": source,
+        }
+        return enriched
+
+    reason = "not_cartesian_or_unparseable"
+    parse_text = _cartesian_parse_text(enriched, include_explanation=True)
+    if _has_symbolic_cartesian_parameter(parse_text):
+        reason = "symbolic_parameter"
+    enriched["visual_latex"] = {
+        "type": "cartesian_2d",
+        "format": "tikz",
+        "source_scope": None,
+        "generated": False,
+        "source": "",
+        "reason": reason,
+    }
+    return enriched
+
+
 def _latex_quiz_sources(question):
     question_text = _compact_math_for_line_wrap(_format_question_text(question.get("soal", "")))
     q_lines = _wrap_plain_lines(question_text, 76)
+    formula_parts = _question_formula_parts(question.get("soal", ""))
     choices = question.get("pilihan") or {}
     choice_lines = {
         key: _wrap_plain_lines(choices.get(key, ""), 52, 3)
@@ -1626,6 +2100,8 @@ def _latex_quiz_sources(question):
             if chunk and chunk != [""]:
                 pages.append({"question": chunk, "choices": [], "visual": False})
         pages.append({"question": [], "choices": list(choice_lines.items()), "visual": False})
+    elif formula_parts and len(q_lines) <= 8:
+        pages.append({"question": q_lines, "choices": list(choice_lines.items()), "visual": False, "formula": True})
     elif len(q_lines) <= 8:
         pages.append({"question": q_lines, "choices": list(choice_lines.items()), "visual": False})
     else:
@@ -1653,30 +2129,61 @@ def _latex_quiz_sources(question):
                 body_parts.append(_node(112, bottom_y, 860, bottom_lines, size=25))
             choice_top = 930
         elif page["question"]:
-            q_height = max(118, 54 + len(page["question"]) * 42)
-            if page.get("visual"):
-                q_height = max(260, q_height)
-                body_parts.append(_rect(72, 190, 548, 190 + q_height, fill="panel"))
-                body_parts.append(_node(112, 230, 396, page["question"], size=27))
-                visual = _cartesian_visual_code(question)
-                if visual:
-                    body_parts.append(visual)
-            else:
+            if page.get("formula") and formula_parts:
+                q_height = 300
                 body_parts.append(_rect(72, 190, 1008, 190 + q_height, fill="panel"))
-                body_parts.append(_node(126, 230, 828, page["question"], size=29))
+                intro_lines = _wrap_plain_lines(formula_parts["intro"], 62, 2)
+                body_parts.append(_node(112, 230, 856, intro_lines, size=28))
+                formula_text = "   |   ".join(formula_parts["formulas"])
+                formula_lines = _wrap_plain_lines(formula_text, 64, 2)
+                formula_top = 310
+                formula_bottom = 396
+                formula_y = formula_top + max(12, (formula_bottom - formula_top - len(formula_lines) * 31) / 2)
+                body_parts.append(_rect(104, formula_top, 976, formula_bottom, fill="softpanel", radius=10))
+                body_parts.append(_node(130, formula_y, 820, formula_lines, size=24, align="left", family="mono"))
+                conclusion_lines = _wrap_plain_lines(formula_parts["conclusion"], 66, 2)
+                body_parts.append(_node(112, 414, 856, conclusion_lines, size=28))
+            else:
+                q_height = max(118, 54 + len(page["question"]) * 42)
+                if page.get("visual"):
+                    q_height = max(260, q_height)
+                    body_parts.append(_rect(72, 190, 548, 190 + q_height, fill="panel"))
+                    body_parts.append(_node(112, 230, 396, page["question"], size=27))
+                    visual = _cartesian_visual_code(question)
+                    if visual:
+                        body_parts.append(visual)
+                else:
+                    body_parts.append(_rect(72, 190, 1008, 190 + q_height, fill="panel"))
+                    body_parts.append(_node(126, 230, 828, page["question"], size=29))
             choice_top = 220 + q_height
         else:
             choice_top = 210
         y = choice_top + 16
         for key, lines in page["choices"]:
-            height = max(82, 34 + len(lines) * 36)
+            height = max(74, 30 + len(lines) * 34)
+            badge_y = y + height / 2
             body_parts.append(_rect(72, y, 1008, y + height, fill="panel"))
-            body_parts.append(_rect(104, y + 20, 164, y + 74, fill="panel", radius=4))
-            body_parts.append(_centered_node(104, y + 20, 60, 54, [key], size=30, color="accent", weight="bold"))
+            body_parts.append(_circle(134, badge_y, 27, fill="softpanel"))
+            body_parts.append(_centered_node(107, badge_y - 27, 54, 54, [key], size=27, color="ink", weight="bold"))
             body_parts.append(_node(190, y + 24, 748, lines, size=29))
-            y += height + 14
+            y += height + 10
         account = str(question.get("akun", "@utbk_neareducation") or "@utbk_neareducation")
         body_parts.append(_node(72, 1010, 450, [account], size=22, color="muted"))
+        if page_number == len(pages) and str(question.get("pembahasan") or "").strip():
+            discussion_x = 650 if len(pages) > 1 else 700
+            discussion_width = 250 if len(pages) > 1 else 308
+            body_parts.append(
+                _node(
+                    discussion_x,
+                    1010,
+                    discussion_width,
+                    ["Pembahasan  →"],
+                    size=22,
+                    color="black",
+                    align="right",
+                    weight="bold",
+                )
+            )
         if len(pages) > 1:
             body_parts.append(_node(930, 1010, 80, [f"{page_number}/{len(pages)}"], size=22, color="muted", align="right"))
         sources.append(_latex_document("\n".join(body_parts)))
@@ -1689,37 +2196,55 @@ def _latex_explanation_sources(question):
         return []
     has_visual = _needs_cartesian_visual(question, include_explanation=True)
     sentence_per_line = slugify(question.get("mapel")) == "pengetahuan-kuantitatif"
-    lines = [
-        line
-        for line in _wrap_plain_lines(
-            _format_explanation_text(explanation, sentence_per_line=sentence_per_line),
-            44 if has_visual else 74,
-        )
-        if line
-    ]
+    lines = _wrap_plain_lines(
+        _format_explanation_text(explanation, sentence_per_line=sentence_per_line),
+        44 if has_visual else 74,
+    )
     chunks = _chunk_lines(lines, 12 if has_visual else 13)
     answer_key = str(question.get("jawaban") or "").strip().upper()
     answer_text = (question.get("pilihan") or {}).get(answer_key, "")
     sources = []
     for page_number, chunk in enumerate(chunks, start=1):
+        title_y = 164 if page_number == 1 else 156
         body_parts = [
             _latex_quiz_logo(),
             _node(72, 78, 760, [str(question.get("mapel", "Kuis"))[:42]], size=36, weight="bold"),
-            _node(72, 132, 760, ["PEMBAHASAN"], size=25, color="muted"),
+            _node(
+                72,
+                132,
+                760,
+                [str(question.get("topik") or question.get("mapel", "Pengetahuan Umum")).upper()[:54]],
+                size=25,
+                color="muted",
+            ),
+            _centered_node(350, title_y, 380, 54, ["Pembahasan"], size=40, color="ink", weight="bold"),
         ]
-        panel_top = 210
+        panel_top = 230 if page_number == 1 else 210
         if page_number == 1:
-            body_parts.append(_rect(72, panel_top, 1008, panel_top + 104, fill="panel"))
-            body_parts.append(_rect(104, panel_top + 25, 164, panel_top + 79, fill="panel", radius=4))
-            body_parts.append(_centered_node(104, panel_top + 25, 60, 54, [answer_key], size=29, color="accent", weight="bold"))
-            answer = f"{answer_key}. {answer_text}" if answer_text else answer_key or "Jawaban"
+            body_parts.append(
+                _rect(72, panel_top, 1008, panel_top + 104, fill="answerpanel", draw="answerline")
+            )
+            body_parts.append(
+                _circle(134, panel_top + 52, 27, fill="answerbadge", draw="answerline")
+            )
+            body_parts.append(_centered_node(107, panel_top + 25, 54, 54, [answer_key], size=27, color="ink", weight="bold"))
+            answer = _answer_display_text(answer_key, answer_text)
             body_parts.append(_node(190, panel_top + 34, 748, _wrap_plain_lines(answer, 58, 2), size=28))
-            panel_top = 342
+            panel_top = 362
         panel_bottom = min(914, panel_top + 84 + len(chunk) * 38)
         if has_visual and page_number == 1:
             body_parts.append(_rect(72, panel_top, 532, 914, fill="panel"))
             body_parts.append(_node(116, panel_top + 40, 344, chunk, size=24))
-            body_parts.append(_cartesian_visual_code(question, x=560, y=342, w=448, h=572, include_explanation=True))
+            body_parts.append(
+                _cartesian_visual_code(
+                    question,
+                    x=560,
+                    y=panel_top,
+                    w=448,
+                    h=914 - panel_top,
+                    include_explanation=True,
+                )
+            )
         else:
             body_parts.append(_rect(72, panel_top, 1008, panel_bottom, fill="panel"))
             body_parts.append(_node(126, panel_top + 42, 828 if not has_visual else 760, chunk, size=27))
@@ -2386,6 +2911,7 @@ def generate_content(mapel, topic, level, mode="auto", account="@utbk_neareducat
     if not GEMINI_VALIDATE or source in {"draft", "fallback"}:
         validation = local_validation(question, caption)
     question["akun"] = account
+    question = attach_cartesian_latex_visual(question)
     run_id = _unique_run_id(run_id, question)
     storage_path = build_storage_path(question, run_id)
     run_dir = OUTPUT_DIR / storage_path
@@ -2481,6 +3007,8 @@ def render_images_for_metadata(metadata_path):
     question = metadata.get("question") or {}
     if not question:
         raise ValueError("Metadata tidak memiliki question.")
+    question = attach_cartesian_latex_visual(question)
+    metadata["question"] = question
     all_image_paths, render_engine = render_content_images(question, run_dir)
     numbered_image_paths = render_numbered_jpg_images(all_image_paths, run_dir)
     explanation_start = next(
@@ -2500,6 +3028,7 @@ def render_images_for_metadata(metadata_path):
     metadata["files"]["explanations"] = [str(path) for path in numbered_explanation_paths]
     metadata["render_engine"] = render_engine
     metadata["image_generated_at"] = dt.datetime.now().isoformat(timespec="seconds")
+    (run_dir / "soal.json").write_text(json.dumps(question, ensure_ascii=False, indent=2), encoding="utf-8")
     metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
     return {
         "ok": True,
@@ -2525,6 +3054,19 @@ def review_explanation_for_metadata(metadata_path, provider="gemini"):
         schema=EXPLANATION_REVIEW_SCHEMA,
         provider=provider,
     )
+    revised_question = {
+        **question,
+        **(review.get("question_revisi") or {}),
+        "pilihan": {
+            **(question.get("pilihan") or {}),
+            **((review.get("question_revisi") or {}).get("pilihan") or {}),
+        },
+    }
+    revised_question = normalize_question(revised_question)
+    review["question_revisi"] = revised_question
+    review["pembahasan_revisi"] = str(
+        revised_question.get("pembahasan") or review.get("pembahasan_revisi") or ""
+    ).strip()
     review["checked_at"] = dt.datetime.now(dt.timezone.utc).isoformat()
     review["provider"] = provider
     review["usage"] = list(GEMINI_USAGE)

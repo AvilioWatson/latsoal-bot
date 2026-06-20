@@ -28,6 +28,13 @@ namespace LatsoalBotLauncher
             }
 
             StopExistingServers();
+            StopProjectDockerServiceIfNeeded(root);
+            if (!WaitForPortToBeFree())
+            {
+                Console.Error.WriteLine("Port " + AppPort + " masih dipakai proses lain. Server baru tidak dapat dijalankan.");
+                return 1;
+            }
+            ClearRuntimeCache(root);
             StartServer(root);
 
             if (!WaitForServer())
@@ -36,7 +43,7 @@ namespace LatsoalBotLauncher
                 return 1;
             }
 
-            OpenBrowser(AppUrl);
+            OpenBrowser(AppUrl + "/?restart=" + DateTime.UtcNow.Ticks);
             Console.WriteLine("Latsoal Bot berjalan di " + AppUrl);
             Console.WriteLine("Tutup window server Node.js jika ingin menghentikan aplikasi.");
             return 0;
@@ -110,6 +117,115 @@ namespace LatsoalBotLauncher
                 Console.WriteLine("Tidak bisa mengecek server lama di port " + port + ": " + error.Message);
             }
             return processIds;
+        }
+
+        private static bool WaitForPortToBeFree()
+        {
+            for (int i = 0; i < 20; i++)
+            {
+                bool occupied = false;
+                foreach (int ignored in FindListeningProcessIds(AppPort))
+                {
+                    occupied = true;
+                    break;
+                }
+                if (!occupied)
+                {
+                    return true;
+                }
+                Thread.Sleep(250);
+            }
+            return false;
+        }
+
+        private static bool IsPortOccupied()
+        {
+            foreach (int ignored in FindListeningProcessIds(AppPort))
+            {
+                return true;
+            }
+            return false;
+        }
+
+        private static void StopProjectDockerServiceIfNeeded(string root)
+        {
+            if (!IsPortOccupied() ||
+                !File.Exists(Path.Combine(root, "docker-compose.yml")) ||
+                !CommandExists("docker"))
+            {
+                return;
+            }
+
+            Console.WriteLine("Port " + AppPort + " masih dipakai. Menghentikan service Docker latsoal-bot...");
+            try
+            {
+                using (Process process = Process.Start(new ProcessStartInfo
+                {
+                    FileName = "docker.exe",
+                    Arguments = "compose stop latsoal-bot",
+                    WorkingDirectory = root,
+                    CreateNoWindow = true,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                }))
+                {
+                    string output = process.StandardOutput.ReadToEnd();
+                    string error = process.StandardError.ReadToEnd();
+                    if (!process.WaitForExit(30000))
+                    {
+                        process.Kill();
+                        Console.WriteLine("Docker tidak selesai dihentikan dalam 30 detik.");
+                        return;
+                    }
+                    if (process.ExitCode != 0)
+                    {
+                        Console.WriteLine("Service Docker gagal dihentikan: " + (error.Trim().Length > 0 ? error.Trim() : output.Trim()));
+                    }
+                }
+            }
+            catch (Exception error)
+            {
+                Console.WriteLine("Tidak dapat menghentikan service Docker: " + error.Message);
+            }
+        }
+
+        private static void ClearRuntimeCache(string root)
+        {
+            int removed = 0;
+            try
+            {
+                foreach (string cacheDirectory in Directory.GetDirectories(root, "__pycache__", SearchOption.AllDirectories))
+                {
+                    try
+                    {
+                        Directory.Delete(cacheDirectory, true);
+                        removed++;
+                    }
+                    catch (Exception error)
+                    {
+                        Console.WriteLine("Cache tidak dapat dihapus: " + cacheDirectory + " (" + error.Message + ")");
+                    }
+                }
+
+                foreach (string cacheFile in Directory.GetFiles(root, "*.pyc", SearchOption.AllDirectories))
+                {
+                    try
+                    {
+                        File.Delete(cacheFile);
+                        removed++;
+                    }
+                    catch (Exception error)
+                    {
+                        Console.WriteLine("Cache tidak dapat dihapus: " + cacheFile + " (" + error.Message + ")");
+                    }
+                }
+            }
+            catch (Exception error)
+            {
+                Console.WriteLine("Pembersihan cache tidak selesai: " + error.Message);
+            }
+            Console.WriteLine("Cache runtime lama dibersihkan: " + removed + " item.");
         }
 
         private static string FindProjectRoot()
