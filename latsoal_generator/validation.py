@@ -1,16 +1,18 @@
 import json
 import re
 
+from .storage import canonical_topic, title_case_topic
+
 
 def validate_caption(caption, answer):
     caption_text = caption.get("caption", "")
     hashtags = caption.get("hashtag", [])
-    required_hashtags = {"#UTBK2026", "#LatsoalUTBK", "#BelajarUTBK", "#SoalUTBK"}
+    required_hashtags = {"#UTBK", "#UTBK2027", "#LatsoalUTBK", "#BelajarUTBK", "#SoalUTBK"}
     hashtag_set = set(hashtags)
     issues = []
     score_penalty = 0
 
-    if any(year in caption_text or year in " ".join(hashtags) for year in ["UTBK2024", "UTBK2025", "SNBT2024", "SNBT2025"]):
+    if any(year in caption_text or year in " ".join(hashtags) for year in ["UTBK2024", "UTBK2025", "UTBK2026", "SNBT2024", "SNBT2025", "SNBT2026"]):
         issues.append("Caption/hashtag memakai tahun lama.")
         score_penalty += 20
     if not required_hashtags.issubset(hashtag_set):
@@ -93,7 +95,8 @@ def draft_caption(question):
     return {
         "caption": caption,
         "hashtag": [
-            "#UTBK2026",
+            "#UTBK2027",
+            "#UTBK",
             "#LatsoalUTBK",
             "#BelajarUTBK",
             "#SoalUTBK",
@@ -114,7 +117,7 @@ def normalize_caption(question, caption):
     hashtags = normalized.get("hashtag")
     if not isinstance(hashtags, list) or not hashtags:
         hashtags = short["hashtag"]
-    required = short["hashtag"][:4]
+    required = short["hashtag"][:5]
     merged = []
     for tag in [*required, *hashtags]:
         tag = str(tag).strip()
@@ -182,6 +185,9 @@ def _normalize_equals_spacing(value):
 
 def normalize_question(question):
     normalized = dict(question or {})
+    normalized["topik"] = title_case_topic(
+        canonical_topic(normalized.get("mapel"), normalized.get("topik"))
+    )
     context = " ".join(
         str(normalized.get(key, ""))
         for key in ("mapel", "topik", "level", "soal")

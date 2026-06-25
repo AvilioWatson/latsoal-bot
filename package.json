@@ -6,6 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "audit-db": "node scripts/audit-db.mjs",
+    "audit-similarity": "python scripts/audit_similarity.py",
+    "backfill-similarity": "python scripts/backfill_similarity.py",
     "check": "node scripts/check.mjs",
     "test": "node scripts/check.mjs"
   },

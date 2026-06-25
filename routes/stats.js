@@ -29,18 +29,22 @@ function statsHtml() {
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/assets/ambient.css">
+    <script src="/assets/ambient.js" defer></script>
     <style>
       *, *::before, *::after { box-sizing: border-box; }
       :root {
         color-scheme:light;
-        --bg:#f5f1e8; --surface:#fffdf8; --surface2:#f3ede2; --border:rgba(78,65,47,.1);
+        --bg:oklch(96.5% .018 86); --surface:#fffdf8; --surface2:#f3ede2; --border:rgba(78,65,47,.1);
+        --ambient-line:oklch(65% .065 75 / .2);
+        --surface-float:rgba(255,253,248,.84); --surface-float-strong:rgba(255,253,248,.93);
         --border2:rgba(78,65,47,.16); --text:#342d25; --muted:#786f64; --faint:#a39a8e;
         --gold:#a88452; --gold-hover:#947344; --gold-dim:rgba(168,132,82,.14);
         --green:#66775f; --red:#9d645a; --blue:#7a8795;
         --font-head:'Manrope',sans-serif; --font-body:'DM Sans',sans-serif;
       }
-      body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 var(--font-body); -webkit-font-smoothing:antialiased; }
-      .topbar { height:64px; display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); align-items:center; gap:20px; padding:0 32px; background:var(--surface); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:5; }
+      body { margin:0; min-height:100vh; background:var(--bg); color:var(--text); font:14px/1.5 var(--font-body); -webkit-font-smoothing:antialiased; }
+      .topbar { height:64px; display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); align-items:center; gap:20px; padding:0 32px; background:var(--surface-float-strong); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:5; box-shadow:0 8px 28px rgba(72,58,40,.035); -webkit-backdrop-filter:blur(12px) saturate(115%); backdrop-filter:blur(12px) saturate(115%); }
       .brand { display:flex; align-items:center; gap:12px; min-width:0; }
       .mark { width:34px; height:34px; border-radius:10px; background:var(--gold); display:grid; place-items:center; color:var(--text); font-family:var(--font-head); font-weight:800; }
       .eyebrow { margin:0 0 3px; font:700 10px/1 var(--font-head); letter-spacing:.14em; text-transform:uppercase; color:var(--gold); }
@@ -56,8 +60,8 @@ function statsHtml() {
       .warnings { display:grid; gap:10px; margin:0 0 18px; }
       .warning { border:1px solid rgba(168,132,82,.2); background:var(--gold-dim); color:#745d3d; border-radius:14px; padding:12px 15px; font-weight:600; }
       .warning.info { border-color:rgba(122,135,149,.2); background:rgba(122,135,149,.09); color:#66727d; }
-      .cards { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:0; overflow:hidden; border:1px solid var(--border); border-radius:16px; background:var(--surface); margin-bottom:18px; }
-      .card, .panel { background:var(--surface); border:1px solid var(--border); border-radius:16px; }
+      .cards { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:0; overflow:hidden; border:1px solid var(--border); border-radius:16px; background:var(--surface-float); margin-bottom:18px; box-shadow:0 18px 46px rgba(72,58,40,.09); -webkit-backdrop-filter:blur(10px) saturate(110%); backdrop-filter:blur(10px) saturate(110%); }
+      .card, .panel { background:var(--surface-float); border:1px solid var(--border); border-radius:16px; }
       .card { padding:20px; min-height:116px; border:0; border-right:1px solid var(--border); border-radius:0; }
       .card:last-child { border-right:0; }
       .label { color:var(--muted); font-size:12px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; }
@@ -66,7 +70,7 @@ function statsHtml() {
       .grid { display:grid; grid-template-columns:1.45fr 1fr; gap:18px; }
       .metrics-grid { display:grid; grid-template-columns:minmax(0,1.15fr) minmax(320px,.85fr); gap:18px; align-items:start; }
       .token-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; margin-bottom:18px; }
-      .panel { padding:18px; margin-bottom:18px; overflow:hidden; }
+      .panel { padding:18px; margin-bottom:18px; overflow:hidden; box-shadow:0 18px 46px rgba(72,58,40,.09); -webkit-backdrop-filter:blur(10px) saturate(110%); backdrop-filter:blur(10px) saturate(110%); }
       .panel h3 { font:750 14px/1.2 var(--font-head); letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin-bottom:14px; }
       .token-list { display:grid; gap:10px; }
       .token-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:5px 12px; align-items:baseline; padding:12px 14px; border:1px solid var(--border); border-radius:10px; background:var(--surface2); }
@@ -85,9 +89,10 @@ function statsHtml() {
       .subtes-toggle:hover { color:var(--gold); background:transparent; }
       .subtopic-row td { background:rgba(72,54,30,.025); color:var(--muted); font-size:13px; }
       .subtopic-name { padding-left:30px; }
-      .export-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
-      .export-stat { padding:14px; border-radius:10px; background:var(--surface2); border:1px solid var(--border); }
+      .export-grid { display:grid; grid-template-columns:minmax(0,.85fr) minmax(0,1.4fr) minmax(0,1fr); gap:12px; }
+      .export-stat { min-width:0; padding:14px; border-radius:10px; background:var(--surface2); border:1px solid var(--border); }
       .export-stat strong { display:block; font:750 24px/1.1 var(--font-head); margin-top:7px; }
+      .export-stat-date strong { font-size:16px; line-height:1.35; overflow-wrap:break-word; }
       .footer { display:flex; align-items:center; justify-content:space-between; gap:16px; color:var(--muted); }
       button { border:0; border-radius:10px; background:var(--gold); color:var(--surface); padding:11px 16px; font:750 13px/1 var(--font-head); cursor:pointer; }
       button:hover { background:var(--gold-hover); }
@@ -114,9 +119,10 @@ function statsHtml() {
         </div>
       </div>
       <nav class="nav" aria-label="Navigasi utama">
-        <a href="/">Generator</a>
-        <a href="/saved">Bank Review</a>
-        <a href="/dashboard">Dashboard</a>
+         <a href="/generator">Generator</a>
+         <a href="/saved">Bank Review</a>
+         <a href="/import">Import Soal</a>
+         <a href="/dashboard">Dashboard</a>
         <a class="active" href="/stats">Monitoring</a>
       </nav>
     </header>
@@ -286,10 +292,10 @@ function statsHtml() {
         ]);
 
         document.getElementById('exportStats').innerHTML = [
-          ['Batch export', rupiah.format(data.export_batches || 0)],
-          ['Export terakhir', data.last_exported_at ? new Date(data.last_exported_at).toLocaleString('id-ID') : '-'],
-          ['Approved belum export', rupiah.format(data.pending_export || 0)]
-        ].map(([label, value]) => '<div class="export-stat"><span class="label">' + esc(label) + '</span><strong>' + esc(value) + '</strong></div>').join('');
+          ['Batch export', rupiah.format(data.export_batches || 0), ''],
+          ['Export terakhir', data.last_exported_at ? new Date(data.last_exported_at).toLocaleString('id-ID') : '-', 'export-stat-date'],
+          ['Approved belum export', rupiah.format(data.pending_export || 0), '']
+        ].map(([label, value, cls]) => '<div class="export-stat ' + cls + '"><span class="label">' + esc(label) + '</span><strong>' + esc(value) + '</strong></div>').join('');
       }
 
       async function loadStats() {

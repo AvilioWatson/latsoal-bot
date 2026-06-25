@@ -34,7 +34,7 @@ function metadata() {
     question,
     caption: {
       caption: "Latihan penalaran deduktif singkat untuk review konsep.",
-      hashtag: ["#UTBK2026", "#LatsoalUTBK"],
+      hashtag: ["#UTBK", "#UTBK2027", "#LatsoalUTBK"],
     },
     validation: {
       lolos_validasi: true,
@@ -52,7 +52,7 @@ async function writeOutput(dataRoot) {
   await mkdir(runDir, {recursive: true});
   await writeFile(path.join(runDir, "metadata.json"), JSON.stringify(payload, null, 2), "utf-8");
   await writeFile(path.join(runDir, "soal.json"), JSON.stringify(payload.question, null, 2), "utf-8");
-  await writeFile(path.join(runDir, "caption.txt"), "Latihan penalaran deduktif\n\n#UTBK2026 #LatsoalUTBK\n", "utf-8");
+  await writeFile(path.join(runDir, "caption.txt"), "Latihan penalaran deduktif\n\n#UTBK #UTBK2027 #LatsoalUTBK\n", "utf-8");
 }
 
 async function waitForHealth(baseUrl) {
@@ -92,6 +92,11 @@ test("bank review API can save, approve, export, and delete in an isolated data 
     assert.match(response.headers.get("content-type"), /text\/html/);
     assert.equal(response.headers.get("x-content-type-options"), "nosniff");
     assert.equal(response.headers.get("referrer-policy"), "same-origin");
+    assert.match(await response.text(), /Your UTBK Question Generator/);
+
+    response = await fetch(`${baseUrl}/generator`);
+    assert.equal(response.status, 200);
+    assert.match(await response.text(), /Manual Generator/);
 
     response = await fetch(`${baseUrl}/assets/..%2Fserver.js`);
     assert.equal(response.status, 403);
@@ -102,7 +107,7 @@ test("bank review API can save, approve, export, and delete in an isolated data 
     body = await response.json();
     assert.ok(body.topics["Penalaran Umum"]);
     assert.equal(body.subtest_codes["Penalaran Umum"], "PU");
-    assert.equal(body.topic_aliases["Pengetahuan Kuantitatif"]["Persamaan Linear"], "Aljabar dan Fungsi");
+    assert.equal(body.topic_aliases["Pengetahuan Kuantitatif"]["Persamaan Linear"], "Aljabar Dan Fungsi");
 
     response = await fetch(`${baseUrl}/saved/penalaran-umum`);
     assert.equal(response.status, 200);
@@ -228,7 +233,7 @@ test("bank review API can save, approve, export, and delete in an isolated data 
       },
       caption: {
         caption: "Penalaran Umum\nPenalaran induktif",
-        hashtag: ["#UTBK2026", "#LatsoalUTBK", "#SoalUTBK"],
+        hashtag: ["#UTBK", "#UTBK2027", "#LatsoalUTBK", "#SoalUTBK"],
       },
     };
     delete edited.web_files;
@@ -240,8 +245,9 @@ test("bank review API can save, approve, export, and delete in an isolated data 
     });
     assert.equal(response.status, 200);
     body = await response.json();
-    assert.equal(body.metadata.question.topik, "Penalaran induktif");
-    assert.equal(body.metadata.caption.hashtag.length, 3);
+    assert.equal(body.metadata.question.topik, "Penalaran Induktif");
+    assert.ok(body.metadata.caption.hashtag.includes("#UTBK"));
+    assert.ok(body.metadata.caption.hashtag.length >= 5);
 
     response = await fetch(`${baseUrl}/saved/${RUN_ID}/json`, {
       method: "PUT",
@@ -254,13 +260,13 @@ test("bank review API can save, approve, export, and delete in an isolated data 
     response = await fetch(`${baseUrl}/saved/${RUN_ID}`, {headers: {Accept: "application/json"}});
     assert.equal(response.status, 200);
     body = await response.json();
-    assert.equal(body.question.topik, "Penalaran induktif");
+    assert.equal(body.question.topik, "Penalaran Induktif");
     const savedIndex = JSON.parse(await readFile(path.join(dataRoot, "bank", "index.json"), "utf-8"));
     const savedMetadata = JSON.parse(await readFile(path.join(dataRoot, savedIndex[0].path, "metadata.json"), "utf-8"));
     const savedQuestion = JSON.parse(await readFile(path.join(dataRoot, savedIndex[0].path, "soal.json"), "utf-8"));
     const savedCaption = await readFile(path.join(dataRoot, savedIndex[0].path, "caption.txt"), "utf-8");
-    assert.equal(savedMetadata.question.topik, "Penalaran induktif");
-    assert.equal(savedQuestion.topik, "Penalaran induktif");
+    assert.equal(savedMetadata.question.topik, "Penalaran Induktif");
+    assert.equal(savedQuestion.topik, "Penalaran Induktif");
     assert.match(savedCaption, /#SoalUTBK/);
 
     response = await fetch(`${baseUrl}/saved/${RUN_ID}/status`, {
@@ -337,6 +343,61 @@ test("bank review API can save, approve, export, and delete in an isolated data 
     response = await fetch(`${baseUrl}/saved`, {headers: {Accept: "application/json"}});
     assert.equal(response.status, 200);
     assert.equal((await response.json()).items.length, 0);
+  } finally {
+    server.kill();
+    await new Promise((resolve) => server.once("exit", resolve));
+    await rm(dataRoot, {recursive: true, force: true});
+  }
+});
+
+test("import page validates and imports a JSON batch", async () => {
+  const dataRoot = await mkdtemp(path.join(os.tmpdir(), "latsoal-import-api-"));
+  const port = 19765 + Math.floor(Math.random() * 1000);
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const server = spawn("node", ["server.js"], {
+    cwd: ROOT,
+    env: {...process.env, PORT: String(port), LATSOAL_DATA_ROOT: dataRoot, LATSOAL_RENDER_ENGINE: "pil"},
+    windowsHide: true,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const question = metadata().question;
+
+  try {
+    await waitForHealth(baseUrl);
+    let response = await fetch(`${baseUrl}/import`);
+    assert.equal(response.status, 200);
+    assert.match(await response.text(), /Import Soal/);
+
+    response = await fetch(`${baseUrl}/api/import/config`);
+    assert.equal(response.status, 200);
+    let body = await response.json();
+    assert.equal(body.threshold, 0.82);
+    assert.ok(Array.isArray(body.template));
+    assert.match(body.prompt, /JSON array/);
+
+    response = await fetch(`${baseUrl}/api/import/validate`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({questions: [question]}),
+    });
+    assert.equal(response.status, 200);
+    body = await response.json();
+    assert.equal(body.summary.valid, 1);
+    assert.equal(body.items[0].selected_by_default, true);
+
+    response = await fetch(`${baseUrl}/api/import`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({questions: [question], selected_indices: [0], confirmed_similar_indices: []}),
+    });
+    assert.equal(response.status, 200);
+    body = await response.json();
+    assert.equal(body.imported.length, 1);
+
+    response = await fetch(`${baseUrl}/saved`, {headers: {Accept: "application/json"}});
+    body = await response.json();
+    assert.equal(body.items.length, 1);
+    assert.equal(body.items[0].source, "import");
   } finally {
     server.kill();
     await new Promise((resolve) => server.once("exit", resolve));

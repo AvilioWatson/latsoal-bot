@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Import Soal | UTBK Content Desk</title>
+    <meta name="description" content="Import banyak soal UTBK dari JSON ke Bank Review.">
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="/assets/styles.css">
+    <link rel="stylesheet" href="/assets/ambient.css">
+    <script src="/assets/ambient.js" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar-brand">
+        <div class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="2" y="2" width="5" height="5" rx="1.5" fill="#0c0c0e"/>
+            <rect x="9" y="2" width="5" height="5" rx="1.5" fill="#0c0c0e"/>
+            <rect x="2" y="9" width="5" height="5" rx="1.5" fill="#0c0c0e"/>
+            <rect x="9" y="9" width="5" height="5" rx="1.5" fill="rgba(12,12,14,0.4)"/>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <p class="eyebrow">UTBK Content Desk</p>
+          <h1>Import Soal</h1>
+        </div>
+      </div>
+      <nav class="main-nav" aria-label="Navigasi utama">
+        <a class="nav-link" href="/generator">Generator</a>
+        <a class="nav-link" href="/saved">Bank Review</a>
+        <a class="nav-link" href="/import" aria-current="page">Import Soal</a>
+        <a class="nav-link" href="/dashboard">Dashboard</a>
+        <a class="nav-link" href="/stats">Monitoring</a>
+      </nav>
+      <div class="top-status"><div class="status-pill" id="importStatus">Siap</div></div>
+    </header>
+
+    <main class="import-page">
+      <section class="import-intro">
+        <div>
+          <p class="eyebrow">Batch intake</p>
+          <h2>Masukkan JSON, periksa, lalu simpan.</h2>
+          <p class="run-note">Setiap soal diuji struktur dan kemiripannya sebelum masuk Bank Review.</p>
+        </div>
+        <label class="compact-field">Akun
+          <input id="importAccount" value="@utbk_neareducation" autocomplete="off" maxlength="80">
+        </label>
+      </section>
+
+      <div class="import-layout">
+        <section class="import-workbench" aria-labelledby="jsonInputTitle">
+          <div class="import-section-head">
+            <div><p class="step-label">01</p><h2 id="jsonInputTitle">JSON soal</h2></div>
+            <span id="inputMeta" class="run-note">Belum ada input</span>
+          </div>
+
+          <label id="jsonDropZone" class="json-drop-zone" for="jsonFileInput">
+            <strong>Tarik file JSON ke sini</strong>
+            <span>atau klik untuk memilih file, maksimal 10 MB</span>
+            <input id="jsonFileInput" type="file" accept="application/json,.json" hidden>
+          </label>
+
+          <label class="json-editor-label" for="jsonInput">Paste JSON array</label>
+          <textarea id="jsonInput" class="json-editor" spellcheck="false" placeholder='[{"mapel":"Penalaran Umum", ...}]'></textarea>
+          <div class="import-actions">
+            <button id="validateImportButton" class="primary" type="button">Validasi JSON</button>
+            <button id="clearImportButton" class="secondary" type="button">Bersihkan</button>
+          </div>
+
+          <section id="validationPanel" class="validation-panel" hidden aria-live="polite">
+            <div class="import-section-head">
+              <div><p class="step-label">02</p><h2>Hasil validasi</h2></div>
+              <div id="validationSummary" class="validation-summary"></div>
+            </div>
+            <div class="import-table-wrap">
+              <table class="import-table">
+                <thead><tr><th scope="col">Pilih</th><th scope="col">#</th><th scope="col">Soal</th><th scope="col">Status</th><th scope="col">Similarity</th><th scope="col">Pasangan</th></tr></thead>
+                <tbody id="validationRows"></tbody>
+              </table>
+            </div>
+            <div class="import-confirm-bar">
+              <p id="selectionNote">Belum ada soal dipilih.</p>
+              <button id="importSelectedButton" class="primary" type="button">Import soal terpilih</button>
+            </div>
+          </section>
+
+          <section id="renderPanel" class="render-panel" hidden aria-live="polite">
+            <div class="import-section-head">
+              <div><p class="step-label">03</p><h2>Render gambar</h2></div>
+              <span id="renderCount">0/0</span>
+            </div>
+            <div class="progress-track" aria-hidden="true"><div id="renderProgress" class="progress-fill"></div></div>
+            <p id="renderNote" class="run-note">Menunggu import.</p>
+            <div class="import-actions">
+              <button id="retryRenderButton" class="secondary" type="button" hidden>Ulangi yang gagal</button>
+              <a class="secondary link-button" href="/saved">Buka Bank Review</a>
+            </div>
+          </section>
+        </section>
+
+        <aside class="import-guidance" aria-label="Prompt dan template JSON">
+          <section class="guidance-section">
+            <div class="guidance-head"><div><p class="step-label">Prompt</p><h2>Ekstrak PDF dengan AI</h2></div><button id="copyPromptButton" class="mini-button" type="button">Copy</button></div>
+            <p class="body-copy">Lampirkan PDF ke AI, lalu kirim prompt ini. Hasilnya dapat langsung ditempel di kolom JSON.</p>
+            <pre id="promptPreview" class="copy-preview" tabindex="0">Memuat prompt...</pre>
+          </section>
+          <section class="guidance-section">
+            <div class="guidance-head"><div><p class="step-label">Schema</p><h2>Template JSON</h2></div><button id="copyTemplateButton" class="mini-button" type="button">Copy</button></div>
+            <pre id="templatePreview" class="copy-preview template-preview" tabindex="0">Memuat template...</pre>
+          </section>
+        </aside>
+      </div>
+    </main>
+
+    <footer class="site-footer"><span>UTBK Content Desk</span> &bull; &copy; 2026</footer>
+    <script src="/assets/import.js"></script>
+  </body>
+</html>

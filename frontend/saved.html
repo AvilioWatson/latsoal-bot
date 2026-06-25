@@ -7,6 +7,8 @@
     <meta name="description" content="Review Bank Soal untuk Content Desk UTBK.">
     <link rel="icon" href="data:,">
     <link rel="stylesheet" href="/assets/styles.css">
+    <link rel="stylesheet" href="/assets/ambient.css">
+    <script src="/assets/ambient.js" defer></script>
   </head>
   <body>
     <header class="topbar">
@@ -25,8 +27,9 @@
         </div>
       </div>
       <nav class="main-nav" aria-label="Navigasi utama">
-        <a class="nav-link" href="/">Generator</a>
+        <a class="nav-link" href="/generator">Generator</a>
         <a class="nav-link" href="/saved" aria-current="page">Bank Review</a>
+        <a class="nav-link" href="/import">Import Soal</a>
         <a class="nav-link" href="/dashboard">Dashboard</a>
         <a class="nav-link" href="/stats">Monitoring</a>
       </nav>
@@ -42,7 +45,8 @@
           <select id="savedStatusFilter">
             <option value="all">Semua status</option>
             <option value="saved">Saved</option>
-            <option value="approved">Approved</option>
+            <option value="approved">Approved, belum upload</option>
+            <option value="uploaded">Uploaded</option>
             <option value="rejected">Rejected</option>
           </select>
           <button id="refreshSavedButton" class="secondary" type="button">Refresh</button>
@@ -73,7 +77,7 @@
                 <button id="deletePreviewButton" class="secondary danger-button" type="button" disabled>Hapus</button>
                 <a id="editJsonLink" class="secondary link-button" href="#" hidden>Edit gambar</a>
                 <button id="copyCaptionButton" class="secondary" type="button" disabled>Copy caption</button>
-                <a id="downloadAllLink" class="secondary link-button" href="#" hidden>Download folder</a>
+                <a id="downloadAllLink" class="secondary link-button" href="#" hidden>Download ZIP</a>
                 <a id="metadataLink" class="ghost-link" href="#" hidden>Metadata</a>
                 <button id="closePreviewButton" class="preview-close-button" type="button" aria-label="Tutup preview">&times;</button>
               </div>

@@ -41,6 +41,37 @@ function renderDebug(data, elements) {
   }, null, 2);
 }
 
+function downloadFileName(src, index) {
+  try {
+    return decodeURIComponent(new URL(src, window.location.href).pathname.split("/").pop()) || `gambar-${index + 1}.jpg`;
+  } catch {
+    return `gambar-${index + 1}.jpg`;
+  }
+}
+
+async function saveImagesToFolder(data, button) {
+  if (typeof window.showDirectoryPicker !== "function") {
+    throw new Error("Fitur simpan folder membutuhkan Chrome atau Edge versi terbaru.");
+  }
+
+  const images = data.web_files?.images || [];
+  const selectedDirectory = await window.showDirectoryPicker({mode: "readwrite"});
+  const folderName = `latsoal-${data.run_id || "gambar"}`.replace(/[^a-zA-Z0-9._-]/g, "-");
+  const targetDirectory = await selectedDirectory.getDirectoryHandle(folderName, {create: true});
+
+  for (const [index, src] of images.entries()) {
+    button.textContent = `Menyimpan ${index + 1}/${images.length}`;
+    const response = await fetch(src);
+    if (!response.ok) throw new Error(`Gagal mengambil gambar ${index + 1}.`);
+    const fileHandle = await targetDirectory.getFileHandle(downloadFileName(src, index), {create: true});
+    const writable = await fileHandle.createWritable();
+    await writable.write(await response.blob());
+    await writable.close();
+  }
+
+  return folderName;
+}
+
 function renderImages(data, elements, options = {}) {
   const {imageCount, imagePreviewList} = elements;
   const images = data.web_files?.images || [];
@@ -53,17 +84,48 @@ function renderImages(data, elements, options = {}) {
     imagePreviewList.append(empty);
     return;
   }
+  const folderButton = document.createElement("button");
+  folderButton.className = "post-preview-folder-download";
+  folderButton.type = "button";
+  folderButton.textContent = "Simpan semua ke folder";
+  folderButton.addEventListener("click", async () => {
+    const initialLabel = folderButton.textContent;
+    folderButton.disabled = true;
+    try {
+      const folderName = await saveImagesToFolder(data, folderButton);
+      folderButton.textContent = `Tersimpan di ${folderName}`;
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        folderButton.textContent = initialLabel;
+      } else {
+        folderButton.textContent = "Gagal menyimpan folder";
+        folderButton.title = error.message;
+      }
+    } finally {
+      folderButton.disabled = false;
+    }
+  });
+  imagePreviewList.append(folderButton);
   images.forEach((src, index) => {
-    const link = document.createElement("a");
-    link.href = src;
-    link.target = "_blank";
-    link.rel = "noopener";
+    const item = document.createElement("figure");
+    item.className = "post-preview-item";
+    const previewLink = document.createElement("a");
+    previewLink.className = "post-preview-link";
+    previewLink.href = src;
+    previewLink.target = "_blank";
+    previewLink.rel = "noopener";
     const image = document.createElement("img");
     image.className = "post-preview";
     image.src = `${src}?t=${Date.now()}`;
     image.alt = `${options.altPrefix || "Preview gambar"} ${index + 1}`;
-    link.append(image);
-    imagePreviewList.append(link);
+    const downloadLink = document.createElement("a");
+    downloadLink.className = "post-preview-download";
+    downloadLink.href = src;
+    downloadLink.download = downloadFileName(src, index);
+    downloadLink.textContent = `Download gambar ${index + 1}`;
+    previewLink.append(image);
+    item.append(previewLink, downloadLink);
+    imagePreviewList.append(item);
   });
 }
 
@@ -96,5 +158,6 @@ window.LatsoalShared = {
   formatQuestionText,
   renderDebug,
   renderImages,
+  saveImagesToFolder,
   sourceText,
 };

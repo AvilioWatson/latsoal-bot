@@ -9,8 +9,10 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,300&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/assets/styles.css">
+    <link rel="stylesheet" href="/assets/ambient.css">
+    <script src="/assets/ambient.js" defer></script>
   </head>
-  <body>
+  <body class="generator-page-enter">
     <header class="topbar">
       <div class="topbar-brand">
         <div class="brand-mark" aria-hidden="true">
@@ -27,8 +29,9 @@
         </div>
       </div>
       <nav class="main-nav" aria-label="Navigasi utama">
-        <a class="nav-link" href="/" aria-current="page">Generator</a>
+        <a class="nav-link" href="/generator" aria-current="page">Generator</a>
         <a class="nav-link" href="/saved">Bank Review</a>
+        <a class="nav-link" href="/import">Import Soal</a>
         <a class="nav-link" href="/dashboard">Dashboard</a>
         <a class="nav-link" href="/stats">Monitoring</a>
       </nav>
@@ -93,6 +96,34 @@
             </svg>
             Generate
           </button>
+
+          <section class="auto-generator-panel" aria-labelledby="autoGeneratorTitle">
+            <div>
+              <p class="auto-generator-kicker">Batch</p>
+              <h2 id="autoGeneratorTitle">Auto Generator</h2>
+              <p>Gunakan Subtes terpilih. Subtopik dipilih acak per soal.</p>
+            </div>
+            <fieldset class="segmented-field">
+              <legend>Jumlah soal</legend>
+              <div class="segmented-control segmented-control--three" role="radiogroup" aria-label="Jumlah soal auto generator">
+                <label>
+                  <input type="radio" name="auto_count" value="5" checked>
+                  <span>5</span>
+                </label>
+                <label>
+                  <input type="radio" name="auto_count" value="10">
+                  <span>10</span>
+                </label>
+                <label>
+                  <input type="radio" name="auto_count" value="15">
+                  <span>15</span>
+                </label>
+              </div>
+            </fieldset>
+            <button class="secondary auto-generator-button" type="button" id="autoGenerateButton">
+              Auto Generator
+            </button>
+          </section>
         </form>
 
       </aside>
@@ -106,7 +137,7 @@
           </div>
           <div class="review-actions">
             <button id="saveButton" class="secondary" type="button" disabled>Simpan</button>
-            <a id="downloadAllLink" class="secondary link-button" href="#" hidden>Download folder</a>
+            <a id="downloadAllLink" class="secondary link-button" href="#" hidden>Download ZIP</a>
             <a id="metadataLink" class="ghost-link" href="#" hidden>Metadata</a>
           </div>
         </div>
@@ -144,6 +175,20 @@
           </section>
         </div>
 
+        <section class="batch-results" id="batchResults" hidden>
+          <div class="block-title">
+            <div>
+              <p class="eyebrow">Auto Generator</p>
+              <h3>Semua soal yang dibuat</h3>
+            </div>
+            <div class="batch-result-summary">
+              <span id="batchResultCount">0 soal</span>
+              <button id="saveAllBatchButton" class="secondary" type="button" disabled>Simpan semua soal</button>
+            </div>
+          </div>
+          <div id="batchResultList" class="batch-result-list"></div>
+        </section>
+
         <section class="debug-panel" id="debugPanel" hidden>
           <div class="block-title">
             <h3>Error / Fallback</h3>
@@ -158,6 +203,17 @@
       <span>UTBK Content Desk</span> &bull; &copy; 2026
     </footer>
 
+    <script>
+      if (sessionStorage.getItem("latsoal-enter-transition") === "true") {
+        sessionStorage.removeItem("latsoal-enter-transition");
+        document.body.dataset.entering = "true";
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          document.body.dataset.entering = "complete";
+        }));
+      } else {
+        document.body.dataset.entering = "complete";
+      }
+    </script>
     <script src="/assets/shared.js"></script>
     <script src="/assets/app.js"></script>
   </body>

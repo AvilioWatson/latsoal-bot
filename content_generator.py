@@ -9,7 +9,6 @@ import re
 import shutil
 import subprocess
 import sys
-import textwrap
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -158,12 +157,87 @@ def _unique_run_id(seed_run_id, question):
 
 def _extract_json(text):
     text = text.strip()
-    text = re.sub(r"^```(?:json)?\s*", "", text)
+    text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.I)
     text = re.sub(r"\s*```$", "", text)
-    match = re.search(r"\{.*\}", text, re.S)
-    if not match:
-        raise ValueError("Response tidak berisi JSON.")
-    return json.loads(match.group(0))
+    decoder = json.JSONDecoder()
+    last_error = None
+
+    for index, char in enumerate(text):
+        if char != "{":
+            continue
+        candidate = text[index:].strip()
+        sanitized = _escape_json_string_control_chars(candidate)
+        for source in (candidate, sanitized):
+            try:
+                value, _end = decoder.raw_decode(source)
+            except json.JSONDecodeError as exc:
+                last_error = exc
+                continue
+            if isinstance(value, dict):
+                if source == candidate and sanitized != candidate and _json_has_suspicious_control_chars(value):
+                    try:
+                        sanitized_value, _sanitized_end = decoder.raw_decode(sanitized)
+                    except json.JSONDecodeError:
+                        return value
+                    if isinstance(sanitized_value, dict):
+                        return sanitized_value
+                return value
+
+    if last_error:
+        raise ValueError(f"Response JSON tidak valid: {last_error.msg}") from last_error
+    raise ValueError("Response tidak berisi JSON.")
+
+
+def _json_has_suspicious_control_chars(value):
+    if isinstance(value, str):
+        return any(char in value for char in ("\b", "\f", "\t"))
+    if isinstance(value, list):
+        return any(_json_has_suspicious_control_chars(item) for item in value)
+    if isinstance(value, dict):
+        return any(
+            _json_has_suspicious_control_chars(key) or _json_has_suspicious_control_chars(item)
+            for key, item in value.items()
+        )
+    return False
+
+
+def _escape_json_string_control_chars(text):
+    output = []
+    in_string = False
+    escaped = False
+    valid_escape_chars = {'"', "\\", "/", "b", "f", "n", "r", "t", "u"}
+
+    for index, char in enumerate(text):
+        if escaped:
+            next_char = text[index + 1] if index + 1 < len(text) else ""
+            if in_string and (
+                char not in valid_escape_chars
+                or (char in {"b", "f", "n", "r", "t"} and next_char.isalpha())
+            ):
+                output.append("\\")
+            output.append(char)
+            escaped = False
+            continue
+        if char == "\\":
+            output.append(char)
+            escaped = True
+            continue
+        if char == '"':
+            output.append(char)
+            in_string = not in_string
+            continue
+        if in_string and char == "\n":
+            output.append("\\n")
+            continue
+        if in_string and char == "\r":
+            output.append("\\r")
+            continue
+        if in_string and char == "\t":
+            output.append("\\t")
+            continue
+        output.append(char)
+
+    return "".join(output)
 
 
 def clean_error_message(exc):
@@ -430,11 +504,37 @@ def _lines_visual_height(draw, lines, font, gap=8):
     return sum(heights) + gap * max(0, len(lines) - 1)
 
 
+def _wrap_units(text):
+    """Split text into words while keeping balanced parentheticals intact."""
+    source = str(text or "")
+    units = []
+    index = 0
+    while index < len(source):
+        while index < len(source) and source[index].isspace():
+            index += 1
+        if index >= len(source):
+            break
+
+        start = index
+        depth = 0
+        while index < len(source):
+            char = source[index]
+            if char == "(":
+                depth += 1
+            elif char == ")" and depth:
+                depth -= 1
+            elif char.isspace() and depth == 0:
+                break
+            index += 1
+        units.append(re.sub(r"\s+", " ", source[start:index]).strip())
+    return [unit for unit in units if unit]
+
+
 def _wrap_text(draw, text, font, max_width):
     lines = []
     normalized_text = _latex_to_plain_text(text)
     for source_line in normalized_text.split("\n"):
-        words = source_line.split()
+        words = _wrap_units(source_line)
         current = ""
         for word in words:
             candidate = f"{current} {word}".strip()
@@ -818,8 +918,33 @@ def render_quiz_images(question, run_dir, page_offset=0, total_pages=None):
         has_choices = bool(page["choices"])
         formula_layout = bool(formula_parts and has_question and page_index == 1)
         q_line_h = _line_height(draw, fonts["question"]) + 8
+        intro_lines = []
+        formula_lines = []
+        conclusion_lines = []
+        formula_line_h = 0
+        formula_h = 0
         if formula_layout:
-            question_box = (72, 188, 928, 480)
+            intro_lines = _wrap_text(draw, formula_parts["intro"], fonts["question"], 748)[:2]
+            formula_text = "   |   ".join(formula_parts["formulas"])
+            formula_lines = _wrap_text(draw, formula_text, fonts["mono"], 730)[:2]
+            formula_line_h = _line_height(draw, fonts["mono"]) + 10
+            formula_h = max(66, len(formula_lines) * formula_line_h + 24)
+            conclusion_lines = _wrap_text(
+                draw,
+                formula_parts["conclusion"],
+                fonts["question"],
+                748,
+            )[:2]
+        if formula_layout:
+            formula_content_h = (
+                len(intro_lines) * q_line_h
+                + 8
+                + formula_h
+                + 14
+                + len(conclusion_lines) * q_line_h
+            )
+            formula_box_h = max(220, 24 + formula_content_h + 18)
+            question_box = (72, 188, 928, min(480, 188 + formula_box_h))
         elif has_question and not has_choices:
             q_box_h = min(696, max(240, len(page["question_lines"]) * q_line_h + 56))
             available_top = 188
@@ -838,16 +963,11 @@ def render_quiz_images(question, run_dir, page_offset=0, total_pages=None):
         if question_box:
             content_top = question_box[1] + 24
             if formula_layout:
-                intro_lines = _wrap_text(draw, formula_parts["intro"], fonts["question"], 748)[:2]
                 q_y = content_top
                 for intro_line in intro_lines:
                     _draw_text_with_math(draw, 112, q_y, intro_line, fonts["question"], colors["ink"])
                     q_y += q_line_h
 
-                formula_text = "   |   ".join(formula_parts["formulas"])
-                formula_lines = _wrap_text(draw, formula_text, fonts["mono"], 730)[:2]
-                formula_line_h = _line_height(draw, fonts["mono"]) + 10
-                formula_h = max(66, len(formula_lines) * formula_line_h + 24)
                 formula_top = q_y + 8
                 draw.rounded_rectangle(
                     (104, formula_top, 896, formula_top + formula_h),
@@ -870,12 +990,6 @@ def render_quiz_images(question, run_dir, page_offset=0, total_pages=None):
                     )
                     formula_y += formula_line_h
 
-                conclusion_lines = _wrap_text(
-                    draw,
-                    formula_parts["conclusion"],
-                    fonts["question"],
-                    748,
-                )[:2]
                 conclusion_y = formula_top + formula_h + 14
                 for conclusion_line in conclusion_lines:
                     _draw_text_with_math(draw, 112, conclusion_y, conclusion_line, fonts["question"], colors["ink"])
@@ -1136,22 +1250,27 @@ def _build_explanation_steps(text):
     formatted = _format_explanation_text(text)
     blocks = [block.strip() for block in formatted.split("\n\n") if block.strip()]
     steps = []
+
+    def append_part(step, content):
+        formula = _is_explanation_formula(content)
+        if formula and step["parts"] and step["parts"][-1]["formula"]:
+            step["parts"][-1]["text"] = f"{step['parts'][-1]['text']}\n{content}"
+            return
+        step["parts"].append({"text": content, "formula": formula})
+
     for block in blocks:
         explicit = re.match(r"^(?:Langkah|Step)\s+(\d+)\s*[:.)-]?\s*(.*)$", block, re.I | re.S)
         conclusion = re.match(r"^Kesimpulan\s*:\s*(.*)$", block, re.I | re.S)
         content = (explicit.group(2) if explicit else conclusion.group(1) if conclusion else block).strip()
         if not content:
             continue
-        formula = _is_explanation_formula(content)
-        if formula and steps and not explicit:
-            steps[-1]["parts"].append({"text": content, "formula": True})
-            continue
-        is_conclusion = bool(conclusion or re.match(r"^(?:Maka|Jadi|Oleh karena itu)\b", content, re.I))
-        steps.append({
-            "number": len(steps) + 1,
-            "conclusion": is_conclusion,
-            "parts": [{"text": content, "formula": formula}],
-        })
+        if explicit or conclusion or not steps:
+            steps.append({
+                "number": int(explicit.group(1)) if explicit else len(steps) + 1,
+                "conclusion": bool(conclusion),
+                "parts": [],
+            })
+        append_part(steps[-1], content)
     return steps
 
 
@@ -1164,9 +1283,14 @@ def _structured_explanation_groups(draw, text, fonts):
         int(round(_font_size(body_font) * 1.5)),
     )
     formula_line_h = _line_height(draw, formula_font) + 8
-    for step in _build_explanation_steps(text):
+    steps = _build_explanation_steps(text)
+    main_step_count = sum(not step["conclusion"] for step in steps)
+    for step in steps:
         label = "Kesimpulan" if step["conclusion"] else f"Langkah {step['number']}"
-        rows = [{"kind": "step", "label": label, "number": step["number"], "height": 38}]
+        show_label = step["conclusion"] or main_step_count > 1
+        rows = []
+        if show_label:
+            rows.append({"kind": "step", "label": label, "number": step["number"], "height": 38})
         formula_lines = []
 
         def flush_formulas():
@@ -1203,7 +1327,8 @@ def _paginate_structured_explanation(draw, question, fonts):
     used = 0
 
     def page_capacity():
-        return 390 if not pages else 542
+        # Reserve an extra 10 px below the first-page section heading.
+        return 380 if not pages else 618
 
     def finish_page():
         nonlocal current, used
@@ -1215,17 +1340,22 @@ def _paginate_structured_explanation(draw, question, fonts):
         used = 0
 
     for group in groups:
-        group_height = sum(row["height"] for row in group)
-        if current and used + group_height > page_capacity() and group_height <= page_capacity():
-            finish_page()
+        if current and group and group[0]["kind"] == "step":
+            minimum_start_height = group[0]["height"]
+            content_rows = 0
+            for candidate in group[1:]:
+                if candidate["kind"] == "gap":
+                    break
+                minimum_start_height += candidate["height"]
+                if candidate["kind"] in {"text", "formula"}:
+                    content_rows += 1
+                if content_rows == 2:
+                    break
+            if used + minimum_start_height > page_capacity():
+                finish_page()
         for row_index, row in enumerate(group):
             if current and used + row["height"] > page_capacity():
                 finish_page()
-                if row_index > 0 and row["kind"] != "step":
-                    header = dict(group[0])
-                    header["label"] = f"{header['label']} · LANJUTAN"
-                    current.append(header)
-                    used += header["height"]
             current.append(row)
             used += row["height"]
     finish_page()
@@ -1294,6 +1424,10 @@ def render_explanation_images(question, run_dir, page_offset=0, total_pages=None
     answer_key = str(question.get("jawaban") or "").strip().upper()
     choices = question.get("pilihan") or {}
     answer_text = choices.get(answer_key, "")
+    main_step_count = sum(
+        not step["conclusion"]
+        for step in _build_explanation_steps(explanation)
+    )
 
     for page_index, rows in enumerate(pages, start=1):
         image = Image.new("RGB", (width, height), colors["bg"])
@@ -1304,18 +1438,18 @@ def render_explanation_images(question, run_dir, page_offset=0, total_pages=None
         if logo:
             image.paste(logo, (928 - logo.width, 68), logo)
         _draw_page_header(draw, question, fonts, colors)
-        explanation_title = "Pembahasan"
-        title_bbox = _text_bbox(draw, explanation_title, fonts["explanation_title"])
-        title_w = title_bbox[2] - title_bbox[0]
-        title_y = 172 if page_index == 1 else 164
-        draw.text(
-            (width / 2 - title_w / 2 - title_bbox[0], title_y),
-            explanation_title,
-            font=fonts["explanation_title"],
-            fill=colors["ink"],
-        )
+        if page_index == 1:
+            explanation_title = "Pembahasan"
+            title_bbox = _text_bbox(draw, explanation_title, fonts["explanation_title"])
+            title_w = title_bbox[2] - title_bbox[0]
+            draw.text(
+                (width / 2 - title_w / 2 - title_bbox[0], 172),
+                explanation_title,
+                font=fonts["explanation_title"],
+                fill=colors["ink"],
+            )
 
-        panel_top = 230 if page_index == 1 else 210
+        panel_top = 230 if page_index == 1 else 180
         if page_index == 1:
             answer_box = (72, panel_top, 928, panel_top + 104)
             draw.rounded_rectangle(
@@ -1350,13 +1484,18 @@ def render_explanation_images(question, run_dir, page_offset=0, total_pages=None
             panel_top = 362
 
         content_h = sum(row["height"] for row in rows)
-        panel_bottom = min(876, panel_top + content_h + 124)
+        first_page_gap_extra = 10 if page_index == 1 else 0
+        panel_padding = 124 + first_page_gap_extra if page_index == 1 else 78
+        panel_bottom = min(876, panel_top + content_h + panel_padding)
         draw.rounded_rectangle((72, panel_top, 928, panel_bottom), radius=7, fill=colors["white"], outline=colors["line"], width=2)
-        section_y = panel_top + 32
-        draw.ellipse((126, section_y + 5, 138, section_y + 17), fill=colors["step_accent"])
-        section_label = "LANGKAH PENGERJAAN" if page_index == 1 else "LANJUTAN PEMBAHASAN"
-        draw.text((150, section_y), section_label, font=fonts["step"], fill=colors["step_accent"])
-        text_y = panel_top + 78
+        if page_index == 1:
+            section_y = panel_top + 32
+            draw.ellipse((126, section_y + 5, 138, section_y + 17), fill=colors["step_accent"])
+            section_label = "PEMBAHASAN INTI" if main_step_count <= 1 else "LANGKAH PENGERJAAN"
+            draw.text((150, section_y), section_label, font=fonts["step"], fill=colors["step_accent"])
+            text_y = panel_top + 78 + first_page_gap_extra
+        else:
+            text_y = panel_top + 32
         for row in rows:
             if row["kind"] == "step":
                 draw.text((126, text_y + 4), row["label"], font=fonts["step"], fill=colors["ink"])
@@ -1434,7 +1573,15 @@ def _wrap_plain_lines(text, width=62, max_lines=None):
             if lines:
                 lines.append("")
             continue
-        lines.extend(textwrap.wrap(paragraph, width=width, break_long_words=False, break_on_hyphens=False) or [""])
+        current = ""
+        for unit in _wrap_units(paragraph):
+            candidate = f"{current} {unit}".strip()
+            if current and len(candidate) > width:
+                lines.append(current)
+                current = unit
+            else:
+                current = candidate
+        lines.append(current)
     lines = _trim_blank_lines(lines) or [""]
     return lines[:max_lines] if max_lines else lines
 
@@ -2130,19 +2277,27 @@ def _latex_quiz_sources(question):
             choice_top = 930
         elif page["question"]:
             if page.get("formula") and formula_parts:
-                q_height = 300
-                body_parts.append(_rect(72, 190, 1008, 190 + q_height, fill="panel"))
                 intro_lines = _wrap_plain_lines(formula_parts["intro"], 62, 2)
-                body_parts.append(_node(112, 230, 856, intro_lines, size=28))
                 formula_text = "   |   ".join(formula_parts["formulas"])
                 formula_lines = _wrap_plain_lines(formula_text, 64, 2)
-                formula_top = 310
-                formula_bottom = 396
-                formula_y = formula_top + max(12, (formula_bottom - formula_top - len(formula_lines) * 31) / 2)
+                intro_line_h = 36
+                formula_line_h = 31
+                formula_top = 230 + len(intro_lines) * intro_line_h + 8
+                formula_h = max(72, len(formula_lines) * formula_line_h + 24)
+                formula_bottom = formula_top + formula_h
+                formula_y = formula_top + max(12, (formula_h - len(formula_lines) * formula_line_h) / 2)
+                conclusion_lines = _wrap_plain_lines(formula_parts["conclusion"], 66, 2)
+                conclusion_y = formula_bottom + 14
+                q_height = max(
+                    220,
+                    conclusion_y + len(conclusion_lines) * intro_line_h + 18 - 190,
+                )
+                body_parts.append(_rect(72, 190, 1008, 190 + q_height, fill="panel"))
+                body_parts.append(_node(112, 230, 856, intro_lines, size=28))
                 body_parts.append(_rect(104, formula_top, 976, formula_bottom, fill="softpanel", radius=10))
                 body_parts.append(_node(130, formula_y, 820, formula_lines, size=24, align="left", family="mono"))
-                conclusion_lines = _wrap_plain_lines(formula_parts["conclusion"], 66, 2)
-                body_parts.append(_node(112, 414, 856, conclusion_lines, size=28))
+                body_parts.append(_node(112, conclusion_y, 856, conclusion_lines, size=28))
+                choice_top = 190 + q_height + 12
             else:
                 q_height = max(118, 54 + len(page["question"]) * 42)
                 if page.get("visual"):
@@ -2155,7 +2310,7 @@ def _latex_quiz_sources(question):
                 else:
                     body_parts.append(_rect(72, 190, 1008, 190 + q_height, fill="panel"))
                     body_parts.append(_node(126, 230, 828, page["question"], size=29))
-            choice_top = 220 + q_height
+                choice_top = 220 + q_height
         else:
             choice_top = 210
         y = choice_top + 16
@@ -2205,7 +2360,6 @@ def _latex_explanation_sources(question):
     answer_text = (question.get("pilihan") or {}).get(answer_key, "")
     sources = []
     for page_number, chunk in enumerate(chunks, start=1):
-        title_y = 164 if page_number == 1 else 156
         body_parts = [
             _latex_quiz_logo(),
             _node(72, 78, 760, [str(question.get("mapel", "Kuis"))[:42]], size=36, weight="bold"),
@@ -2217,9 +2371,12 @@ def _latex_explanation_sources(question):
                 size=25,
                 color="muted",
             ),
-            _centered_node(350, title_y, 380, 54, ["Pembahasan"], size=40, color="ink", weight="bold"),
         ]
-        panel_top = 230 if page_number == 1 else 210
+        if page_number == 1:
+            body_parts.append(
+                _centered_node(350, 164, 380, 54, ["Pembahasan"], size=40, color="ink", weight="bold")
+            )
+        panel_top = 230 if page_number == 1 else 180
         if page_number == 1:
             body_parts.append(
                 _rect(72, panel_top, 1008, panel_top + 104, fill="answerpanel", draw="answerline")
@@ -2402,8 +2559,10 @@ def _ai_json(prompt, label, retries=MAX_GEMINI_RETRIES, schema=None, provider="g
     strict_prompt = (
         f"{prompt}\n\n"
         "PENTING: Balas hanya dengan satu objek JSON valid. "
-        "Jangan gunakan markdown, komentar, trailing comma, atau teks tambahan. "
-        "Semua string harus memakai kutip ganda dan newline di dalam string harus di-escape."
+        "Karakter pertama jawaban harus { dan karakter terakhir harus }. "
+        "Jangan gunakan markdown, pagar kode, komentar, trailing comma, atau teks tambahan. "
+        "Semua key dan string wajib memakai kutip ganda. "
+        "Jika perlu baris baru di dalam string, tulis sebagai escape \\n, bukan enter mentah."
     )
     for attempt in range(1, retries + 1):
         try:
@@ -2417,7 +2576,9 @@ def _ai_json(prompt, label, retries=MAX_GEMINI_RETRIES, schema=None, provider="g
                 f"{prompt}\n\n"
                 f"Percobaan sebelumnya untuk {label} gagal diparse sebagai JSON valid: {exc}. "
                 "Kirim ulang hanya satu objek JSON valid RFC 8259. "
-                "Jangan ada teks pembuka, markdown, trailing comma, atau newline mentah di dalam string."
+                "Awali langsung dengan { dan akhiri langsung dengan }. "
+                "Jangan ada teks pembuka, markdown, trailing comma, atau newline mentah di dalam string. "
+                "Gunakan escape \\n untuk pemisah baris di field teks."
             )
     raise ValueError(f"Gagal parse JSON {provider_label} untuk {label} setelah {retries} percobaan: {clean_error_message(last_error)}")
 
@@ -2726,7 +2887,7 @@ def deterministic_quant_question(mapel, topic, level, seed):
     rng = random.Random(seed)
     kelompok_tes = "TPS" if mapel == "Pengetahuan Kuantitatif" else "Literasi"
 
-    if topic in {"Statistika", "Statistika dan Peluang", "Data dan ketidakpastian", "Data dan Ketidakpastian"}:
+    if topic in {"Statistika", "Statistika dan Peluang", "Statistika Dan Peluang", "Data dan ketidakpastian", "Data dan Ketidakpastian", "Data Dan Ketidakpastian"}:
         n = rng.choice([5, 6, 7])
         known_count = n - 1
         known_values = [rng.randrange(62, 91, 2) for _ in range(known_count)]

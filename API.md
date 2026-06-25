@@ -13,10 +13,12 @@ Response file/HTML dan JSON menyertakan header `X-Content-Type-Options: nosniff`
 
 | Method | Path | Description |
 | --- | --- | --- |
-| `GET` | `/` | Halaman Generator. |
+| `GET` | `/` | Homepage Near Education. |
+| `GET` | `/generator` | Halaman Generator. |
 | `GET` | `/saved` | Halaman Bank Review jika browser meminta HTML. |
 | `GET` | `/saved.html` | Alias halaman Bank Review. |
 | `GET` | `/saved/<subtes-slug>` | Halaman Bank Review terfilter subtes. |
+| `GET` | `/import` | Halaman import batch JSON. |
 | `GET` | `/stats` | Halaman Stats jika browser meminta HTML. |
 
 ## Config
@@ -64,6 +66,37 @@ Validation:
 - `account` maksimal 80 karakter.
 
 Success response menyertakan `run_id`, `question`, `caption`, `validation`, `metadata`, dan `web_files`.
+
+## Import Soal
+
+### `GET /api/import/config`
+
+Mengembalikan prompt ekstraksi PDF, template JSON, taksonomi, batas batch, dan threshold similarity.
+
+### `POST /api/import/validate`
+
+Request:
+
+```json
+{"questions": []}
+```
+
+Memvalidasi maksimal 1.000 soal dan menjalankan similarity check terhadap bank serta item sebelumnya dalam batch. Response mengelompokkan item sebagai `valid`, `similar`, `exact_duplicate`, atau `invalid`.
+
+### `POST /api/import`
+
+Request:
+
+```json
+{
+  "questions": [],
+  "selected_indices": [0, 2],
+  "confirmed_similar_indices": [2],
+  "account": "@utbk_neareducation"
+}
+```
+
+Server mengulang validasi dan similarity check sebelum menyimpan. Duplikat exact ditolak; item similarity tinggi harus dicantumkan dalam `confirmed_similar_indices`. Gambar tidak dirender dalam request import dan dapat dibuat melalui endpoint gambar saved.
 
 ## Bank Review
 
@@ -127,6 +160,10 @@ Membatalkan tanda upload dengan mengosongkan `uploaded_at`, tanpa mengubah statu
 Alias: `POST /saved/<run-id>/delete`, `POST /api/saved/delete`
 
 Menghapus entry index dan folder `saved/<run-id>/`.
+
+### `POST /saved/<run-id>/images`
+
+Merender atau merender ulang gambar soal dan pembahasan untuk item saved.
 
 ## Export
 

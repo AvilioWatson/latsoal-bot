@@ -2,6 +2,7 @@ const form = document.querySelector("#generateForm");
 const mapelSelect = document.querySelector("#mapel");
 const topicSelect = document.querySelector("#topik");
 const button = document.querySelector("#generateButton");
+const autoGenerateButton = document.querySelector("#autoGenerateButton");
 const sourceStatus = document.querySelector("#sourceStatus");
 const sourceLabel = document.querySelector("#sourceLabel");
 const previewTitle = document.querySelector("#previewTitle");
@@ -20,9 +21,15 @@ const debugPanel = document.querySelector("#debugPanel");
 const debugSource = document.querySelector("#debugSource");
 const debugText = document.querySelector("#debugText");
 const copyCaptionButton = document.querySelector("#copyCaptionButton");
+const batchResults = document.querySelector("#batchResults");
+const batchResultCount = document.querySelector("#batchResultCount");
+const batchResultList = document.querySelector("#batchResultList");
+const saveAllBatchButton = document.querySelector("#saveAllBatchButton");
+const BATCH_STORAGE_KEY = "latsoal:auto-generator:latest";
 
 let topicsByMapel = {};
 let currentRunId = "";
+let batchItems = [];
 const {
   copyCaption: sharedCopyCaption = async (elements, setStatusCallback) => {
     const {captionText, hashtagText, debugPanel, debugSource, debugText} = elements;
@@ -84,6 +91,53 @@ function renderImages(data) {
   sharedRenderImages(data, {imageCount, imagePreviewList});
 }
 
+function readStoredBatchState() {
+  try {
+    const raw = localStorage.getItem(BATCH_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.results)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function persistBatchState(extra = {}) {
+  try {
+    if (!batchItems.length) return;
+    localStorage.setItem(BATCH_STORAGE_KEY, JSON.stringify({
+      saved_at: new Date().toISOString(),
+      results: batchItems,
+      current_run_id: currentRunId,
+      ...extra,
+    }));
+  } catch {
+    // Storage can be unavailable in private browsing. The in-memory list still works.
+  }
+}
+
+function clearBatchState() {
+  try {
+    localStorage.removeItem(BATCH_STORAGE_KEY);
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+function hideBatchResults({clearStored = true} = {}) {
+  batchItems = [];
+  if (!batchResults || !batchResultList || !batchResultCount) return;
+  batchResults.hidden = true;
+  batchResultList.innerHTML = "";
+  batchResultCount.textContent = "0 soal";
+  if (clearStored) clearBatchState();
+  if (saveAllBatchButton) {
+    saveAllBatchButton.disabled = true;
+    saveAllBatchButton.textContent = "Simpan semua soal";
+  }
+}
+
 function fillTopics() {
   const topics = topicsByMapel[mapelSelect.value] || [];
   topicSelect.innerHTML = "";
@@ -112,6 +166,11 @@ async function loadConfig() {
 }
 
 function renderResult(data) {
+  hideBatchResults();
+  renderPreviewResult(data);
+}
+
+function renderPreviewResult(data) {
   currentRunId = data.run_id;
   const question = data.question;
   const caption = data.caption;
@@ -143,14 +202,237 @@ function renderResult(data) {
   saveButton.textContent = "Simpan";
 }
 
+function questionExcerpt(question) {
+  return sharedFormatQuestionText(question?.soal || "").replace(/\s+/g, " ").trim().slice(0, 220);
+}
+
+function selectedAutoCount() {
+  return form.querySelector('input[name="auto_count"]:checked')?.value || "5";
+}
+
+function buildGeneratePayload() {
+  const payload = Object.fromEntries(new FormData(form).entries());
+  delete payload.auto_count;
+  return payload;
+}
+
+function renderBatchResult(data) {
+  const lastResult = data.last_result || data.results?.[data.results.length - 1];
+  if (lastResult) {
+    renderPreviewResult(lastResult);
+  }
+
+  const generated = Number(data.generated_count || 0);
+  const requested = Number(data.requested_count || 0);
+  const message = data.message || `Auto generator membuat ${generated} dari ${requested} soal.`;
+  runNote.textContent = message;
+  setStatus(generated === requested ? "Auto selesai" : "Auto partial");
+  renderDebug({
+    message,
+    requested_count: requested,
+    generated_count: generated,
+    token_limited: Boolean(data.token_limited),
+    generated_runs: (data.results || []).map((item) => ({
+      run_id: item.run_id,
+      mapel: item.question?.mapel,
+      topik: item.question?.topik,
+      metadata: item.web_files?.metadata,
+    })),
+    failures: data.failures || [],
+  });
+
+  if (!lastResult) {
+    previewTitle.textContent = "Auto generator belum menghasilkan soal";
+    captionText.textContent = message;
+    saveButton.disabled = true;
+  }
+
+  renderBatchList(data.results || []);
+  persistBatchState({
+    message,
+    requested_count: requested,
+    generated_count: generated,
+    token_limited: Boolean(data.token_limited),
+    actual_token_usage: data.actual_token_usage || 0,
+  });
+}
+
+function renderBatchList(results) {
+  if (!batchResults || !batchResultList || !batchResultCount) return;
+  batchItems = results;
+  batchResultList.innerHTML = "";
+  batchResults.hidden = results.length === 0;
+  batchResultCount.textContent = `${results.length} soal`;
+  if (saveAllBatchButton) {
+    saveAllBatchButton.disabled = results.length === 0;
+    saveAllBatchButton.textContent = "Simpan semua soal";
+  }
+  persistBatchState();
+
+  results.forEach((item, index) => {
+    const question = item.question || {};
+    const article = document.createElement("article");
+    article.className = "batch-result-item";
+    article.dataset.runId = item.run_id || "";
+
+    const header = document.createElement("div");
+    header.className = "batch-result-header";
+
+    const number = document.createElement("span");
+    number.className = "batch-result-number";
+    number.textContent = String(index + 1).padStart(2, "0");
+
+    const title = document.createElement("div");
+    title.className = "batch-result-title";
+    const heading = document.createElement("h4");
+    heading.textContent = `${question.mapel || "Tanpa subtes"}: ${question.topik || "Tanpa subtopik"}`;
+    const meta = document.createElement("p");
+    meta.textContent = `${item.run_id || "-"} · ${sharedSourceText(item)} · Skor ${item.validation?.skor ?? "-"}`;
+    title.append(heading, meta);
+
+    header.append(number, title);
+
+    const excerpt = document.createElement("p");
+    excerpt.className = "batch-result-excerpt";
+    excerpt.textContent = questionExcerpt(question) || "Soal belum memiliki ringkasan.";
+
+    const actions = document.createElement("div");
+    actions.className = "batch-result-actions";
+
+    const previewButton = document.createElement("button");
+    previewButton.type = "button";
+    previewButton.className = "mini-button";
+    previewButton.textContent = "Preview";
+    previewButton.addEventListener("click", () => {
+      renderPreviewResult(item);
+      document.querySelector(".review-header")?.scrollIntoView({behavior: "smooth", block: "start"});
+    });
+    actions.append(previewButton);
+
+    const saveItemButton = document.createElement("button");
+    saveItemButton.type = "button";
+    saveItemButton.className = "mini-button";
+    saveItemButton.textContent = "Simpan";
+    saveItemButton.dataset.saveRunId = item.run_id || "";
+    saveItemButton.addEventListener("click", () => saveRunFromBatch(item, saveItemButton));
+    actions.append(saveItemButton);
+
+    if (item.web_files?.metadata) {
+      const metadata = document.createElement("a");
+      metadata.className = "mini-link";
+      metadata.href = item.web_files.metadata;
+      metadata.textContent = "Metadata";
+      actions.append(metadata);
+    }
+
+    if (item.run_id) {
+      const download = document.createElement("a");
+      download.className = "mini-link";
+      download.href = `/download/outputs/${item.run_id}`;
+      download.textContent = "ZIP";
+      actions.append(download);
+    }
+
+    article.append(header, excerpt, actions);
+    batchResultList.append(article);
+  });
+}
+
+async function saveRunFromBatch(item, trigger) {
+  if (!item?.run_id) return false;
+  trigger.disabled = true;
+  trigger.textContent = "Menyimpan";
+  try {
+    const response = await fetch("/saved", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({run_id: item.run_id}),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || "Simpan gagal.");
+    }
+    trigger.textContent = "Tersimpan";
+    setStatus("Saved");
+    item.saved_web_files = data.web_files;
+    item.saved = true;
+    syncSaveAllBatchButton();
+    persistBatchState();
+    return true;
+  } catch (error) {
+    trigger.disabled = false;
+    trigger.textContent = "Simpan";
+    setStatus("Error");
+    debugPanel.hidden = false;
+    debugSource.textContent = "save-batch";
+    debugText.textContent = error.stack || error.message;
+    return false;
+  }
+}
+
+function syncSaveAllBatchButton() {
+  if (!saveAllBatchButton) return;
+  const remaining = batchItems.filter((item) => item?.run_id && !item.saved).length;
+  saveAllBatchButton.disabled = remaining === 0;
+  saveAllBatchButton.textContent = remaining === 0 ? "Semua tersimpan" : `Simpan semua soal (${remaining})`;
+}
+
+async function saveAllBatchResults() {
+  if (!batchItems.length || !saveAllBatchButton) return;
+  saveAllBatchButton.disabled = true;
+  let saved = 0;
+  let failed = 0;
+
+  for (const item of batchItems) {
+    if (!item?.run_id || item.saved) continue;
+    const trigger = batchResultList?.querySelector(`[data-save-run-id="${CSS.escape(item.run_id)}"]`);
+    const ok = await saveRunFromBatch(item, trigger || saveAllBatchButton);
+    if (ok) {
+      saved += 1;
+      saveAllBatchButton.textContent = `Menyimpan ${saved}/${batchItems.length}`;
+    } else {
+      failed += 1;
+    }
+  }
+
+  const remaining = batchItems.filter((item) => item?.run_id && !item.saved).length;
+  if (failed || remaining) {
+    setStatus("Save partial");
+    saveAllBatchButton.disabled = false;
+    saveAllBatchButton.textContent = `Simpan sisa soal (${remaining})`;
+    return;
+  }
+
+  setStatus("Saved all");
+  syncSaveAllBatchButton();
+  persistBatchState();
+}
+
+function restoreBatchState() {
+  const stored = readStoredBatchState();
+  if (!stored?.results?.length) return;
+  const lastResult = stored.results.find((item) => item?.run_id === stored.current_run_id)
+    || stored.results[stored.results.length - 1];
+  if (lastResult) {
+    renderPreviewResult(lastResult);
+  }
+  renderBatchList(stored.results);
+  const generated = Number(stored.generated_count || stored.results.length);
+  const requested = Number(stored.requested_count || generated);
+  runNote.textContent = stored.message || `Auto generator sebelumnya memuat ${generated} dari ${requested} soal.`;
+  setStatus("Draft batch");
+  syncSaveAllBatchButton();
+}
+
 mapelSelect.addEventListener("change", fillTopics);
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   button.disabled = true;
+  if (autoGenerateButton) autoGenerateButton.disabled = true;
   setStatus("Generating");
 
-  const payload = Object.fromEntries(new FormData(form).entries());
+  const payload = buildGeneratePayload();
   try {
     const response = await fetch("/generate", {
       method: "POST",
@@ -171,8 +453,48 @@ form.addEventListener("submit", async (event) => {
     debugText.textContent = error.stack || error.message;
   } finally {
     button.disabled = false;
+    if (autoGenerateButton) autoGenerateButton.disabled = false;
   }
 });
+
+autoGenerateButton?.addEventListener("click", async () => {
+  hideBatchResults();
+  button.disabled = true;
+  autoGenerateButton.disabled = true;
+  autoGenerateButton.textContent = "Generating batch";
+  setStatus("Auto batch");
+
+  const payload = {
+    ...buildGeneratePayload(),
+    count: selectedAutoCount(),
+  };
+  delete payload.topik;
+
+  try {
+    const response = await fetch("/generate/auto", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || data.detail || "Auto generator gagal.");
+    }
+    renderBatchResult(data);
+  } catch (error) {
+    setStatus("Error");
+    captionText.textContent = error.message;
+    debugPanel.hidden = false;
+    debugSource.textContent = "auto-generator";
+    debugText.textContent = error.stack || error.message;
+  } finally {
+    button.disabled = false;
+    autoGenerateButton.disabled = false;
+    autoGenerateButton.textContent = "Auto Generator";
+  }
+});
+
+saveAllBatchButton?.addEventListener("click", saveAllBatchResults);
 
 saveButton.addEventListener("click", async () => {
   if (!currentRunId) return;
@@ -213,3 +535,5 @@ loadConfig().catch((error) => {
   debugSource.textContent = "config";
   debugText.textContent = error.stack || error.message;
 });
+
+restoreBatchState();

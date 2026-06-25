@@ -8,6 +8,7 @@ import {handle as handleBank} from "./routes/bank.js";
 import {handle as handleDownload} from "./routes/download.js";
 import {handle as handleExport} from "./routes/export.js";
 import {handle as handleGenerate, TOPICS} from "./routes/generate.js";
+import {handle as handleImport} from "./routes/import.js";
 import {sendStatsJson, sendStatsPage} from "./routes/stats.js";
 
 const PORT = Number(process.env.PORT || 8765);
@@ -21,6 +22,11 @@ const SAVED_PAGE_ROUTES = new Set(Object.keys(TOPICS).map((name) => `/saved/${sl
 
 async function handleStaticPage(request, response, route) {
   if (request.method === "GET" && route === "/") {
+    await sendFile(response, path.join(FRONTEND, "home.html"));
+    return true;
+  }
+
+  if (request.method === "GET" && (route === "/generator" || route === "/generator.html")) {
     await sendFile(response, path.join(FRONTEND, "index.html"));
     return true;
   }
@@ -35,6 +41,11 @@ async function handleStaticPage(request, response, route) {
 
   if (request.method === "GET" && (route === "/dashboard" || route === "/dashboard.html" || route === "/admin")) {
     await sendFile(response, path.join(FRONTEND, "dashboard.html"));
+    return true;
+  }
+
+  if (request.method === "GET" && (route === "/import" || route === "/import.html")) {
+    await sendFile(response, path.join(FRONTEND, "import.html"));
     return true;
   }
 
@@ -96,6 +107,7 @@ async function handleRequest(request, response) {
 
   const handled = await handleGenerate(request, response, route)
     || await handleBank(request, response, route)
+    || await handleImport(request, response, route)
     || await handleDownload(request, response, route)
     || await handleExport(request, response, route)
     || await handleStats(request, response, route)

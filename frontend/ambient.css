@@ -1,0 +1,235 @@
+:root {
+  --ambient-page: var(--bg, var(--paper, oklch(96.5% 0.018 86)));
+  --ambient-stroke: var(--ambient-line, var(--line, oklch(65% 0.065 75 / 0.2)));
+  --ambient-accent: var(--gold, var(--accent, oklch(63% 0.11 72)));
+  --ambient-symbol: oklch(39% 0.045 70 / 0.5);
+}
+
+body {
+  isolation: isolate;
+}
+
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+body::before {
+  background:
+    radial-gradient(circle at 24% 30%, oklch(82% 0.08 75 / 0.28), transparent 27%),
+    radial-gradient(circle at 78% 64%, oklch(86% 0.055 105 / 0.3), transparent 30%),
+    var(--ambient-page);
+  animation: ambient-shift 16s cubic-bezier(.16, 1, .3, 1) infinite alternate;
+}
+
+body::after {
+  opacity: 0.42;
+  background-image:
+    linear-gradient(var(--ambient-stroke) 1px, transparent 1px),
+    linear-gradient(90deg, var(--ambient-stroke) 1px, transparent 1px);
+  background-size: 76px 76px;
+  -webkit-mask-image: radial-gradient(circle at center, black, transparent 72%);
+  mask-image: radial-gradient(circle at center, black, transparent 72%);
+  animation: ambient-grid-drift 24s linear infinite;
+}
+
+body > * {
+  position: relative;
+  z-index: 1;
+}
+
+.ambient-motion-field {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.ambient-orbit,
+.ambient-moving-line,
+.ambient-glyph {
+  position: absolute;
+  pointer-events: none;
+}
+
+.ambient-orbit {
+  width: var(--orbit-size);
+  aspect-ratio: 1;
+  left: 50%;
+  top: 50%;
+  border: 1px solid var(--ambient-stroke);
+  border-radius: 50%;
+  animation: ambient-orbit-spin var(--orbit-duration) linear infinite var(--orbit-direction, normal);
+}
+
+.ambient-orbit--inner { --orbit-size: clamp(260px, 38vmin, 520px); }
+.ambient-orbit--middle { --orbit-size: clamp(420px, 60vmin, 760px); }
+.ambient-orbit--outer { --orbit-size: clamp(580px, 86vmin, 1040px); }
+
+.ambient-planet {
+  width: var(--planet-size);
+  aspect-ratio: 1;
+  position: absolute;
+  left: 50%;
+  top: 0;
+  border: 1px solid oklch(82% 0.045 78 / 0.72);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 32% 28%, oklch(89% 0.045 82), transparent 28%),
+    var(--ambient-accent);
+  box-shadow:
+    0 0 var(--planet-glow) oklch(63% 0.11 72 / 0.32),
+    inset -2px -3px 5px oklch(35% 0.04 68 / 0.16);
+  transform: translate(-50%, -50%);
+}
+
+.ambient-moon-orbit {
+  width: var(--moon-orbit-size);
+  aspect-ratio: 1;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  border: 1px solid oklch(65% 0.065 75 / 0.18);
+  border-radius: 50%;
+  animation: ambient-moon-spin 5.8s linear infinite reverse;
+}
+
+.ambient-moon {
+  width: var(--moon-size);
+  aspect-ratio: 1;
+  position: absolute;
+  left: 50%;
+  top: 0;
+  border-radius: 50%;
+  background: oklch(55% 0.035 72);
+  box-shadow: 0 0 8px oklch(55% 0.035 72 / 0.28);
+  transform: translate(-50%, -50%);
+}
+
+.ambient-moving-line {
+  width: 45vw;
+  height: 1px;
+  background: var(--ambient-stroke);
+}
+
+.ambient-moving-line--one {
+  left: -8vw;
+  top: 24%;
+  animation: ambient-line-one 13s cubic-bezier(.16, 1, .3, 1) infinite alternate;
+}
+
+.ambient-moving-line--two {
+  right: -10vw;
+  bottom: 20%;
+  animation: ambient-line-two 17s cubic-bezier(.16, 1, .3, 1) infinite alternate-reverse;
+}
+
+.ambient-glyph {
+  color: var(--ambient-symbol);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(26px, 3vw, 48px);
+  line-height: 1;
+  opacity: 0.52;
+  transform-origin: center;
+  text-shadow: 0 0 18px oklch(63% 0.11 72 / 0.18);
+}
+
+.ambient-glyph__visual {
+  display: block;
+  transform: translate3d(var(--parallax-x, 0), var(--parallax-y, 0), 0);
+  transition: transform 900ms cubic-bezier(.16, 1, .3, 1);
+}
+
+.ambient-glyph--one { left: 10%; top: 18%; }
+.ambient-glyph--two { right: 12%; top: 22%; }
+.ambient-glyph--three { left: 16%; bottom: 17%; }
+.ambient-glyph--four { right: 17%; bottom: 15%; }
+.ambient-glyph--five { right: 7%; top: 50%; }
+
+.ambient-motion-fallback .ambient-glyph--one {
+  animation: ambient-glyph-fallback-one 15s cubic-bezier(.16, 1, .3, 1) infinite alternate;
+}
+
+.ambient-motion-fallback .ambient-glyph--two,
+.ambient-motion-fallback .ambient-glyph--four {
+  animation: ambient-glyph-fallback-two 18s cubic-bezier(.16, 1, .3, 1) infinite alternate-reverse;
+}
+
+.ambient-motion-fallback .ambient-glyph--three,
+.ambient-motion-fallback .ambient-glyph--five {
+  animation: ambient-glyph-fallback-three 21s cubic-bezier(.16, 1, .3, 1) infinite alternate;
+}
+
+@keyframes ambient-shift {
+  to { transform: translate3d(3%, -2%, 0) scale(1.06); }
+}
+
+@keyframes ambient-grid-drift {
+  to { background-position: 76px 76px; }
+}
+
+@keyframes ambient-orbit-spin {
+  from { transform: translate(-50%, -50%) rotate(0deg); }
+  to { transform: translate(-50%, -50%) rotate(360deg); }
+}
+
+@keyframes ambient-moon-spin {
+  from { transform: translate(-50%, -50%) rotate(0deg); }
+  to { transform: translate(-50%, -50%) rotate(360deg); }
+}
+
+@keyframes ambient-line-one {
+  from { transform: translate3d(0, 0, 0) rotate(18deg); }
+  to { transform: translate3d(8vw, 24px, 0) rotate(18deg); }
+}
+
+@keyframes ambient-line-two {
+  from { transform: translate3d(0, 0, 0) rotate(-24deg); }
+  to { transform: translate3d(-8vw, -18px, 0) rotate(-24deg); }
+}
+
+@keyframes ambient-glyph-fallback-one {
+  to { transform: translate3d(44px, -32px, 0) rotate(7deg); opacity: 0.22; }
+}
+
+@keyframes ambient-glyph-fallback-two {
+  to { transform: translate3d(-54px, 38px, 0) rotate(-8deg); opacity: 0.13; }
+}
+
+@keyframes ambient-glyph-fallback-three {
+  to { transform: translate3d(32px, 46px, 0) rotate(5deg); opacity: 0.2; }
+}
+
+@media (max-width: 640px) {
+  .ambient-glyph--five { display: none; }
+}
+
+html.ambient-motion-paused body::before,
+html.ambient-motion-paused body::after,
+html.ambient-motion-paused .ambient-orbit,
+html.ambient-motion-paused .ambient-moon-orbit,
+html.ambient-motion-paused .ambient-moving-line,
+html.ambient-motion-paused .ambient-motion-fallback .ambient-glyph {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body::before,
+  body::after,
+  .ambient-orbit,
+  .ambient-moon-orbit,
+  .ambient-moving-line {
+    animation: none !important;
+  }
+
+  .ambient-glyph,
+  .ambient-glyph__visual {
+    transform: none !important;
+    transition: none !important;
+  }
+}

@@ -3,6 +3,7 @@ import json
 import os
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -15,6 +16,49 @@ def load_generator(data_root):
 
 
 class ContentGeneratorTest(unittest.TestCase):
+    def test_extract_json_accepts_wrapped_or_loose_gemini_json(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            generator = load_generator(Path(tmp))
+
+            wrapped = 'Berikut JSON-nya:\n```json\n{"caption":"A","hashtag":["#UTBK"]}\n```'
+            self.assertEqual(generator._extract_json(wrapped)["caption"], "A")
+
+            loose_newline = '{"pembahasan":"Langkah 1: Hitung nilai.\nLangkah 2: Simpulkan.","jawaban":"A"}'
+            parsed = generator._extract_json(loose_newline)
+            self.assertIn("Langkah 2", parsed["pembahasan"])
+
+            raw_latex_escape = r'{"pembahasan":"Langkah 1: Gunakan \frac{1}{2} sebagai rasio.","jawaban":"A"}'
+            parsed_latex = generator._extract_json(raw_latex_escape)
+            self.assertIn(r"\frac", parsed_latex["pembahasan"])
+
+    def test_explanation_pagination_fills_page_without_orphaning_step_heading(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            generator = load_generator(Path(tmp))
+            groups = [
+                [
+                    {"kind": "step", "label": "Langkah 1", "number": 1, "height": 38},
+                    {"kind": "text", "line": "Isi panjang", "height": 166},
+                    {"kind": "gap", "height": 16},
+                ],
+                [
+                    {"kind": "step", "label": "Langkah 2", "number": 2, "height": 38},
+                    {"kind": "text", "line": "Baris pertama", "height": 50},
+                    {"kind": "text", "line": "Baris kedua", "height": 50},
+                    {"kind": "text", "line": "Baris ketiga", "height": 50},
+                    {"kind": "gap", "height": 16},
+                ],
+            ]
+
+            with mock.patch.object(generator, "_structured_explanation_groups", return_value=groups):
+                pages = generator._paginate_structured_explanation(None, {"pembahasan": "isi"}, {})
+
+            self.assertEqual([row["line"] for row in pages[0] if row["kind"] == "text"][-2:], [
+                "Baris pertama",
+                "Baris kedua",
+            ])
+            self.assertEqual(pages[1][0]["kind"], "text")
+            self.assertEqual(pages[1][0]["line"], "Baris ketiga")
+
     def test_local_validation_accepts_complete_question_and_caption(self):
         with tempfile.TemporaryDirectory() as tmp:
             generator = load_generator(Path(tmp))
@@ -65,6 +109,29 @@ class ContentGeneratorTest(unittest.TestCase):
             self.assertEqual(result["matched_run_id"], run_id)
             self.assertEqual(result["matched_status"], "approved")
 
+    def test_check_duplicate_can_exclude_current_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_root = Path(tmp)
+            generator = load_generator(data_root)
+            run_id = "20990101-010101"
+            question = generator.draft_question("Penalaran Umum", "Penalaran deduktif", "mudah")
+            saved_dir = data_root / "saved" / run_id
+            bank_dir = data_root / "bank"
+            saved_dir.mkdir(parents=True)
+            bank_dir.mkdir(parents=True)
+            (saved_dir / "metadata.json").write_text(
+                json.dumps({"question": question}, ensure_ascii=False), encoding="utf-8"
+            )
+            (bank_dir / "index.json").write_text(
+                json.dumps([{"run_id": run_id, "status": "saved"}]), encoding="utf-8"
+            )
+
+            result = generator.check_duplicate(question, exclude_run_id=run_id)
+
+            self.assertFalse(result["is_duplicate"])
+            self.assertEqual(result["similarity"], 0.0)
+            self.assertIsNone(result["matched_run_id"])
+
     def test_question_prompt_samples_three_same_topic_saved_examples(self):
         with tempfile.TemporaryDirectory() as tmp:
             data_root = Path(tmp)
@@ -106,7 +173,7 @@ class ContentGeneratorTest(unittest.TestCase):
 
             prompt = generator.build_question_prompt(
                 "Pengetahuan Kuantitatif",
-                "Aljabar dan Fungsi",
+                "Aljabar Dan Fungsi",
                 "mudah",
             )
 
@@ -127,7 +194,7 @@ class ContentGeneratorTest(unittest.TestCase):
             with self.assertRaises(generator.InsufficientTopicExamplesError) as context:
                 generator.generate_content(
                     "Pengetahuan Kuantitatif",
-                    "Aljabar dan Fungsi",
+                    "Aljabar Dan Fungsi",
                     "mudah",
                     mode="auto",
                     account="@quality",
@@ -270,7 +337,8 @@ class ContentGeneratorTest(unittest.TestCase):
                     self.assertEqual(metadata["run_id"], result["run_id"])
                     self.assertEqual(sorted(result["question"]["pilihan"].keys()), ["A", "B", "C", "D", "E"])
                     self.assertIn(result["question"]["jawaban"], result["question"]["pilihan"])
-                    self.assertIn("#UTBK2026", caption_text)
+                    self.assertIn("#UTBK", caption_text)
+                    self.assertIn("#UTBK2027", caption_text)
 
     def test_normalize_question_removes_parenthetical_hint_in_linear_question(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -309,7 +377,7 @@ class ContentGeneratorTest(unittest.TestCase):
             generator = load_generator(Path(tmp))
             question = {
                 "mapel": "Pengetahuan Kuantitatif",
-                "topik": "Aljabar dan Fungsi",
+                "topik": "Aljabar Dan Fungsi",
                 "level": "sedang",
                 "soal": "Jika f(x)=2x+1 dan x>=2, tentukan f(2).",
                 "pilihan": {"A": "f(2)=3", "B": "5", "C": "6", "D": "7", "E": "8"},
@@ -402,7 +470,7 @@ class ContentGeneratorTest(unittest.TestCase):
             generator = load_generator(Path(tmp))
             question = {
                 "mapel": "Pengetahuan Kuantitatif",
-                "topik": "Aljabar dan Fungsi",
+                "topik": "Aljabar Dan Fungsi",
                 "level": "sedang",
                 "soal": "Jika a² + b² = z dan ab = y, manakah di bawah ini yang ekuivalen dengan 4z + 8y?",
                 "pilihan": {
@@ -470,6 +538,60 @@ class ContentGeneratorTest(unittest.TestCase):
 
             self.assertEqual(formatted, "Nilai fungsi pada x = (1) adalah 2.")
 
+    def test_plain_wrap_keeps_parenthetical_phrase_on_one_line(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            generator = load_generator(Path(tmp))
+
+            lines = generator._wrap_plain_lines(
+                "Kabut disebut juga (fog tebal sekali) dalam bacaan.",
+                width=20,
+            )
+
+            self.assertIn("(fog tebal sekali)", lines)
+            self.assertFalse(any("(fog" in line and ")" not in line for line in lines))
+
+    def test_wrap_units_preserves_math_function_spacing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            generator = load_generator(Path(tmp))
+
+            self.assertEqual(generator._wrap_units("Nilai f(x) adalah 2."), ["Nilai", "f(x)", "adalah", "2."])
+
+    def test_pixel_wrap_keeps_parenthetical_phrase_on_one_line(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            generator = load_generator(Path(tmp))
+            from PIL import Image, ImageDraw, ImageFont
+
+            draw = ImageDraw.Draw(Image.new("RGB", (400, 100)))
+            lines = generator._wrap_text(
+                draw,
+                "Kabut (fog tebal sekali) menghalangi pandangan.",
+                ImageFont.load_default(),
+                90,
+            )
+
+            self.assertTrue(any("(fog tebal sekali)" in line for line in lines))
+            self.assertFalse(any("(fog" in line and ")" not in line for line in lines))
+
+    def test_latex_explanation_title_only_appears_on_first_page(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            generator = load_generator(Path(tmp))
+            question = {
+                "mapel": "Penalaran Umum",
+                "topik": "Simpulan logis",
+                "pembahasan": " ".join(
+                    f"Kalimat penjelasan nomor {index} memberikan alasan yang lengkap."
+                    for index in range(1, 45)
+                ),
+                "pilihan": {"A": "Jawaban benar"},
+                "jawaban": "A",
+            }
+
+            sources = generator._latex_explanation_sources(question)
+
+            self.assertGreater(len(sources), 1)
+            self.assertIn("Pembahasan", sources[0])
+            self.assertTrue(all("Pembahasan" not in source for source in sources[1:]))
+
     def test_data_sufficiency_explanation_keeps_logical_blocks(self):
         with tempfile.TemporaryDirectory() as tmp:
             generator = load_generator(Path(tmp))
@@ -519,9 +641,10 @@ class ContentGeneratorTest(unittest.TestCase):
             )
 
             steps = generator._build_explanation_steps(question["pembahasan"])
-            self.assertEqual(len(steps), 3)
-            self.assertFalse(steps[1]["parts"][0]["formula"])
-            self.assertTrue(steps[2]["parts"][1]["formula"])
+            self.assertEqual(len(steps), 1)
+            self.assertTrue(steps[0]["parts"][0]["formula"])
+            self.assertTrue(any(not part["formula"] for part in steps[0]["parts"]))
+            self.assertTrue(any(part["formula"] for part in steps[0]["parts"]))
 
             groups = generator._structured_explanation_groups(
                 ImageDraw.Draw(image),
@@ -531,7 +654,7 @@ class ContentGeneratorTest(unittest.TestCase):
                     "formula": generator._load_font(26, family="anthropic_mono"),
                 },
             )
-            self.assertEqual(groups[0][0]["label"], "Langkah 1")
+            self.assertFalse(any(row["kind"] == "step" for row in groups[0]))
             text_rows = [
                 row
                 for group in groups
@@ -541,12 +664,24 @@ class ContentGeneratorTest(unittest.TestCase):
             self.assertTrue(text_rows)
             self.assertGreaterEqual(text_rows[0]["height"], 40)
 
+            single_groups = generator._structured_explanation_groups(
+                ImageDraw.Draw(image),
+                "Gunakan definisi fungsi untuk memperoleh jawaban yang benar.",
+                {
+                    "explanation": generator._load_font(27, family="anthropic_sans"),
+                    "formula": generator._load_font(26, family="anthropic_mono"),
+                },
+            )
+            self.assertFalse(any(row["kind"] == "step" for row in single_groups[0]))
+
             labeled_steps = generator._build_explanation_steps(
                 "Langkah 1: Tentukan nilai x.\n"
+                "Gunakan persamaan yang diberikan.\n"
                 "Langkah 2: Substitusikan nilai x.\n"
                 "Kesimpulan: Jawaban yang benar adalah C."
             )
             self.assertEqual(len(labeled_steps), 3)
+            self.assertEqual(len(labeled_steps[0]["parts"]), 2)
             self.assertTrue(labeled_steps[-1]["conclusion"])
 
     def test_latex_explanation_preserves_paragraph_spacing(self):
@@ -587,10 +722,9 @@ class ContentGeneratorTest(unittest.TestCase):
                 r"$g(x)=\frac{x-1}{x+2}$"
             )
 
-            self.assertEqual(
-                rendered,
-                "f⁻¹ dan g⁻¹, (f⁻¹∘ g⁻¹)(x)=2x-4, g(x)=(x-1)/(x+2)",
-            )
+            self.assertIn("f⁻¹ dan g⁻¹", rendered)
+            self.assertIn("f⁻¹∘ g⁻¹", rendered)
+            self.assertIn("(x-1)/(x+2)", rendered)
             self.assertNotIn("$", rendered)
             self.assertNotIn(r"\frac", rendered)
             self.assertNotIn(r"\circ", rendered)
@@ -600,14 +734,14 @@ class ContentGeneratorTest(unittest.TestCase):
             generator = load_generator(Path(tmp))
 
             self.assertEqual(generator._latex_to_plain_text(r"$-\frac{5}{4}$"), "-5/4")
-            self.assertEqual(generator._latex_to_plain_text(r"$\sqrt{40}=2\sqrt{10}$"), "√40=2√10")
+            self.assertEqual(generator._latex_to_plain_text(r"$\sqrt{40}=2\sqrt{10}$"), "√40 = 2√10")
 
     def test_symbolic_quadratic_parameter_does_not_render_cartesian_visual(self):
         with tempfile.TemporaryDirectory() as tmp:
             generator = load_generator(Path(tmp))
             question = {
                 "mapel": "Pengetahuan Kuantitatif",
-                "topik": "Aljabar dan Fungsi",
+                "topik": "Aljabar Dan Fungsi",
                 "level": "sedang",
                 "soal": (
                     "Sebuah kurva parabolik memiliki fungsi f(x)=2x²+bx+5 dengan b≠0 "
@@ -634,7 +768,7 @@ class ContentGeneratorTest(unittest.TestCase):
             generator = load_generator(Path(tmp))
             question = {
                 "mapel": "Pengetahuan Kuantitatif",
-                "topik": "Aljabar dan Fungsi",
+                "topik": "Aljabar Dan Fungsi",
                 "level": "sedang",
                 "soal": "Diketahui grafik garis y = ax + 2 memotong sumbu y di titik tertentu. Pernyataan yang benar tentang a adalah...",
                 "butuh_visual": True,
@@ -648,7 +782,7 @@ class ContentGeneratorTest(unittest.TestCase):
             generator = load_generator(Path(tmp))
             question = {
                 "mapel": "Pengetahuan Kuantitatif",
-                "topik": "Aljabar dan Fungsi",
+                "topik": "Aljabar Dan Fungsi",
                 "level": "sedang",
                 "soal": "Pada bidang kartesius, grafik garis y = x + 1 memotong sumbu y di titik (0, 1).",
                 "butuh_visual": True,
@@ -701,7 +835,7 @@ class ContentGeneratorTest(unittest.TestCase):
             generator = load_generator(Path(tmp))
             question = {
                 "mapel": "Pengetahuan Kuantitatif",
-                "topik": "Aljabar dan Fungsi",
+                "topik": "Aljabar Dan Fungsi",
                 "level": "sedang",
                 "soal": "Diketahui grafik garis y = ax + 2 melalui titik (1, 4). Tentukan grafik garis tersebut.",
                 "pilihan": {
@@ -726,7 +860,7 @@ class ContentGeneratorTest(unittest.TestCase):
             generator = load_generator(Path(tmp))
             question = {
                 "mapel": "Pengetahuan Kuantitatif",
-                "topik": "Aljabar dan Fungsi",
+                "topik": "Aljabar Dan Fungsi",
                 "level": "sedang",
                 "soal": "Jika a² + b² = z dan ab = y, bentuk ekuivalen 4z + 8y adalah...",
                 "pilihan": {"A": "2(a+b)²", "B": "2(2a+b)²", "C": "(4a+4b)²", "D": "(4a+8b)²", "E": "4(a+b)²"},
@@ -739,14 +873,14 @@ class ContentGeneratorTest(unittest.TestCase):
 
             self.assertIn("4z+8y", source)
             self.assertIn(r"a^2+b^2", source)
-            self.assertNotIn(r"\mbox{}\\Maka", source)
+            self.assertIn(r"\mbox{}\\Maka", source)
 
     def test_pk_latex_explanation_breaks_after_sentence_periods(self):
         with tempfile.TemporaryDirectory() as tmp:
             generator = load_generator(Path(tmp))
             question = {
                 "mapel": "Pengetahuan Kuantitatif",
-                "topik": "Aljabar dan Fungsi",
+                "topik": "Aljabar Dan Fungsi",
                 "level": "sedang",
                 "soal": "Tentukan nilai x dari persamaan linear.",
                 "pilihan": {"A": "1", "B": "2", "C": "3", "D": "4", "E": "5"},

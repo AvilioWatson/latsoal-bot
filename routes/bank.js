@@ -2,6 +2,7 @@ import {spawn} from "node:child_process";
 import {access, cp, mkdir, readdir, rm, writeFile} from "node:fs/promises";
 import path from "node:path";
 import {readJsonValidated, validateQuestion, writeJsonValidated} from "../lib/dbschema.js";
+import {normalizeCaptionForStorage, normalizeQuestionForStorage} from "../lib/content-normalize.js";
 import {
   addEntry,
   createEntryFromMetadata,
@@ -103,6 +104,8 @@ async function saveRun(runId) {
   } catch (error) {
     console.warn(`[schema:question] ${path.join(sourceRun.dir, "soal.json")}: ${error.message}`);
   }
+  if (metadata.question) metadata.question = normalizeQuestionForStorage(metadata.question);
+  if (metadata.caption) metadata.caption = normalizeCaptionForStorage(metadata.question || {}, metadata.caption);
   const artifactPath = buildStoragePath(metadata.question || {}, runId);
   const target = safeJoin(SAVED, artifactPath);
   if (!target) {
@@ -116,6 +119,14 @@ async function saveRun(runId) {
   metadata.storage_path = artifactPath;
   retargetMetadataFiles(metadata, target);
   await writeJsonValidated(path.join(target, "metadata.json"), metadata, "metadata");
+  if (metadata.question) {
+    await writeJsonValidated(path.join(target, "soal.json"), metadata.question, "question");
+  }
+  if (metadata.caption) {
+    const captionText = metadata.caption.caption || "";
+    const hashtags = Array.isArray(metadata.caption.hashtag) ? metadata.caption.hashtag.join(" ") : "";
+    await writeFile(path.join(target, "caption.txt"), `${captionText}\n\n${hashtags}\n`, "utf-8");
+  }
   await addEntry(createEntryFromMetadata(runId, metadata, {
     saved_at: savedAt,
     status: "saved",
@@ -400,16 +411,17 @@ async function applySavedExplanationReview(runId, payload) {
   const metadata = await readJsonValidated(metadataPath, "metadata");
   const {question_revisi: _ignoredQuestion, ...reviewSummary} = review;
   const now = new Date().toISOString();
-  metadata.question = revisedQuestion;
+  metadata.question = normalizeQuestionForStorage(revisedQuestion);
+  if (metadata.caption) metadata.caption = normalizeCaptionForStorage(metadata.question, metadata.caption);
   metadata.explanation_review = {
     ...reviewSummary,
-    pembahasan_revisi: revisedQuestion.pembahasan,
+    pembahasan_revisi: metadata.question.pembahasan,
     applied_at: now,
   };
   metadata.review_status = reviewSummary.lolos ? "ready" : "needs_review";
   metadata.edited_at = now;
   await writeJsonValidated(metadataPath, metadata, "metadata");
-  await writeJsonValidated(path.join(runDir, "soal.json"), revisedQuestion, "question");
+  await writeJsonValidated(path.join(runDir, "soal.json"), metadata.question, "question");
 
   const patchedEntry = createEntryFromMetadata(runId, metadata, {
     ...(resolved.entry || {}),
@@ -423,7 +435,7 @@ async function applySavedExplanationReview(runId, payload) {
   return {
     ok: true,
     run_id: runId,
-    question: revisedQuestion,
+    question: metadata.question,
     explanation_review: metadata.explanation_review,
     review_status: metadata.review_status,
     web_files: buildWebFiles("/saved", artifactPath, metadata.files),
@@ -527,6 +539,12 @@ async function updateSavedMetadataJson(runId, metadata) {
     storage_path: artifactPath,
     edited_at: new Date().toISOString(),
   };
+  if (nextMetadata.question) {
+    nextMetadata.question = normalizeQuestionForStorage(nextMetadata.question);
+  }
+  if (nextMetadata.caption) {
+    nextMetadata.caption = normalizeCaptionForStorage(nextMetadata.question || {}, nextMetadata.caption);
+  }
   retargetMetadataFiles(nextMetadata, runDir);
   await writeJsonValidated(path.join(runDir, "metadata.json"), nextMetadata, "metadata");
   if (nextMetadata.question) {

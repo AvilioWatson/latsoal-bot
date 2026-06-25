@@ -102,8 +102,9 @@ Gunakan bahasa Indonesia baku. Setiap soal punya tepat 5 pilihan A sampai E,
 hanya 1 jawaban benar, dan pembahasan jelas untuk pelajar SMA.
 Pembahasan wajib memakai bahasa Indonesia formal, baku, objektif, dan tidak memakai gaya percakapan.
 Susun pembahasan menjadi 3 sampai 6 langkah ringkas. Awali setiap langkah dengan teks
-"Langkah 1:", "Langkah 2:", dan seterusnya, masing-masing dipisahkan newline.
-Letakkan persamaan atau rumus penting pada baris tersendiri setelah kalimat penjelasnya.
+"Langkah 1:", "Langkah 2:", dan seterusnya. Di field JSON pembahasan, pisahkan langkah
+dengan escape \\n literal. Jangan menulis enter mentah di dalam string.
+Letakkan persamaan atau rumus penting setelah kalimat penjelasnya dengan escape \\n.
 Tutup dengan "Kesimpulan:" yang menyatakan jawaban akhir secara singkat.
 Jangan memakai markdown, bullet, heading dekoratif, emoji, atau sapaan kepada pembaca.
 Jika memakai pola referensi, gunakan hanya struktur konsepnya. Jangan menyalin kalimat,
@@ -112,9 +113,13 @@ Jangan menambahkan hint/petunjuk dalam tanda kurung pada teks soal.
 Untuk Pengetahuan Kuantitatif dan Penalaran Matematika yang membutuhkan grafik,
 gunakan hanya grafik 2 dimensi kartesius yang dapat dinyatakan sebagai garis,
 pertidaksamaan garis, atau parabola sederhana. Jangan menulis kode LaTeX/TikZ mentah.
+Jangan memakai backslash di field mana pun, termasuk rumus. Tulis x^2, y >= 2x + 1,
+sqrt(16), atau 1/2, bukan perintah LaTeX.
 Isi butuh_visual=true dan tuliskan persamaan/pertidaksamaan eksplisit di deskripsi_visual,
 misalnya "bidang kartesius dengan y = 2x + 1" atau "daerah solusi y >= 2x + 1".
-Output harus JSON valid tanpa markdown.
+Output harus satu objek JSON valid tanpa markdown, tanpa pagar kode, tanpa teks pembuka,
+tanpa trailing comma. Awali langsung dengan { dan akhiri langsung dengan }.
+Untuk field pembahasan, pisahkan langkah dengan escape \\n di dalam string, bukan enter mentah.
 """.strip()
 
     patterns = load_patterns(mapel, topic)
@@ -150,7 +155,7 @@ Output harus JSON valid tanpa markdown.
         "Gunakan minimal 3 contoh jika tersedia untuk menangkap variasi terbaru database, "
         "tetapi jangan menyalin kalimat, angka, konteks, pilihan, atau pembahasannya:\n"
         f"{json.dumps(topic_examples, ensure_ascii=False, indent=2)}\n\n"
-        "Kembalikan JSON dengan struktur berikut:\n"
+        "Kembalikan hanya JSON dengan struktur berikut. Jangan isi nilai selain JSON:\n"
         f"{json.dumps(schema, ensure_ascii=False, indent=2)}"
     )
 
@@ -159,7 +164,7 @@ def build_validation_prompt(question):
     return (
         "Kamu adalah validator soal UTBK yang ketat dan teliti. "
         "Periksa kebenaran konten, kejelasan soal, kesesuaian level, "
-        "kesesuaian UTBK, dan bahasa. Output harus JSON valid.\n\n"
+        "kesesuaian UTBK, dan bahasa. Output harus satu objek JSON valid tanpa markdown atau teks tambahan.\n\n"
         f"{json.dumps(question, ensure_ascii=False)}\n\n"
         "Kembalikan JSON: "
         '{"lolos_validasi": true, "skor": 0, "catatan": {}, "saran_perbaikan": ""}'
@@ -180,7 +185,8 @@ def build_explanation_review_prompt(question):
         "butuh_visual, dan deskripsi_visual bila diperlukan agar konsisten dan akurat. "
         "Nilai lolos dan skor harus merujuk pada question_revisi final, bukan versi awal. "
         "pembahasan_revisi harus sama dengan question_revisi.pembahasan. "
-        "Output harus JSON valid tanpa markdown.\n\n"
+        "Output harus satu objek JSON valid tanpa markdown, pagar kode, atau teks tambahan. "
+        "Gunakan escape \\n untuk newline di dalam string. Jangan memakai backslash selain escape JSON resmi.\n\n"
         f"{json.dumps(question, ensure_ascii=False, indent=2)}\n\n"
         "Kembalikan JSON: "
         '{"lolos": false, "skor": 0, "akurasi": "", "bahasa_formal": "", '
@@ -197,9 +203,9 @@ def build_caption_prompt(question):
         "Kamu adalah copywriter konten edukasi Instagram untuk akun latihan soal UTBK. "
         "Buat caption sangat singkat, hanya dua baris: baris pertama subtopik/subtes, "
         "baris kedua judul submateri/topik. Jangan tambah hook, CTA, motivasi, atau jawaban. "
-        "Wajib pakai konteks UTBK 2026. Jangan memakai tahun 2024 atau 2025. "
-        "Hashtag wajib diawali tanda # dan wajib memuat #UTBK, #LatsoalUTBK, "
-        "#BelajarUTBK, dan #SoalUTBK. Output JSON valid.\n\n"
+        "Wajib pakai konteks UTBK 2027. Jangan memakai tahun 2024, 2025, atau 2026. "
+        "Hashtag wajib diawali tanda # dan wajib memuat #UTBK, #UTBK2027, #LatsoalUTBK, "
+        "#BelajarUTBK, dan #SoalUTBK. Output harus satu objek JSON valid tanpa markdown atau teks tambahan.\n\n"
         f"{json.dumps(question, ensure_ascii=False)}\n\n"
         'Kembalikan JSON: {"caption": "", "hashtag": []}'
     )

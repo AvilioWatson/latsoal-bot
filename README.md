@@ -105,6 +105,23 @@ http://127.0.0.1:8765/saved/literasi-bahasa-inggris
 http://127.0.0.1:8765/saved/penalaran-matematika
 ```
 
+## Import Banyak Soal
+
+Buka halaman berikut untuk paste atau upload JSON array berisi maksimal 1.000 soal:
+
+```text
+http://127.0.0.1:8765/import
+```
+
+Halaman import menyediakan prompt ekstraksi PDF dan template JSON siap salin. Sebelum disimpan, setiap soal divalidasi serta dibandingkan dengan bank menggunakan Jaccard similarity. Duplikat exact diblokir; soal di atas threshold `DEDUP_THRESHOLD` memerlukan konfirmasi manual. Setelah import, gambar dirender berurutan dan proses yang tertunda dapat dilanjutkan setelah reload.
+
+Audit dan backfill similarity dapat dijalankan dengan:
+
+```powershell
+npm.cmd run audit-similarity
+npm.cmd run backfill-similarity
+```
+
 ## Cara Menjalankan
 
 Pastikan Node.js dan Python sudah tersedia.
@@ -127,6 +144,12 @@ Lalu buka:
 
 ```text
 http://127.0.0.1:8765
+```
+
+Alamat root menampilkan homepage Near Education. Klik halaman tersebut untuk masuk ke Generator, atau buka langsung:
+
+```text
+http://127.0.0.1:8765/generator
 ```
 
 Alternatif di Windows, klik dua kali `LatsoalBot.exe` dari root project. Setiap dijalankan, launcher menghentikan server Node.js lama pada port `8765`. Jika port tersebut sedang dipublikasikan oleh service Docker project, launcher menjalankan `docker compose stop latsoal-bot` tanpa mematikan Docker Desktop. Setelah port benar-benar bebas, launcher membersihkan cache runtime Python (`__pycache__` dan `.pyc`), lalu menjalankan proses `node server.js` yang baru pada port yang sama. Browser dibuka dengan URL restart unik dan server mengirim header `no-store`, sehingga HTML, JavaScript, CSS, JSON, dan gambar selalu dimuat ulang. Data soal di `saved/`, indeks `bank/`, hasil `outputs/`, dan file kerja `.tmp/` tidak dihapus. Launcher juga menyetel `LATSOAL_RENDER_ENGINE=pil` jika belum ada konfigurasi render. Karena itu, menjalankan aplikasi melalui EXE tidak memakai toolchain LaTeX milik Docker.

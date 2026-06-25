@@ -204,11 +204,20 @@ function renderImages(data) {
   sharedRenderImages(data, {imageCount, imagePreviewList}, {altPrefix: "Preview gambar saved"});
 }
 
+function matchesStatusFilter(item, status) {
+  if (status === "all") return true;
+  if (status === "approved") {
+    return (item.status || "saved") === "approved" && !item.uploaded_at;
+  }
+  if (status === "uploaded") return Boolean(item.uploaded_at);
+  return (item.status || "saved") === status;
+}
+
 function filteredSavedItems() {
   const query = savedSearch.value.trim().toLowerCase();
   const status = savedStatusFilter.value;
   return savedItems.filter((item) => {
-    const statusOk = status === "all" || (item.status || "saved") === status;
+    const statusOk = matchesStatusFilter(item, status);
     const subtestOk = activeSubtest === "all" || item.mapel === activeSubtest;
     const topicOk = activeSubtopic === "all" || topicKey(topicLabel(item)) === activeSubtopic;
     const haystack = [item.run_id, item.mapel, item.topik, item.canonical_topik, item.level, item.source, item.status].join(" ").toLowerCase();

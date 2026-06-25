@@ -29,10 +29,17 @@ def subtest_code(mapel):
     return SUBTEST_CODES.get(slug, slug.upper() or "LAINNYA")
 
 
+def title_case_topic(topic):
+    return " ".join(
+        part[:1].upper() + part[1:]
+        for part in str(topic or "").strip().split()
+    )
+
+
 def canonical_topic(mapel, topic):
     raw_topic = topic or "umum"
     key = (slugify(mapel), slugify(raw_topic))
-    return TOPIC_ALIASES.get(key, CANONICAL_TOPICS.get(key, raw_topic))
+    return title_case_topic(TOPIC_ALIASES.get(key, CANONICAL_TOPICS.get(key, raw_topic)))
 
 
 def build_storage_path(question, run_id):

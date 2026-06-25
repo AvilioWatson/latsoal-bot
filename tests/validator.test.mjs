@@ -23,7 +23,7 @@ function validPayload() {
     },
     caption: {
       caption: "Latihan singkat untuk mengasah penalaran deduktif sebelum tryout.",
-      hashtag: ["#UTBK2026", "#LatsoalUTBK"],
+      hashtag: ["#UTBK", "#UTBK2027", "#LatsoalUTBK"],
     },
     validation: {
       lolos_validasi: true,

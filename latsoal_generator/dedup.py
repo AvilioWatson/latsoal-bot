@@ -1,5 +1,6 @@
 import json
 import re
+import datetime as dt
 
 import latsoal_generator.config as generator_config
 
@@ -33,28 +34,50 @@ def _question_text(question):
     ])
 
 
-def check_duplicate(question):
+def check_duplicate(question, exclude_run_id=None, additional_questions=None):
     current_text = _question_text(question)
     best = {
         "is_duplicate": False,
         "similarity": 0.0,
         "matched_run_id": None,
         "matched_status": None,
+        "matched_batch_index": None,
         "threshold": generator_config.DEDUP_THRESHOLD,
         "reason": "",
+        "checked_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+        "algorithm": "jaccard-v1",
     }
 
+    def compare(candidate_question, run_id=None, status=None, batch_index=None):
+        nonlocal best
+        similarity = jaccard_similarity(current_text, _question_text(candidate_question or {}))
+        if similarity > best["similarity"]:
+            best.update({
+                "similarity": round(similarity, 4),
+                "matched_run_id": run_id,
+                "matched_status": status,
+                "matched_batch_index": batch_index,
+            })
+
+    for candidate in additional_questions or []:
+        compare(
+            candidate.get("question") or {},
+            run_id=candidate.get("run_id"),
+            status=candidate.get("status") or "batch",
+            batch_index=candidate.get("batch_index"),
+        )
+
     bank_index_path = generator_config.BANK_INDEX_PATH
-    if not bank_index_path.exists():
-        return best
-    try:
-        index = json.loads(bank_index_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return best
+    index = []
+    if bank_index_path.exists():
+        try:
+            index = json.loads(bank_index_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            index = []
 
     for item in index if isinstance(index, list) else []:
         run_id = item.get("run_id")
-        if not run_id:
+        if not run_id or run_id == exclude_run_id:
             continue
         item_path = item.get("path") or f"saved/{run_id}"
         relative_path = str(item_path).replace("\\", "/")
@@ -68,13 +91,7 @@ def check_duplicate(question):
         except json.JSONDecodeError:
             continue
         saved_question = saved.get("question", {})
-        similarity = jaccard_similarity(current_text, _question_text(saved_question))
-        if similarity > best["similarity"]:
-            best.update({
-                "similarity": round(similarity, 4),
-                "matched_run_id": run_id,
-                "matched_status": item.get("status", "saved"),
-            })
+        compare(saved_question, run_id=run_id, status=item.get("status", "saved"))
 
     if best["similarity"] >= generator_config.DEDUP_THRESHOLD:
         best["is_duplicate"] = True

@@ -270,7 +270,7 @@ Kembalikan dalam format JSON:
 }
 
 Hashtag: 15–20 hashtag relevan campuran besar dan kecil.
-Wajib include: #UTBK2026 #LatsoalUTBK #BelajarUTBK #SoalUTBK
+Wajib include: #UTBK2027 #LatsoalUTBK #BelajarUTBK #SoalUTBK
 ```
 
 ---
