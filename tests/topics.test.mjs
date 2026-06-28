@@ -19,6 +19,7 @@ test("routes use the shared topics config", () => {
 
 test("topics config has non-empty subtests and topics", () => {
   assert.ok(Object.keys(topicsConfig).length >= 7);
+  assert.ok(topicsConfig["Pengetahuan Kuantitatif"].includes("Geometri"));
   for (const [subtest, topics] of Object.entries(topicsConfig)) {
     assert.equal(typeof subtest, "string");
     assert.notEqual(subtest.trim(), "");

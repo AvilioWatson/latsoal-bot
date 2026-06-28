@@ -4,6 +4,8 @@ const savedLayout = document.querySelector(".saved-layout");
 const savedPreview = document.querySelector(".saved-preview");
 const savedSearch = document.querySelector("#savedSearch");
 const savedStatusFilter = document.querySelector("#savedStatusFilter");
+const tryoutReadinessFilter = document.querySelector("#tryoutReadinessFilter");
+const tryoutReadinessSummary = document.querySelector("#tryoutReadinessSummary");
 const refreshSavedButton = document.querySelector("#refreshSavedButton");
 const exportApprovedButton = document.querySelector("#exportApprovedButton");
 const subtestTabs = document.querySelector("#subtestTabs");
@@ -213,15 +215,48 @@ function matchesStatusFilter(item, status) {
   return (item.status || "saved") === status;
 }
 
+function matchesTryoutReadinessFilter(item, filter) {
+  if (filter === "all") return true;
+  if (filter === "ready") return Boolean(item.tryout_ready);
+  if (filter === "warning") return (item.status || "saved") === "approved" && Number(item.tryout_warning_count || 0) > 0;
+  if (filter === "review-ready") return item.review_status === "ready";
+  if (filter === "review-pending") return item.review_status !== "ready";
+  return true;
+}
+
+function tryoutStateLabel(item) {
+  if (item.tryout_ready) return "Tryout ready";
+  if ((item.status || "saved") === "approved" && Number(item.tryout_warning_count || 0) > 0) {
+    return `${item.tryout_warning_count} warning`;
+  }
+  if (item.review_status === "ready") return "Review ready";
+  return "Needs review";
+}
+
+function renderTryoutReadinessSummary() {
+  const approved = savedItems.filter((item) => item.status === "approved");
+  const ready = approved.filter((item) => item.tryout_ready).length;
+  const warnings = approved.filter((item) => Number(item.tryout_warning_count || 0) > 0).length;
+  const reviewPending = savedItems.filter((item) => item.review_status !== "ready").length;
+  tryoutReadinessSummary.innerHTML = `
+    <span><strong>${ready}</strong> siap tryout</span>
+    <span><strong>${warnings}</strong> approved perlu cek</span>
+    <span><strong>${reviewPending}</strong> belum review ready</span>
+  `;
+}
+
 function filteredSavedItems() {
   const query = savedSearch.value.trim().toLowerCase();
   const status = savedStatusFilter.value;
+  const tryoutReadiness = tryoutReadinessFilter.value;
   return savedItems.filter((item) => {
     const statusOk = matchesStatusFilter(item, status);
+    const tryoutOk = matchesTryoutReadinessFilter(item, tryoutReadiness);
     const subtestOk = activeSubtest === "all" || item.mapel === activeSubtest;
     const topicOk = activeSubtopic === "all" || topicKey(topicLabel(item)) === activeSubtopic;
-    const haystack = [item.run_id, item.mapel, item.topik, item.canonical_topik, item.level, item.source, item.status].join(" ").toLowerCase();
-    return subtestOk && topicOk && statusOk && (!query || haystack.includes(query));
+    const warningCodes = (item.tryout_warnings || []).map((warning) => warning.code).join(" ");
+    const haystack = [item.run_id, item.mapel, item.topik, item.canonical_topik, item.level, item.source, item.status, item.review_status, warningCodes].join(" ").toLowerCase();
+    return subtestOk && topicOk && statusOk && tryoutOk && (!query || haystack.includes(query));
   }).sort((left, right) => {
     const leftQuestion = left.soal_excerpt || "";
     const rightQuestion = right.soal_excerpt || "";
@@ -340,6 +375,7 @@ function renderSavedList(items = filteredSavedItems()) {
       <div class="saved-card-meta">
         <span data-level></span>
         <span data-upload-state></span>
+        <span data-tryout-state></span>
         <span data-run-id></span>
       </div>
     `;
@@ -352,6 +388,10 @@ function renderSavedList(items = filteredSavedItems()) {
     row.querySelector(".saved-question-excerpt").textContent = item.soal_excerpt || "Soal belum memiliki ringkasan.";
     row.querySelector("[data-level]").textContent = item.level || "-";
     row.querySelector("[data-upload-state]").textContent = item.uploaded_at ? "Uploaded" : "Belum upload";
+    row.querySelector("[data-tryout-state]").textContent = tryoutStateLabel(item);
+    row.querySelector("[data-tryout-state]").dataset.tryoutState = item.tryout_ready
+      ? "ready"
+      : (item.status || "saved") === "approved" && Number(item.tryout_warning_count || 0) > 0 ? "warning" : "pending";
     row.querySelector("[data-run-id]").textContent = item.run_id;
     row.addEventListener("click", () => loadSavedPreview(item.run_id));
     row.addEventListener("keydown", (event) => {
@@ -370,6 +410,7 @@ async function loadSavedList() {
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || "Gagal memuat saved.");
   savedItems = data.items || [];
+  renderTryoutReadinessSummary();
   renderSubtopicTabs();
   renderSavedList();
 }
@@ -702,6 +743,10 @@ closePreviewButton.addEventListener("click", closePreviewPanel);
 
 savedSearch.addEventListener("input", () => renderSavedList());
 savedStatusFilter.addEventListener("change", () => {
+  renderSubtopicTabs();
+  renderSavedList();
+});
+tryoutReadinessFilter.addEventListener("change", () => {
   renderSubtopicTabs();
   renderSavedList();
 });

@@ -2954,6 +2954,34 @@ def deterministic_quant_question(mapel, topic, level, seed):
             "deskripsi_visual": "",
         }
 
+    if topic in {"Geometri", "Geometri dan Pengukuran", "Geometri Dan Pengukuran"}:
+        length = rng.randint(8, 18)
+        width = rng.randint(4, length - 1)
+        area = length * width
+        choices, answer = make_choices(area, [-2 * width, -width, 0, width, 2 * width])
+        return {
+            "mapel": mapel,
+            "kelompok_tes": kelompok_tes,
+            "topik": topic,
+            "level": level,
+            "tipe": "rectangle_area_context",
+            "params": {"length": length, "width": width, "area": area},
+            "soal": (
+                f"Sebuah poster berbentuk persegi panjang memiliki panjang {length} cm dan lebar {width} cm. "
+                "Luas poster tersebut adalah..."
+            ),
+            "pilihan": choices,
+            "jawaban": answer,
+            "pembahasan": (
+                "Luas persegi panjang dihitung dengan rumus panjang x lebar. "
+                f"Maka luas poster adalah {length} x {width} = {area} cm^2."
+            ),
+            "konsep_kunci": "Luas persegi panjang",
+            "tips_pengerjaan": "Pastikan ukuran yang dikalikan adalah panjang dan lebar dengan satuan yang sama.",
+            "butuh_visual": False,
+            "deskripsi_visual": "",
+        }
+
     start = rng.randrange(12, 31, 2)
     step = rng.choice([3, 4, 5, 6, 8])
     values = [start + step * i for i in range(3)]

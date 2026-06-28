@@ -174,6 +174,70 @@ Alias: `POST /api/export/approved`
 Menyalin semua item `approved` ke `approved/<export-id>/` dan membuat `manifest.json`.
 Path file di manifest relatif terhadap folder export.
 
+### `POST /api/export/tryout`
+
+Membuat export khusus untuk project website tryout. Endpoint ini hanya mengambil item dengan status `approved`, menyalin aset ke `approved/<export-id>/`, lalu membuat file versioned:
+
+```text
+approved/<export-id>/tryout-export.v1.json
+```
+
+Response:
+
+```json
+{
+  "export_id": "2026-06-26T10-00-00-000Z",
+  "total": 1,
+  "warning_count": 0,
+  "file": "/approved/2026-06-26T10-00-00-000Z/tryout-export.v1.json",
+  "manifest": {
+    "schema_version": "tryout-export.v1",
+    "source_app": "latsoal-bot",
+    "questions": []
+  }
+}
+```
+
+Schema file utama:
+
+```json
+{
+  "schema_version": "tryout-export.v1",
+  "export_id": "2026-06-26T10-00-00-000Z",
+  "created_at": "2026-06-26T10:00:00.000Z",
+  "source_app": "latsoal-bot",
+  "total": 1,
+  "warning_count": 0,
+  "skipped": [],
+  "questions": [
+    {
+      "external_id": "20260626-100000",
+      "subtest_name": "Penalaran Umum",
+      "subtest_code": "PU",
+      "topic": "Penalaran Deduktif",
+      "canonical_topic": "Penalaran Deduktif",
+      "difficulty_raw": "mudah",
+      "difficulty": "easy",
+      "question_text": "Teks soal...",
+      "options": [
+        {"label": "A", "text": "Pilihan A", "sort_order": 1}
+      ],
+      "correct_answer": "A",
+      "explanation": "Pembahasan...",
+      "caption": {},
+      "assets": {"images": [], "explanations": []},
+      "source": "import",
+      "review_status": "ready",
+      "validation": {},
+      "dedup": {},
+      "warnings": []
+    }
+  ]
+}
+```
+
+Warning tidak menggagalkan export. Contoh warning: `review_not_ready`, `missing_question_text`, `missing_explanation`, `invalid_correct_answer`, dan `missing_option`.
+
 ## Download
 
 ### `GET /download/outputs/<run-id>`

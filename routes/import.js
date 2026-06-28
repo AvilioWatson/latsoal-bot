@@ -26,6 +26,20 @@ const TEMPLATE = [{
   sumber_pdf: {nama_file: "", halaman: ""},
 }];
 
+function topicListForPrompt(mapel) {
+  return (TAXONOMY.topics?.[mapel] || []).map((topic) => `  - ${topic}`).join("\n");
+}
+
+function subtestPrompt(mapel, index) {
+  const code = TAXONOMY.subtest_codes?.[mapel] || mapel;
+  return `${index}. Prompt ${code} - ${mapel}
+Gunakan field mapel persis: "${mapel}".
+Klasifikasikan setiap soal ke salah satu topik resmi berikut:
+${topicListForPrompt(mapel)}`;
+}
+
+const SUBTEST_PROMPTS = Object.keys(TAXONOMY.topics || {}).map(subtestPrompt).join("\n\n");
+
 const EXTRACTION_PROMPT = `Anda adalah editor dan validator soal UTBK/SNBT. Ekstrak seluruh soal pilihan ganda dari PDF yang saya lampirkan dan keluarkan hasilnya sebagai satu JSON array valid.
 
 Aturan kerja:
@@ -33,12 +47,17 @@ Aturan kerja:
 2. Setiap soal harus memiliki pilihan tepat A, B, C, D, dan E yang semuanya non-empty dan tidak duplikat.
 3. Tentukan jawaban yang benar dengan mengerjakan soal secara mandiri. Field jawaban hanya boleh satu huruf kapital A-E.
 4. Buat atau rapikan pembahasan dalam bahasa Indonesia formal, runtut, dan cukup untuk membuktikan jawaban.
-5. Gunakan mapel dan topik resmi yang paling sesuai. Level hanya boleh mudah, sedang, atau sulit.
+5. Gunakan mapel dan topik resmi yang paling sesuai dari daftar subtes dan subtopik di bawah. Level hanya boleh mudah, sedang, atau sulit.
 6. Untuk matematika gunakan LaTeX inline dengan delimiter $...$. Escape backslash sesuai aturan JSON.
 7. Jika soal membutuhkan gambar, grafik, tabel, atau diagram, set butuh_visual ke true dan tulis deskripsi_visual lengkap. Jangan mengarang detail yang tidak terlihat.
 8. Isi konsep_kunci dan tips_pengerjaan secara spesifik dan ringkas.
 9. sumber_pdf bersifat opsional. Biarkan nama_file dan halaman sebagai string kosong jika tidak diperlukan.
 10. Jangan menggabungkan dua soal, jangan menghilangkan konteks, dan jangan menambah fakta yang tidak tersedia.
+
+Daftar 7 prompt subtes dan subtopik resmi website:
+${SUBTEST_PROMPTS}
+
+Jika PDF hanya berisi satu subtes, pakai prompt subtes yang sesuai. Jika PDF campuran, klasifikasikan setiap soal per object berdasarkan mapel dan topik resmi terdekat. Jangan membuat judul topik baru di luar daftar.
 
 Aturan keluaran:
 - Keluarkan hanya JSON array valid.

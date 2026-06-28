@@ -14,6 +14,7 @@ import {
 import {errorStatus, readJsonBody, sendError, sendJson} from "../lib/http.js";
 import {OUTPUTS, ROOT, SAVED, buildStoragePath, buildWebFiles, canonicalTopic, isValidRunId, pathFromIndexEntry, safeJoin} from "../lib/paths.js";
 import {requestError, wantsJson} from "../lib/route-utils.js";
+import {tryoutQuestionWarnings} from "../lib/tryout-export.js";
 
 const DEFAULT_PYTHON = process.env.PYTHON || "python";
 
@@ -154,17 +155,24 @@ async function listSavedRuns() {
     } catch {
       metadata = null;
     }
+    const tryoutWarnings = metadata
+      ? tryoutQuestionWarnings(metadata)
+      : [{code: "missing_metadata", message: "metadata.json tidak bisa dibaca."}];
+    const status = item.status || "saved";
     items.push({
       run_id: item.run_id,
       saved_at: item.saved_at || null,
       uploaded_at: item.uploaded_at || null,
-      status: item.status || "saved",
+      status,
       source: metadata?.source || null,
       review_status: metadata?.review_status || null,
       mapel: metadata?.question?.mapel || null,
       topik: metadata?.question?.topik || null,
       canonical_topik: canonicalTopic(metadata?.question?.mapel, metadata?.question?.topik) || null,
       explanation_review: metadata?.explanation_review || null,
+      tryout_ready: status === "approved" && tryoutWarnings.length === 0,
+      tryout_warning_count: tryoutWarnings.length,
+      tryout_warnings: tryoutWarnings,
       level: metadata?.question?.level || null,
       soal_excerpt: String(metadata?.question?.soal || "").replace(/\s+/g, " ").trim().slice(0, 180),
       jawaban: metadata?.question?.jawaban || null,

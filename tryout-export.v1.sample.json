@@ -1,0 +1,67 @@
+{
+  "schema_version": "tryout-export.v1",
+  "export_id": "sample-export",
+  "created_at": "2026-06-26T10:00:00.000Z",
+  "source_app": "latsoal-bot",
+  "total": 1,
+  "warning_count": 0,
+  "skipped": [],
+  "questions": [
+    {
+      "external_id": "20260626-100000",
+      "subtest_name": "Penalaran Umum",
+      "subtest_code": "PU",
+      "topic": "Penalaran Deduktif",
+      "canonical_topic": "Penalaran Deduktif",
+      "difficulty_raw": "mudah",
+      "difficulty": "easy",
+      "question_text": "Jika semua peserta disiplin belajar dan sebagian peserta mengikuti tryout, simpulan mana yang paling aman?",
+      "options": [
+        {
+          "label": "A",
+          "text": "Semua peserta mengikuti tryout.",
+          "sort_order": 1
+        },
+        {
+          "label": "B",
+          "text": "Sebagian peserta disiplin belajar.",
+          "sort_order": 2
+        },
+        {
+          "label": "C",
+          "text": "Tidak ada peserta yang mengikuti tryout.",
+          "sort_order": 3
+        },
+        {
+          "label": "D",
+          "text": "Semua peserta tidak disiplin belajar.",
+          "sort_order": 4
+        },
+        {
+          "label": "E",
+          "text": "Sebagian peserta tidak mengikuti UTBK.",
+          "sort_order": 5
+        }
+      ],
+      "correct_answer": "B",
+      "explanation": "Karena semua peserta disiplin belajar, setiap kelompok yang merupakan peserta tetap termasuk disiplin belajar. Simpulan yang aman adalah sebagian peserta disiplin belajar.",
+      "caption": {
+        "caption": "Latihan penalaran deduktif singkat untuk review konsep.",
+        "hashtag": ["#UTBK", "#UTBK2027", "#LatsoalUTBK"]
+      },
+      "assets": {
+        "images": [],
+        "explanations": []
+      },
+      "source": "import",
+      "review_status": "ready",
+      "validation": {
+        "lolos_validasi": true
+      },
+      "dedup": {
+        "is_duplicate": false
+      },
+      "warnings": []
+    }
+  ]
+}

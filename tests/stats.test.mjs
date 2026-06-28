@@ -60,7 +60,7 @@ test("buildStats aggregates status, source, level, subtest, duplicate, and expor
   ], NOW);
 
   assert.equal(stats.total, 3);
-  assert.deepEqual(stats.by_status, {saved: 0, approved: 2, rejected: 1});
+  assert.deepEqual(stats.by_status, {generated: 0, saved: 0, approved: 2, rejected: 1});
   assert.equal(stats.by_subtes["penalaran-umum"].approved, 2);
   assert.equal(stats.by_subtes["penalaran-umum"].uploaded, 1);
   assert.equal(stats.by_subtes["penalaran-umum"].topics["penalaran-deduktif"].total, 1);
@@ -86,4 +86,27 @@ test("buildStats treats unknown status as saved and handles empty input", () => 
   const stats = buildStats([{status: "published", saved_at: "2026-05-29T00:00:00.000Z"}], NOW);
   assert.equal(stats.by_status.saved, 1);
   assert.equal(stats.by_subtes.unknown.saved, 1);
+});
+
+test("buildStats includes generated output entries in token totals", () => {
+  const stats = buildStats([
+    {
+      run_id: "20260529-120000",
+      status: "generated",
+      source: "gemini",
+      subtes: "pengetahuan-kuantitatif",
+      topik: "statistika-dan-peluang",
+      level: "sedang",
+      saved_at: "2026-05-29T12:00:00.000Z",
+      token_usage: {
+        question: {
+          gemini: {prompt_tokens: 100, output_tokens: 50, total_tokens: 150},
+        },
+      },
+    },
+  ], NOW);
+
+  assert.equal(stats.by_status.generated, 1);
+  assert.equal(stats.token_usage.question.gemini.total_tokens, 150);
+  assert.equal(stats.last_7_days.total_generated, 1);
 });

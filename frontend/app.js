@@ -83,6 +83,14 @@ function reviewNote(data) {
   return "Review manual sebelum upload.";
 }
 
+function similarityText(data) {
+  const similarity = Number(data?.dedup?.similarity);
+  if (!Number.isFinite(similarity)) return "Similarity -";
+  const percent = Math.round(similarity * 1000) / 10;
+  const match = data?.dedup?.matched_run_id ? ` dengan ${data.dedup.matched_run_id}` : "";
+  return `Similarity ${percent}%${match}`;
+}
+
 function renderDebug(data) {
   sharedRenderDebug(data, {debugPanel, debugSource, debugText});
 }
@@ -177,7 +185,7 @@ function renderPreviewResult(data) {
   const validation = data.validation;
   previewTitle.textContent = `${question.mapel}: ${question.topik}`;
   sourceLabel.textContent = sharedSourceText(data);
-  validationScore.textContent = `Skor ${validation.skor ?? "-"}`;
+  validationScore.textContent = `Skor ${validation.skor ?? "-"} · ${similarityText(data)}`;
   runNote.textContent = reviewNote(data);
   renderDebug(data);
   renderImages(data);
@@ -287,7 +295,7 @@ function renderBatchList(results) {
     const heading = document.createElement("h4");
     heading.textContent = `${question.mapel || "Tanpa subtes"}: ${question.topik || "Tanpa subtopik"}`;
     const meta = document.createElement("p");
-    meta.textContent = `${item.run_id || "-"} · ${sharedSourceText(item)} · Skor ${item.validation?.skor ?? "-"}`;
+    meta.textContent = `${item.run_id || "-"} · ${sharedSourceText(item)} · Skor ${item.validation?.skor ?? "-"} · ${similarityText(item)}`;
     title.append(heading, meta);
 
     header.append(number, title);

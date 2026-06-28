@@ -66,10 +66,11 @@ def existing_question_records():
 
 def validate_and_normalize_question(raw_question):
     if not isinstance(raw_question, dict):
-        return {}, ["Soal harus berupa JSON object."]
+        return {}, ["Soal harus berupa JSON object."], []
     question = fix_text(dict(raw_question))
     errors = []
-    for field in ["mapel", "topik", "level", "soal", "jawaban", "pembahasan"]:
+    warnings = []
+    for field in ["mapel", "level", "soal", "jawaban", "pembahasan"]:
         if not isinstance(question.get(field), str) or not question[field].strip():
             errors.append(f"Field '{field}' wajib berupa teks non-empty.")
 
@@ -83,12 +84,23 @@ def validate_and_normalize_question(raw_question):
 
     if mapel and mapel not in content_generator.MAPEL_TOPICS:
         errors.append("Subtes/mapel tidak tersedia dalam taksonomi.")
-    if mapel in content_generator.MAPEL_TOPICS and topik:
-        canonical = content_generator.canonical_topic(mapel, topik)
-        if canonical not in content_generator.MAPEL_TOPICS[mapel]:
-            errors.append("Topik tidak tersedia untuk subtes tersebut.")
+    if mapel in content_generator.MAPEL_TOPICS:
+        if topik:
+            canonical = content_generator.canonical_topic(mapel, topik)
+            if canonical in content_generator.MAPEL_TOPICS[mapel]:
+                question["topik"] = canonical
+            else:
+                fallback_topic = content_generator.MAPEL_TOPICS[mapel][0]
+                question["topik"] = fallback_topic
+                warnings.append(
+                    f"Topik '{topik}' tidak tersedia untuk {mapel}; dinormalisasi ke '{fallback_topic}'."
+                )
         else:
-            question["topik"] = canonical
+            fallback_topic = content_generator.MAPEL_TOPICS[mapel][0]
+            question["topik"] = fallback_topic
+            warnings.append(
+                f"Topik kosong untuk {mapel}; dinormalisasi ke '{fallback_topic}'."
+            )
     if level and level not in VALID_LEVELS:
         errors.append("Level harus mudah, sedang, atau sulit.")
 
@@ -123,7 +135,7 @@ def validate_and_normalize_question(raw_question):
             "nama_file": str(source.get("nama_file") or "").strip(),
             "halaman": str(source.get("halaman") or "").strip(),
         }
-    return question, list(dict.fromkeys(errors))
+    return question, list(dict.fromkeys(errors)), list(dict.fromkeys(warnings))
 
 
 def evaluate_batch(raw_questions):
@@ -138,7 +150,7 @@ def evaluate_batch(raw_questions):
     earlier_by_text = {}
     items = []
     for index, raw_question in enumerate(raw_questions):
-        question, errors = validate_and_normalize_question(raw_question)
+        question, errors, warnings = validate_and_normalize_question(raw_question)
         normalized_text = normalize_question_text(question)
         exact_match = existing_by_text.get(normalized_text) or earlier_by_text.get(normalized_text)
         dedup = content_generator.check_duplicate(question, additional_questions=earlier) if not errors else None
@@ -161,6 +173,7 @@ def evaluate_batch(raw_questions):
             "selectable": not errors and not is_exact,
             "selected_by_default": not errors and not is_exact and not is_similar,
             "errors": errors,
+            "warnings": warnings,
             "question": question,
             "dedup": dedup,
         })

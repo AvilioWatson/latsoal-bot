@@ -86,6 +86,29 @@ class ImportQuestionsTest(unittest.TestCase):
             self.assertEqual(payload["items"][1]["status"], "exact_duplicate")
             self.assertFalse(payload["items"][1]["selectable"])
 
+    def test_unknown_topic_is_normalized_without_invalidating_question(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            item = question()
+            item["mapel"] = "Pengetahuan Kuantitatif"
+            item["topik"] = "Judul Sub Topik Dari PDF"
+            result, payload = run_importer(Path(tmp), {"questions": [item]}, "--validate-only", "--skip-render")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(payload["items"][0]["status"], "valid")
+            self.assertEqual(payload["items"][0]["question"]["topik"], "Aljabar Dan Fungsi")
+            self.assertTrue(payload["items"][0]["warnings"])
+
+    def test_empty_topic_is_normalized_without_invalidating_question(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            item = question()
+            item["topik"] = ""
+            result, payload = run_importer(Path(tmp), {"questions": [item]}, "--validate-only", "--skip-render")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(payload["items"][0]["status"], "valid")
+            self.assertEqual(payload["items"][0]["question"]["topik"], "Penalaran Induktif")
+            self.assertTrue(payload["items"][0]["warnings"])
+
 
 if __name__ == "__main__":
     unittest.main()

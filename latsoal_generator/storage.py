@@ -39,7 +39,7 @@ def title_case_topic(topic):
 def canonical_topic(mapel, topic):
     raw_topic = topic or "umum"
     key = (slugify(mapel), slugify(raw_topic))
-    return title_case_topic(TOPIC_ALIASES.get(key, CANONICAL_TOPICS.get(key, raw_topic)))
+    return title_case_topic(CANONICAL_TOPICS.get(key, TOPIC_ALIASES.get(key, raw_topic)))
 
 
 def build_storage_path(question, run_id):

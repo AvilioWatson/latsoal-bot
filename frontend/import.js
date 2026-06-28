@@ -27,6 +27,7 @@ const RENDER_QUEUE_KEY = "latsoal-import-render-queue";
 let questions = [];
 let validationItems = [];
 let failedRenderIds = [];
+let topicsByMapel = {};
 
 function setStatus(text, state = "") {
   elements.status.textContent = text;
@@ -73,6 +74,38 @@ function matchedLabel(item) {
   return "-";
 }
 
+function syncQuestionTopic(index, topic) {
+  const question = questions[index];
+  const item = validationItems.find((candidate) => candidate.index === index);
+  if (question) question.topik = topic;
+  if (item?.question) item.question.topik = topic;
+}
+
+function renderTopicControl(item, title) {
+  const mapel = item.question?.mapel || "";
+  const topics = topicsByMapel[mapel] || [];
+  if (!topics.length) return null;
+  const label = document.createElement("label");
+  label.className = "topic-fix-field";
+  label.textContent = "Subtopik";
+  const select = document.createElement("select");
+  select.dataset.index = String(item.index);
+  select.setAttribute("aria-label", `Ganti subtopik soal ${item.index + 1}`);
+  for (const topic of topics) {
+    const option = document.createElement("option");
+    option.value = topic;
+    option.textContent = topic;
+    option.selected = topic === item.question?.topik;
+    select.append(option);
+  }
+  select.addEventListener("change", () => {
+    syncQuestionTopic(item.index, select.value);
+    title.textContent = `${mapel || "Tanpa subtes"} · ${select.value}`;
+  });
+  label.append(select);
+  return label;
+}
+
 function updateSelectionNote() {
   const selected = elements.rows.querySelectorAll('input[type="checkbox"]:checked').length;
   elements.selection.textContent = `${selected} dari ${validationItems.length} soal dipilih.`;
@@ -113,11 +146,19 @@ function renderValidation(result) {
     const excerpt = document.createElement("p");
     excerpt.textContent = String(item.question?.soal || "").replace(/\s+/g, " ").slice(0, 150) || "Soal tidak terbaca.";
     questionCell.append(title, excerpt);
+    const topicControl = renderTopicControl(item, title);
+    if (topicControl) questionCell.append(topicControl);
     if (item.errors?.length) {
       const errors = document.createElement("ul");
       errors.className = "row-errors";
       for (const message of item.errors) { const li = document.createElement("li"); li.textContent = message; errors.append(li); }
       questionCell.append(errors);
+    }
+    if (item.warnings?.length) {
+      const warnings = document.createElement("ul");
+      warnings.className = "row-errors";
+      for (const message of item.warnings) { const li = document.createElement("li"); li.textContent = message; warnings.append(li); }
+      questionCell.append(warnings);
     }
     const statusCell = document.createElement("td");
     const badge = document.createElement("span");
@@ -247,6 +288,7 @@ for (const eventName of ["dragleave", "drop"]) elements.drop.addEventListener(ev
 elements.drop.addEventListener("drop", (event) => loadFile(event.dataTransfer.files[0]));
 
 api("/api/import/config").then((config) => {
+  topicsByMapel = config.topics || {};
   elements.prompt.textContent = config.prompt;
   elements.template.textContent = JSON.stringify(config.template, null, 2);
 }).catch((error) => { setStatus("Config gagal", "error"); elements.prompt.textContent = error.message; });

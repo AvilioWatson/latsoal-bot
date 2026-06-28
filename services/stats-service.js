@@ -1,6 +1,9 @@
-import {rebuildIndex} from "../lib/filestore.js";
+import {readdir, readFile} from "node:fs/promises";
+import path from "node:path";
+import {createEntryFromMetadata, rebuildIndex} from "../lib/filestore.js";
+import {OUTPUTS} from "../lib/paths.js";
 
-const STATUS_KEYS = ["saved", "approved", "rejected"];
+const STATUS_KEYS = ["generated", "saved", "approved", "rejected"];
 const LEVEL_KEYS = ["mudah", "sedang", "sulit"];
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -44,7 +47,7 @@ function newestIso(values) {
 export function buildStats(entries, now = new Date()) {
   const list = Array.isArray(entries) ? entries : [];
   const total = list.length;
-  const byStatus = {saved: 0, approved: 0, rejected: 0};
+  const byStatus = {generated: 0, saved: 0, approved: 0, rejected: 0};
   const bySubtes = {};
   const bySource = {};
   const byLevel = {mudah: 0, sedang: 0, sulit: 0};
@@ -158,5 +161,48 @@ export function buildStats(entries, now = new Date()) {
 }
 
 export async function readStats(now = new Date()) {
-  return buildStats(await rebuildIndex(), now);
+  const savedEntries = await rebuildIndex();
+  const savedRunIds = new Set(savedEntries.map((entry) => entry.run_id));
+  const outputEntries = await readOutputEntries(savedRunIds);
+  return buildStats([...savedEntries, ...outputEntries], now);
+}
+
+async function readOutputEntries(excludedRunIds = new Set()) {
+  const metadataFiles = [];
+
+  async function collect(dir) {
+    let names;
+    try {
+      names = await readdir(dir, {withFileTypes: true});
+    } catch {
+      return;
+    }
+    for (const dirent of names) {
+      const target = path.join(dir, dirent.name);
+      if (dirent.isDirectory()) {
+        await collect(target);
+      } else if (dirent.isFile() && dirent.name === "metadata.json") {
+        metadataFiles.push(target);
+      }
+    }
+  }
+
+  await collect(OUTPUTS);
+  const entries = [];
+  for (const metadataPath of metadataFiles) {
+    const runId = path.basename(path.dirname(metadataPath));
+    if (!/^\d{8}-\d{6}$/.test(runId) || excludedRunIds.has(runId)) continue;
+    try {
+      const metadata = JSON.parse(await readFile(metadataPath, "utf-8"));
+      const relativeDir = path.relative(path.dirname(OUTPUTS), path.dirname(metadataPath)).replace(/\\/g, "/");
+      entries.push(createEntryFromMetadata(runId, metadata, {
+        status: "generated",
+        path: relativeDir,
+        saved_at: metadata.created_at || null,
+      }));
+    } catch {
+      continue;
+    }
+  }
+  return entries;
 }

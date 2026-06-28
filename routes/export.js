@@ -5,6 +5,7 @@ import {readIndex, writeIndex} from "../lib/filestore.js";
 import {errorStatus, sendError, sendJson} from "../lib/http.js";
 import {APPROVED, SAVED, isValidRunId, pathFromIndexEntry} from "../lib/paths.js";
 import {artifactName} from "../lib/route-utils.js";
+import {TRYOUT_EXPORT_FILENAME, TRYOUT_EXPORT_SCHEMA_VERSION, metadataToTryoutQuestion} from "../lib/tryout-export.js";
 
 async function exportApprovedRuns() {
   const index = await readIndex();
@@ -75,7 +76,64 @@ async function exportApprovedRuns() {
   };
 }
 
+async function exportTryoutQuestions() {
+  const index = await readIndex();
+  const approved = index.filter((item) => item.status === "approved" && isValidRunId(item.run_id));
+  const exportId = new Date().toISOString().replace(/[:.]/g, "-");
+  const createdAt = new Date().toISOString();
+  const targetDir = path.join(APPROVED, exportId);
+  await mkdir(targetDir, {recursive: true});
+
+  const questions = [];
+  const skipped = [];
+  for (const item of approved) {
+    const sourceDir = path.join(SAVED, pathFromIndexEntry(item, "saved"));
+    const destinationDir = path.join(targetDir, item.run_id);
+    try {
+      await access(path.join(sourceDir, "metadata.json"));
+      await cp(sourceDir, destinationDir, {recursive: true, force: true});
+      const metadata = await readJsonValidated(path.join(sourceDir, "metadata.json"), "metadata");
+      questions.push(metadataToTryoutQuestion(item.run_id, metadata, exportId));
+    } catch (error) {
+      skipped.push({
+        run_id: item.run_id,
+        reason: error.message,
+      });
+    }
+  }
+
+  const warningCount = questions.reduce((total, question) => total + question.warnings.length, 0);
+  const payload = {
+    schema_version: TRYOUT_EXPORT_SCHEMA_VERSION,
+    export_id: exportId,
+    created_at: createdAt,
+    source_app: "latsoal-bot",
+    total: questions.length,
+    warning_count: warningCount,
+    skipped,
+    questions,
+  };
+  await writeFile(path.join(targetDir, TRYOUT_EXPORT_FILENAME), JSON.stringify(payload, null, 2), "utf-8");
+
+  return {
+    export_id: exportId,
+    total: questions.length,
+    warning_count: warningCount,
+    file: `/approved/${exportId}/${TRYOUT_EXPORT_FILENAME}`,
+    manifest: payload,
+  };
+}
+
 export async function handle(request, response, route) {
+  if (request.method === "POST" && route === "/api/export/tryout") {
+    try {
+      sendJson(response, await exportTryoutQuestions());
+    } catch (error) {
+      sendError(response, errorStatus(error), error.message);
+    }
+    return true;
+  }
+
   if (request.method !== "POST" || (route !== "/api/export/approved" && route !== "/export")) {
     return false;
   }

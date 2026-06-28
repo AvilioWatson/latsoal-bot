@@ -5,6 +5,8 @@ const dashboardTableBody = document.querySelector("#dashboardTableBody");
 const dashboardSubtestFilter = document.querySelector("#dashboardSubtestFilter");
 const dashboardUploadFilter = document.querySelector("#dashboardUploadFilter");
 const dashboardRefreshButton = document.querySelector("#dashboardRefreshButton");
+const tryoutExportButton = document.querySelector("#tryoutExportButton");
+const tryoutExportResult = document.querySelector("#tryoutExportResult");
 
 const numberFormatter = new Intl.NumberFormat("id-ID");
 let topicsBySubtest = {};
@@ -284,8 +286,39 @@ async function loadDashboard() {
   }
 }
 
+function renderTryoutExportResult(result) {
+  tryoutExportResult.hidden = false;
+  const warningText = result.warning_count === 0
+    ? "Tidak ada warning."
+    : `${formatNumber(result.warning_count)} warning perlu dicek sebelum import ke website tryout.`;
+  tryoutExportResult.innerHTML = `
+    <div>
+      <strong>${formatNumber(result.total)} soal siap diexport</strong>
+      <p>${warningText}</p>
+    </div>
+    <a class="secondary export-link" href="${result.file}" target="_blank" rel="noreferrer">Buka JSON</a>
+  `;
+}
+
+async function exportForTryout() {
+  tryoutExportButton.disabled = true;
+  tryoutExportResult.hidden = false;
+  tryoutExportResult.textContent = "Membuat tryout-export.v1.json...";
+  try {
+    const response = await fetch("/api/export/tryout", {method: "POST"});
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error || "Export tryout gagal.");
+    renderTryoutExportResult(body);
+  } catch (error) {
+    tryoutExportResult.textContent = error.message;
+  } finally {
+    tryoutExportButton.disabled = false;
+  }
+}
+
 dashboardRefreshButton.addEventListener("click", loadDashboard);
 dashboardSubtestFilter.addEventListener("change", renderDashboard);
 dashboardUploadFilter.addEventListener("change", renderDashboard);
+tryoutExportButton.addEventListener("click", exportForTryout);
 
 loadDashboard();

@@ -25,6 +25,14 @@
       "pola_soal": "Diberikan rata-rata sejumlah data dan sebagian nilai diketahui, peserta mencari satu nilai yang belum diketahui.",
       "konsep_kunci": ["mean", "jumlah data", "banyak data"],
       "batasan": ["ubah angka setiap generate", "hasil harus cocok dengan salah satu opsi"]
+    },
+    {
+      "topik": "Geometri",
+      "tipe": "luas bangun datar sederhana",
+      "level": "mudah",
+      "pola_soal": "Diberikan ukuran bangun datar dalam konteks sederhana, peserta menentukan luas atau panjang yang belum diketahui.",
+      "konsep_kunci": ["luas", "keliling", "bangun datar"],
+      "batasan": ["angka realistis", "gunakan satuan konsisten", "opsi pengecoh dari salah memakai rumus"]
     }
   ]
 }

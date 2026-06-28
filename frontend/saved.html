@@ -49,9 +49,17 @@
             <option value="uploaded">Uploaded</option>
             <option value="rejected">Rejected</option>
           </select>
+          <select id="tryoutReadinessFilter">
+            <option value="all">Semua tryout</option>
+            <option value="ready">Siap tryout</option>
+            <option value="warning">Approved perlu cek</option>
+            <option value="review-ready">Review ready</option>
+            <option value="review-pending">Review belum ready</option>
+          </select>
           <button id="refreshSavedButton" class="secondary" type="button">Refresh</button>
           <button id="exportApprovedButton" class="primary" type="button">Export approved</button>
         </div>
+        <div id="tryoutReadinessSummary" class="tryout-readiness-summary" aria-label="Ringkasan kesiapan tryout"></div>
         <nav id="subtestTabs" class="subtest-tabs" aria-label="Filter subtes"></nav>
         <nav id="subtopicTabs" class="subtopic-tabs" aria-label="Filter subtopik" hidden></nav>
 

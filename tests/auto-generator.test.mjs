@@ -65,4 +65,6 @@ test("generator page exposes the auto generator controls and endpoint", async ()
   assert.match(script, /BATCH_STORAGE_KEY/);
   assert.match(script, /localStorage\.setItem/);
   assert.match(script, /restoreBatchState\(\)/);
+  assert.match(script, /function similarityText/);
+  assert.match(script, /Similarity/);
 });

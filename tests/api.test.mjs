@@ -128,8 +128,8 @@ test("bank review API can save, approve, export, and delete in an isolated data 
     response = await fetch(`${baseUrl}/stats`, {headers: {Accept: "application/json"}});
     assert.equal(response.status, 200);
     body = await response.json();
-    assert.equal(body.total, 0);
-    assert.deepEqual(body.by_status, {saved: 0, approved: 0, rejected: 0});
+    assert.equal(body.total, 1);
+    assert.deepEqual(body.by_status, {generated: 1, saved: 0, approved: 0, rejected: 0});
 
     response = await fetch(`${baseUrl}/stats`, {headers: {Accept: "text/html"}});
     assert.equal(response.status, 200);
@@ -185,6 +185,8 @@ test("bank review API can save, approve, export, and delete in an isolated data 
     assert.equal(body.items.length, 1);
     assert.equal(body.items[0].status, "saved");
     assert.equal(body.items[0].uploaded_at, null);
+    assert.equal(body.items[0].tryout_ready, false);
+    assert.ok(Array.isArray(body.items[0].tryout_warnings));
 
     response = await fetch(`${baseUrl}/saved/${RUN_ID}`, {headers: {Accept: "application/json"}});
     assert.equal(response.status, 200);
@@ -309,10 +311,13 @@ test("bank review API can save, approve, export, and delete in an isolated data 
     assert.equal(response.status, 200);
     body = await response.json();
     assert.equal(body.items[0].uploaded_at, null);
+    assert.equal(body.items[0].tryout_ready, true);
+    assert.equal(body.items[0].tryout_warning_count, 0);
 
     response = await fetch(`${baseUrl}/export`, {method: "POST"});
     assert.equal(response.status, 200);
     body = await response.json();
+    const approvedExportId = body.export_id;
     assert.equal(body.total, 1);
 
     const manifest = JSON.parse(await readFile(path.join(dataRoot, body.manifest.replace(/^\//, "")), "utf-8"));
@@ -324,8 +329,28 @@ test("bank review API can save, approve, export, and delete in an isolated data 
     assert.equal(manifest.items[0].caption_file, `${RUN_ID}/caption.txt`);
     assert.equal(manifest.items[0].metadata_file, `${RUN_ID}/metadata.json`);
 
+    response = await fetch(`${baseUrl}/api/export/tryout`, {method: "POST"});
+    assert.equal(response.status, 200);
+    body = await response.json();
+    assert.equal(body.total, 1);
+    assert.equal(body.warning_count, 0);
+    assert.match(body.file, /\/approved\/.+\/tryout-export\.v1\.json$/);
+    assert.equal(body.manifest.schema_version, "tryout-export.v1");
+    assert.equal(body.manifest.source_app, "latsoal-bot");
+    assert.equal(body.manifest.questions[0].external_id, RUN_ID);
+    assert.equal(body.manifest.questions[0].subtest_code, "PU");
+    assert.equal(body.manifest.questions[0].canonical_topic, "Penalaran Induktif");
+    assert.equal(body.manifest.questions[0].difficulty, "easy");
+    assert.equal(body.manifest.questions[0].options.length, 5);
+    assert.equal(body.manifest.questions[0].correct_answer, "B");
+
+    const tryoutExport = JSON.parse(await readFile(path.join(dataRoot, body.file.replace(/^\//, "")), "utf-8"));
+    assert.equal(tryoutExport.schema_version, "tryout-export.v1");
+    assert.equal(tryoutExport.total, 1);
+    assert.equal(tryoutExport.questions[0].external_id, RUN_ID);
+
     const indexAfterExport = JSON.parse(await readFile(path.join(dataRoot, "bank", "index.json"), "utf-8"));
-    assert.equal(indexAfterExport[0].export_batch_id, body.export_id);
+    assert.equal(indexAfterExport[0].export_batch_id, approvedExportId);
     assert.match(indexAfterExport[0].exported_at, /^\d{4}-\d{2}-\d{2}T/);
 
     response = await fetch(`${baseUrl}/stats`, {headers: {Accept: "application/json"}});
@@ -374,6 +399,8 @@ test("import page validates and imports a JSON batch", async () => {
     assert.equal(body.threshold, 0.82);
     assert.ok(Array.isArray(body.template));
     assert.match(body.prompt, /JSON array/);
+    assert.match(body.prompt, /Prompt PK - Pengetahuan Kuantitatif/);
+    assert.match(body.prompt, /Aljabar Dan Fungsi/);
 
     response = await fetch(`${baseUrl}/api/import/validate`, {
       method: "POST",

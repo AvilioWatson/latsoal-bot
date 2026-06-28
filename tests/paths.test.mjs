@@ -69,6 +69,8 @@ test("buildStoragePath groups question artifacts by subtest code and topic", () 
 test("canonicalTopic merges related labels and normalizes canonical casing", () => {
   assert.equal(canonicalTopic("Pengetahuan Kuantitatif", "fungsi komposisi"), "Aljabar Dan Fungsi");
   assert.equal(canonicalTopic("Pengetahuan Kuantitatif", "SPLDV"), "Aljabar Dan Fungsi");
+  assert.equal(canonicalTopic("Pengetahuan Kuantitatif", "Geometri"), "Geometri");
+  assert.equal(canonicalTopic("Pengetahuan Kuantitatif", "Segitiga"), "Geometri");
   assert.equal(canonicalTopic("Pengetahuan Kuantitatif", "peluang"), "Statistika Dan Peluang");
   assert.equal(canonicalTopic("Penalaran Umum", "Penalaran deduktif"), "Penalaran Deduktif");
 });
