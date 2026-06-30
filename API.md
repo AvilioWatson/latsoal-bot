@@ -37,6 +37,59 @@ Response:
 }
 ```
 
+### `POST /api/config/topics`
+
+Alias: `POST /config/topics`
+
+Menambahkan subtopik baru ke subtes yang sudah ada di `config/taxonomy.json`.
+
+Request:
+
+```json
+{
+  "mapel": "Penalaran Umum",
+  "topik": "Analogi Verbal"
+}
+```
+
+Response:
+
+```json
+{
+  "ok": true,
+  "created": true,
+  "mapel": "Penalaran Umum",
+  "topik": "Analogi Verbal",
+  "taxonomy_path": "C:\\Users\\Wildan\\Kuliah\\Project\\latsoal-bot\\config\\taxonomy.json"
+}
+```
+
+### `DELETE /api/config/topics`
+
+Alias: `DELETE /config/topics`
+
+Menghapus subtopik dari subtes di konfigurasi taxonomy. Data soal yang sudah tersimpan tidak dihapus; item yang memakai subtopik tersebut akan ditandai perlu ganti subtopik di Bank Review.
+
+Request:
+
+```json
+{
+  "mapel": "Penalaran Umum",
+  "topik": "Analogi Verbal"
+}
+```
+
+Response:
+
+```json
+{
+  "ok": true,
+  "deleted": true,
+  "mapel": "Penalaran Umum",
+  "topik": "Analogi Verbal"
+}
+```
+
 ## Generate
 
 ### `POST /generate`

@@ -50,6 +50,7 @@ let activePreviewStatus = "";
 let activePreviewSource = "";
 let pendingExplanationReview = null;
 let subtests = [];
+let topicsBySubtest = {};
 const {
   copyCaption: sharedCopyCaption = async (elements, setStatusCallback) => {
     const {captionText, hashtagText, debugPanel, debugSource, debugText} = elements;
@@ -91,6 +92,13 @@ function topicLabel(item) {
 
 function topicKey(value) {
   return String(value || "Tanpa subtopik").trim().toLowerCase();
+}
+
+function taxonomyBadgeText(item) {
+  if (item.taxonomy_state?.ok !== false) return "";
+  if (item.taxonomy_state.code === "missing_subtest") return "Subtes dihapus";
+  if (item.taxonomy_state.code === "missing_topic") return "Subtopik hilang";
+  return "Taxonomy perlu cek";
 }
 
 function subtestFromPath() {
@@ -343,10 +351,82 @@ async function loadConfig() {
   });
   const config = await response.json();
   if (!response.ok) throw new Error(config.error || "Gagal memuat config.");
-  subtests = Object.keys(config.topics || {});
+  topicsBySubtest = config.topics || {};
+  subtests = Object.keys(topicsBySubtest);
   activeSubtest = subtestFromPath();
   renderSubtestTabs();
   renderSubtopicTabs();
+}
+
+function fillSelect(select, options, selectedValue = "") {
+  select.innerHTML = "";
+  for (const value of options) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = value;
+    option.selected = value === selectedValue;
+    select.append(option);
+  }
+}
+
+function renderClassificationControls(item) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "saved-classification-controls";
+  wrapper.addEventListener("click", (event) => event.stopPropagation());
+  wrapper.addEventListener("keydown", (event) => event.stopPropagation());
+
+  const subtestSelect = document.createElement("select");
+  subtestSelect.setAttribute("aria-label", `Ganti subtes ${item.run_id}`);
+  fillSelect(subtestSelect, subtests, subtests.includes(item.mapel) ? item.mapel : subtests[0]);
+
+  const topicSelect = document.createElement("select");
+  topicSelect.setAttribute("aria-label", `Ganti subtopik ${item.run_id}`);
+
+  const syncTopics = () => {
+    const topics = topicsBySubtest[subtestSelect.value] || [];
+    const selectedTopic = subtestSelect.value === item.mapel && topics.includes(item.canonical_topik || item.topik)
+      ? item.canonical_topik || item.topik
+      : topics[0];
+    fillSelect(topicSelect, topics, selectedTopic);
+  };
+  syncTopics();
+
+  const saveButton = document.createElement("button");
+  saveButton.type = "button";
+  saveButton.className = "mini-button";
+  saveButton.textContent = "Ganti";
+  saveButton.disabled = !subtests.length;
+  saveButton.addEventListener("click", async () => {
+    saveButton.disabled = true;
+    saveButton.textContent = "Menyimpan";
+    setStatus("Updating");
+    try {
+      const response = await fetch(`/saved/${item.run_id}/classification`, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({mapel: subtestSelect.value, topik: topicSelect.value}),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Gagal mengganti subtopik.");
+      setStatus("Updated");
+      await loadSavedList();
+      if (activePreviewRunId === item.run_id) {
+        await loadSavedPreview(item.run_id);
+      }
+    } catch (error) {
+      setStatus("Error");
+      debugPanel.hidden = false;
+      debugSource.textContent = "saved/classification";
+      debugText.textContent = error.stack || error.message;
+    } finally {
+      saveButton.disabled = false;
+      saveButton.textContent = "Ganti";
+    }
+  });
+
+  subtestSelect.addEventListener("change", syncTopics);
+  wrapper.append(subtestSelect, topicSelect, saveButton);
+  return wrapper;
 }
 
 function renderSavedList(items = filteredSavedItems()) {
@@ -371,6 +451,7 @@ function renderSavedList(items = filteredSavedItems()) {
         <span data-status-pill></span>
       </div>
       <h3 data-topic></h3>
+      <p class="taxonomy-warning" data-taxonomy-warning hidden></p>
       <p class="saved-question-excerpt"></p>
       <div class="saved-card-meta">
         <span data-level></span>
@@ -385,6 +466,12 @@ function renderSavedList(items = filteredSavedItems()) {
     row.querySelector("[data-subtest]").textContent = item.mapel || "Tanpa subtes";
     row.querySelector("[data-status-pill]").textContent = statusLabel(item.status);
     row.querySelector("[data-topic]").textContent = item.topik || item.run_id;
+    const taxonomyWarning = row.querySelector("[data-taxonomy-warning]");
+    const badge = taxonomyBadgeText(item);
+    if (badge) {
+      taxonomyWarning.hidden = false;
+      taxonomyWarning.textContent = `${badge}: pilih subtes dan subtopik baru.`;
+    }
     row.querySelector(".saved-question-excerpt").textContent = item.soal_excerpt || "Soal belum memiliki ringkasan.";
     row.querySelector("[data-level]").textContent = item.level || "-";
     row.querySelector("[data-upload-state]").textContent = item.uploaded_at ? "Uploaded" : "Belum upload";
@@ -393,6 +480,7 @@ function renderSavedList(items = filteredSavedItems()) {
       ? "ready"
       : (item.status || "saved") === "approved" && Number(item.tryout_warning_count || 0) > 0 ? "warning" : "pending";
     row.querySelector("[data-run-id]").textContent = item.run_id;
+    row.append(renderClassificationControls(item));
     row.addEventListener("click", () => loadSavedPreview(item.run_id));
     row.addEventListener("keydown", (event) => {
       if (event.key !== "Enter" && event.key !== " ") return;

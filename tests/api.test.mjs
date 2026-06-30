@@ -55,6 +55,13 @@ async function writeOutput(dataRoot) {
   await writeFile(path.join(runDir, "caption.txt"), "Latihan penalaran deduktif\n\n#UTBK #UTBK2027 #LatsoalUTBK\n", "utf-8");
 }
 
+async function writeTaxonomyCopy(dataRoot) {
+  const taxonomyPath = path.join(dataRoot, "taxonomy.json");
+  const taxonomy = await readFile(path.join(ROOT, "config", "taxonomy.json"), "utf-8");
+  await writeFile(taxonomyPath, taxonomy, "utf-8");
+  return taxonomyPath;
+}
+
 async function waitForHealth(baseUrl) {
   const deadline = Date.now() + 8000;
   let lastError;
@@ -72,13 +79,14 @@ async function waitForHealth(baseUrl) {
 
 test("bank review API can save, approve, export, and delete in an isolated data root", async () => {
   const dataRoot = await mkdtemp(path.join(os.tmpdir(), "latsoal-api-"));
+  const taxonomyPath = await writeTaxonomyCopy(dataRoot);
   const port = 18765 + Math.floor(Math.random() * 1000);
   const baseUrl = `http://127.0.0.1:${port}`;
   await writeOutput(dataRoot);
 
   const server = spawn("node", ["server.js"], {
     cwd: ROOT,
-    env: {...process.env, PORT: String(port), LATSOAL_DATA_ROOT: dataRoot},
+    env: {...process.env, PORT: String(port), LATSOAL_DATA_ROOT: dataRoot, LATSOAL_TAXONOMY_PATH: taxonomyPath},
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -108,6 +116,40 @@ test("bank review API can save, approve, export, and delete in an isolated data 
     assert.ok(body.topics["Penalaran Umum"]);
     assert.equal(body.subtest_codes["Penalaran Umum"], "PU");
     assert.equal(body.topic_aliases["Pengetahuan Kuantitatif"]["Persamaan Linear"], "Aljabar Dan Fungsi");
+
+    response = await fetch(`${baseUrl}/api/config/topics`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({mapel: "Penalaran Umum", topik: "Analogi Verbal"}),
+    });
+    assert.equal(response.status, 200);
+    body = await response.json();
+    assert.equal(body.created, true);
+    assert.ok(body.config.topics["Penalaran Umum"].includes("Analogi Verbal"));
+    assert.match(await readFile(taxonomyPath, "utf-8"), /Analogi Verbal/);
+
+    response = await fetch(`${baseUrl}/api/config/topics`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({mapel: "Penalaran Umum", topik: "Analogi Verbal"}),
+    });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).created, false);
+
+    response = await fetch(`${baseUrl}/api/config/topics`, {
+      method: "DELETE",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({mapel: "Penalaran Umum", topik: "Analogi Verbal"}),
+    });
+    assert.equal(response.status, 200);
+    body = await response.json();
+    assert.equal(body.deleted, true);
+    assert.equal(body.mapel, "Penalaran Umum");
+    assert.equal(body.topik, "Analogi Verbal");
+    assert.equal(body.config.topics["Penalaran Umum"].includes("Analogi Verbal"), false);
+    assert.equal(Object.hasOwn(body.config.subtest_codes, "Penalaran Umum"), true);
+    const taxonomyAfterDelete = JSON.parse(await readFile(taxonomyPath, "utf-8"));
+    assert.equal(taxonomyAfterDelete.topics["Penalaran Umum"].includes("Analogi Verbal"), false);
 
     response = await fetch(`${baseUrl}/saved/penalaran-umum`);
     assert.equal(response.status, 200);
@@ -171,6 +213,17 @@ test("bank review API can save, approve, export, and delete in an isolated data 
     assert.equal(response.status, 200);
     assert.equal((await response.json()).run_id, RUN_ID);
 
+    response = await fetch(`${baseUrl}/saved/${RUN_ID}/classification`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({mapel: "Penalaran Umum", topik: "Penalaran Induktif"}),
+    });
+    assert.equal(response.status, 200);
+    body = await response.json();
+    assert.equal(body.question.mapel, "Penalaran Umum");
+    assert.equal(body.question.topik, "Penalaran Induktif");
+    assert.equal(body.taxonomy_state.ok, true);
+
     response = await fetch(`${baseUrl}/saved`, {
       method: "POST",
       headers: {"Content-Type": "application/json"},
@@ -187,6 +240,7 @@ test("bank review API can save, approve, export, and delete in an isolated data 
     assert.equal(body.items[0].uploaded_at, null);
     assert.equal(body.items[0].tryout_ready, false);
     assert.ok(Array.isArray(body.items[0].tryout_warnings));
+    assert.equal(body.items[0].taxonomy_state.ok, true);
 
     response = await fetch(`${baseUrl}/saved/${RUN_ID}`, {headers: {Accept: "application/json"}});
     assert.equal(response.status, 200);

@@ -14,6 +14,7 @@ import {
 import {errorStatus, readJsonBody, sendError, sendJson} from "../lib/http.js";
 import {OUTPUTS, ROOT, SAVED, buildStoragePath, buildWebFiles, canonicalTopic, isValidRunId, pathFromIndexEntry, safeJoin} from "../lib/paths.js";
 import {requestError, wantsJson} from "../lib/route-utils.js";
+import {TOPICS} from "../lib/taxonomy.js";
 import {tryoutQuestionWarnings} from "../lib/tryout-export.js";
 
 const DEFAULT_PYTHON = process.env.PYTHON || "python";
@@ -32,6 +33,27 @@ function retargetMetadataFiles(metadata, targetDir) {
     }
   }
   return metadata;
+}
+
+function taxonomyState(question = {}) {
+  const mapel = question?.mapel || "";
+  const topik = question?.topik || "";
+  if (!mapel || !Object.hasOwn(TOPICS, mapel)) {
+    return {
+      ok: false,
+      code: "missing_subtest",
+      message: "Subtes tidak ada di taxonomy.",
+    };
+  }
+  const canonical = canonicalTopic(mapel, topik);
+  if (!topik || !TOPICS[mapel].includes(canonical)) {
+    return {
+      ok: false,
+      code: "missing_topic",
+      message: "Subtopik tidak ada di taxonomy subtes ini.",
+    };
+  }
+  return {ok: true, code: null, message: ""};
 }
 
 async function resolveSavedRun(runId) {
@@ -169,6 +191,7 @@ async function listSavedRuns() {
       mapel: metadata?.question?.mapel || null,
       topik: metadata?.question?.topik || null,
       canonical_topik: canonicalTopic(metadata?.question?.mapel, metadata?.question?.topik) || null,
+      taxonomy_state: taxonomyState(metadata?.question || {}),
       explanation_review: metadata?.explanation_review || null,
       tryout_ready: status === "approved" && tryoutWarnings.length === 0,
       tryout_warning_count: tryoutWarnings.length,
@@ -582,6 +605,62 @@ async function updateSavedMetadataJson(runId, metadata) {
   };
 }
 
+async function updateSavedClassification(runId, payload = {}) {
+  if (!isValidRunId(runId)) {
+    throw requestError(400, "Run ID tidak valid.");
+  }
+  const mapel = String(payload.mapel || "").trim();
+  const topik = String(payload.topik || "").trim();
+  if (!mapel || !Object.hasOwn(TOPICS, mapel)) {
+    throw requestError(400, "Subtes tidak valid.");
+  }
+  const canonical = canonicalTopic(mapel, topik);
+  if (!topik || !TOPICS[mapel].includes(canonical)) {
+    throw requestError(400, "Subtopik tidak tersedia untuk subtes terpilih.");
+  }
+
+  const resolved = await resolveSavedRun(runId);
+  const runDir = resolved?.dir;
+  const artifactPath = resolved?.artifactPath || runId;
+  if (!runDir) {
+    throw requestError(404, "Saved run tidak ditemukan.");
+  }
+
+  const metadataPath = path.join(runDir, "metadata.json");
+  const metadata = await readJsonValidated(metadataPath, "metadata");
+  metadata.question = normalizeQuestionForStorage({
+    ...(metadata.question || {}),
+    mapel,
+    topik: canonical,
+  });
+  if (metadata.caption) {
+    metadata.caption = normalizeCaptionForStorage(metadata.question, metadata.caption);
+  }
+  metadata.edited_at = new Date().toISOString();
+  await writeJsonValidated(metadataPath, metadata, "metadata");
+  await writeJsonValidated(path.join(runDir, "soal.json"), metadata.question, "question");
+  if (metadata.caption) {
+    const captionText = metadata.caption.caption || "";
+    const hashtags = Array.isArray(metadata.caption.hashtag) ? metadata.caption.hashtag.join(" ") : "";
+    await writeFile(path.join(runDir, "caption.txt"), `${captionText}\n\n${hashtags}\n`, "utf-8");
+  }
+
+  const patchedEntry = createEntryFromMetadata(runId, metadata, {
+    ...(resolved.entry || {}),
+    path: `saved/${artifactPath}`,
+  });
+  await updateEntry(runId, patchedEntry);
+  return {
+    ok: true,
+    run_id: runId,
+    question: metadata.question,
+    caption: metadata.caption,
+    canonical_topik: canonicalTopic(metadata.question.mapel, metadata.question.topik),
+    taxonomy_state: taxonomyState(metadata.question),
+    web_files: buildWebFiles("/saved", artifactPath, metadata.files),
+  };
+}
+
 function savedRunRoute(route) {
   const parts = route.split("/").filter(Boolean);
   if (parts[0] !== "saved" || parts.length < 2) return null;
@@ -634,6 +713,16 @@ export async function handle(request, response, route) {
     try {
       const payload = await readJsonBody(request);
       sendJson(response, await updateSavedMetadataJson(savedRoute[1], payload));
+    } catch (error) {
+      sendError(response, errorStatus(error), error.message);
+    }
+    return true;
+  }
+
+  if (request.method === "POST" && savedRoute?.length === 3 && savedRoute[2] === "classification") {
+    try {
+      const payload = await readJsonBody(request);
+      sendJson(response, await updateSavedClassification(savedRoute[1], payload));
     } catch (error) {
       sendError(response, errorStatus(error), error.message);
     }

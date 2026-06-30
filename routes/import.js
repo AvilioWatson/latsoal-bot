@@ -38,9 +38,9 @@ Klasifikasikan setiap soal ke salah satu topik resmi berikut:
 ${topicListForPrompt(mapel)}`;
 }
 
-const SUBTEST_PROMPTS = Object.keys(TAXONOMY.topics || {}).map(subtestPrompt).join("\n\n");
-
-const EXTRACTION_PROMPT = `Anda adalah editor dan validator soal UTBK/SNBT. Ekstrak seluruh soal pilihan ganda dari PDF yang saya lampirkan dan keluarkan hasilnya sebagai satu JSON array valid.
+function extractionPrompt() {
+  const subtestPrompts = Object.keys(TAXONOMY.topics || {}).map(subtestPrompt).join("\n\n");
+  return `Anda adalah editor dan validator soal UTBK/SNBT. Ekstrak seluruh soal pilihan ganda dari PDF yang saya lampirkan dan keluarkan hasilnya sebagai satu JSON array valid.
 
 Aturan kerja:
 1. Ambil setiap stem, pilihan jawaban, tabel, dan informasi penting dari PDF secara akurat.
@@ -55,7 +55,7 @@ Aturan kerja:
 10. Jangan menggabungkan dua soal, jangan menghilangkan konteks, dan jangan menambah fakta yang tidak tersedia.
 
 Daftar 7 prompt subtes dan subtopik resmi website:
-${SUBTEST_PROMPTS}
+${subtestPrompts}
 
 Jika PDF hanya berisi satu subtes, pakai prompt subtes yang sesuai. Jika PDF campuran, klasifikasikan setiap soal per object berdasarkan mapel dan topik resmi terdekat. Jangan membuat judul topik baru di luar daftar.
 
@@ -66,6 +66,7 @@ Aturan keluaran:
 
 Template JSON:
 ${JSON.stringify(TEMPLATE, null, 2)}`;
+}
 
 let importQueue = Promise.resolve();
 
@@ -114,7 +115,7 @@ async function parseImportBody(request) {
 export async function handle(request, response, route) {
   if (request.method === "GET" && route === "/api/import/config") {
     sendJson(response, {
-      prompt: EXTRACTION_PROMPT,
+      prompt: extractionPrompt(),
       template: TEMPLATE,
       max_batch: MAX_BATCH,
       max_body_bytes: MAX_BODY_BYTES,

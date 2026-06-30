@@ -54,6 +54,28 @@
             <select name="topik" id="topik"></select>
           </label>
 
+          <section class="topic-add-panel" aria-labelledby="topicAddTitle">
+            <div>
+              <p class="auto-generator-kicker">Subtopik</p>
+              <h2 id="topicAddTitle">Tambah Subtopik</h2>
+            </div>
+            <label>
+              Nama subtopik
+              <input id="newTopicInput" type="text" maxlength="80" autocomplete="off" placeholder="Contoh: Vektor">
+            </label>
+            <button class="secondary" type="button" id="addTopicButton">Tambah ke subtes</button>
+            <p id="addTopicNote" class="topic-add-note" role="status"></p>
+          </section>
+
+          <section class="topic-add-panel danger-panel" aria-labelledby="topicDeleteTitle">
+            <div>
+              <p class="auto-generator-kicker">Subtopik</p>
+              <h2 id="topicDeleteTitle">Hapus Subtopik</h2>
+            </div>
+            <button class="secondary danger-button" type="button" id="deleteTopicButton">Hapus subtopik terpilih</button>
+            <p id="deleteTopicNote" class="topic-add-note" role="status"></p>
+          </section>
+
           <label>
             Level
             <select name="level">

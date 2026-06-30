@@ -575,6 +575,19 @@ File ini menyimpan `subtest_codes`, `topic_aliases`, `topics`, dan `pattern_file
 
 Frontend mengambil daftar topik dan alias lewat route `/config`, backend Node membaca config yang sama untuk validasi dan storage path, dan generator Python membaca file config yang sama untuk pilihan `--mapel` dan pattern referensi.
 
+Subtopik baru bisa ditambahkan dari halaman Generator lewat panel `Tambah Subtopik`. Pilih subtes, isi nama subtopik, lalu klik `Tambah ke subtes`; aplikasi akan menyimpan perubahan ke `config/taxonomy.json` dan memperbarui dropdown topik.
+
+Jika aplikasi berjalan lewat Docker, taxonomy disimpan di volume data pada `LATSOAL_DATA_ROOT/config/taxonomy.json` agar perubahan tetap ada setelah container dibuat ulang. Response API `/api/config/topics` menyertakan `taxonomy_path` untuk melihat file yang sedang dipakai.
+
+Subtopik bisa dihapus dari halaman Generator lewat panel `Hapus Subtopik`. Penghapusan ini hanya mengubah taxonomy; data soal yang sudah tersimpan tetap ada dan akan ditandai di Bank Review jika masih memakai subtopik yang sudah dihapus.
+
+Alternatif API:
+
+```powershell
+curl -X POST http://127.0.0.1:8765/api/config/topics -H "Content-Type: application/json" -d "{\"mapel\":\"Penalaran Umum\",\"topik\":\"Analogi Verbal\"}"
+curl -X DELETE http://127.0.0.1:8765/api/config/topics -H "Content-Type: application/json" -d "{\"mapel\":\"Penalaran Umum\",\"topik\":\"Analogi Verbal\"}"
+```
+
 ## Generate Manual Tanpa Web
 
 Generator bisa dijalankan langsung dari terminal:

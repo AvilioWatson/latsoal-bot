@@ -715,6 +715,47 @@ select option {
   background: var(--surface);
 }
 
+.topic-add-panel {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-md);
+  padding: 14px;
+  background: color-mix(in srgb, var(--surface) 82%, var(--surface2));
+}
+
+.topic-add-panel h2,
+.topic-add-panel p {
+  margin: 0;
+}
+
+.topic-add-panel h2 {
+  color: var(--text);
+  font-family: var(--font-head);
+  font-size: 15px;
+  line-height: 1.2;
+}
+
+.topic-add-note {
+  min-height: 17px;
+  color: var(--faint);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.danger-panel {
+  background: rgba(157, 100, 90, .055);
+}
+
+.danger-button {
+  color: var(--red);
+}
+
+.danger-button:hover:not(:disabled) {
+  border-color: rgba(157, 100, 90, .45);
+  background: rgba(157, 100, 90, .08);
+}
+
 .auto-generator-panel h2,
 .auto-generator-panel p {
   margin: 0;
@@ -1898,6 +1939,36 @@ select option {
   overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 4;
+}
+
+.taxonomy-warning {
+  margin: -3px 0 0;
+  border: 1px solid rgba(157, 100, 90, .22);
+  border-radius: 4px;
+  padding: 6px 8px;
+  color: var(--red);
+  background: rgba(157, 100, 90, .08);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.saved-classification-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+  cursor: default;
+}
+
+.saved-classification-controls select {
+  min-height: 32px;
+  padding-left: 8px;
+  font-size: 12px;
+}
+
+.saved-classification-controls .mini-button {
+  min-height: 32px;
+  white-space: nowrap;
 }
 
 .saved-card-meta span {

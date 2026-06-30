@@ -1,6 +1,11 @@
 const form = document.querySelector("#generateForm");
 const mapelSelect = document.querySelector("#mapel");
 const topicSelect = document.querySelector("#topik");
+const newTopicInput = document.querySelector("#newTopicInput");
+const addTopicButton = document.querySelector("#addTopicButton");
+const addTopicNote = document.querySelector("#addTopicNote");
+const deleteTopicButton = document.querySelector("#deleteTopicButton");
+const deleteTopicNote = document.querySelector("#deleteTopicNote");
 const button = document.querySelector("#generateButton");
 const autoGenerateButton = document.querySelector("#autoGenerateButton");
 const sourceStatus = document.querySelector("#sourceStatus");
@@ -146,7 +151,25 @@ function hideBatchResults({clearStored = true} = {}) {
   }
 }
 
-function fillTopics() {
+function fillSubtests(selectedMapel = "") {
+  const subtests = Object.keys(topicsByMapel);
+  mapelSelect.innerHTML = "";
+  for (const mapel of subtests) {
+    const option = document.createElement("option");
+    option.value = mapel;
+    option.textContent = mapel;
+    mapelSelect.append(option);
+  }
+  if (selectedMapel && subtests.includes(selectedMapel)) {
+    mapelSelect.value = selectedMapel;
+  }
+  mapelSelect.disabled = subtests.length === 0;
+  button.disabled = subtests.length === 0;
+  if (autoGenerateButton) autoGenerateButton.disabled = subtests.length === 0;
+  if (deleteTopicButton) deleteTopicButton.disabled = (topicsByMapel[mapelSelect.value] || []).length <= 1;
+}
+
+function fillTopics(selectedTopic = "") {
   const topics = topicsByMapel[mapelSelect.value] || [];
   topicSelect.innerHTML = "";
   for (const topic of topics) {
@@ -155,6 +178,10 @@ function fillTopics() {
     option.textContent = topic;
     topicSelect.append(option);
   }
+  if (selectedTopic && topics.includes(selectedTopic)) {
+    topicSelect.value = selectedTopic;
+  }
+  if (deleteTopicButton) deleteTopicButton.disabled = topics.length <= 1;
 }
 
 async function loadConfig() {
@@ -163,14 +190,74 @@ async function loadConfig() {
   });
   const config = await response.json();
   topicsByMapel = config.topics;
-  mapelSelect.innerHTML = "";
-  for (const mapel of Object.keys(topicsByMapel)) {
-    const option = document.createElement("option");
-    option.value = mapel;
-    option.textContent = mapel;
-    mapelSelect.append(option);
-  }
+  fillSubtests();
   fillTopics();
+}
+
+async function addSelectedSubtopic() {
+  const mapel = mapelSelect.value;
+  const topik = (newTopicInput?.value || "").trim().replace(/\s+/g, " ");
+  if (!topik) {
+    addTopicNote.textContent = "Isi nama subtopik dulu.";
+    return;
+  }
+
+  addTopicButton.disabled = true;
+  addTopicNote.textContent = "Menyimpan subtopik...";
+  try {
+    const response = await fetch("/api/config/topics", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({mapel, topik}),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || "Gagal menambah subtopik.");
+    }
+    topicsByMapel = data.config?.topics || topicsByMapel;
+    fillTopics(data.topik);
+    newTopicInput.value = "";
+    addTopicNote.textContent = data.created ? "Subtopik ditambahkan." : "Subtopik sudah ada.";
+  } catch (error) {
+    addTopicNote.textContent = error.message;
+    debugPanel.hidden = false;
+    debugSource.textContent = "config-topics";
+    debugText.textContent = error.stack || error.message;
+  } finally {
+    addTopicButton.disabled = false;
+  }
+}
+
+async function deleteSelectedTopic() {
+  const mapel = mapelSelect.value;
+  const topik = topicSelect.value;
+  if (!mapel || !topik) return;
+  const confirmed = window.confirm(`Hapus subtopik "${topik}" dari subtes "${mapel}"? Soal yang sudah tersimpan tidak dihapus, tetapi akan ditandai perlu ganti subtopik.`);
+  if (!confirmed) return;
+
+  deleteTopicButton.disabled = true;
+  deleteTopicNote.textContent = "Menghapus subtopik...";
+  try {
+    const response = await fetch("/api/config/topics", {
+      method: "DELETE",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({mapel, topik}),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || "Gagal menghapus subtopik.");
+    }
+    topicsByMapel = data.config?.topics || topicsByMapel;
+    fillTopics();
+    deleteTopicNote.textContent = `Subtopik "${data.topik}" dihapus.`;
+  } catch (error) {
+    deleteTopicNote.textContent = error.message;
+    debugPanel.hidden = false;
+    debugSource.textContent = "config-topics";
+    debugText.textContent = error.stack || error.message;
+  } finally {
+    if (deleteTopicButton) deleteTopicButton.disabled = (topicsByMapel[mapelSelect.value] || []).length <= 1;
+  }
 }
 
 function renderResult(data) {
@@ -432,7 +519,15 @@ function restoreBatchState() {
   syncSaveAllBatchButton();
 }
 
-mapelSelect.addEventListener("change", fillTopics);
+mapelSelect.addEventListener("change", () => fillTopics());
+addTopicButton?.addEventListener("click", addSelectedSubtopic);
+deleteTopicButton?.addEventListener("click", deleteSelectedTopic);
+newTopicInput?.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    addSelectedSubtopic();
+  }
+});
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();

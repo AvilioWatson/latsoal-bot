@@ -18,7 +18,9 @@ function slugifySubtest(name) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
-const SAVED_PAGE_ROUTES = new Set(Object.keys(TOPICS).map((name) => `/saved/${slugifySubtest(name)}`));
+function isSavedPageRoute(route) {
+  return Object.keys(TOPICS).some((name) => route === `/saved/${slugifySubtest(name)}`);
+}
 
 async function handleStaticPage(request, response, route) {
   if (request.method === "GET" && route === "/") {
@@ -33,7 +35,7 @@ async function handleStaticPage(request, response, route) {
 
   if (
     request.method === "GET"
-    && (route === "/saved.html" || route === "/saved" || SAVED_PAGE_ROUTES.has(route))
+    && (route === "/saved.html" || route === "/saved" || isSavedPageRoute(route))
   ) {
     await sendFile(response, path.join(FRONTEND, "saved.html"));
     return true;
