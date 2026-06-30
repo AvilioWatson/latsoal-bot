@@ -103,6 +103,29 @@ async function exportTryoutQuestions() {
   }
 
   const warningCount = questions.reduce((total, question) => total + question.warnings.length, 0);
+  const passageGroups = Object.values(questions.reduce((groups, question) => {
+    if (!question.passage_id || !question.passage) return groups;
+    const key = `${question.subtest_code || question.subtest_name || "SUB"}:${question.passage_id}`;
+    groups[key] = groups[key] || {
+      passage_id: question.passage_id,
+      subtest_name: question.subtest_name,
+      subtest_code: question.subtest_code,
+      title: question.passage.judul || "",
+      text: question.passage.teks || "",
+      language: question.passage.bahasa || null,
+      total_questions: question.passage.total_soal || null,
+      question_ids: [],
+    };
+    groups[key].question_ids.push(question.external_id);
+    return groups;
+  }, {})).map((group) => ({
+    ...group,
+    question_ids: group.question_ids.sort((left, right) => {
+      const leftQuestion = questions.find((question) => question.external_id === left);
+      const rightQuestion = questions.find((question) => question.external_id === right);
+      return Number(leftQuestion?.passage_order || 0) - Number(rightQuestion?.passage_order || 0);
+    }),
+  }));
   const payload = {
     schema_version: TRYOUT_EXPORT_SCHEMA_VERSION,
     export_id: exportId,
@@ -111,6 +134,7 @@ async function exportTryoutQuestions() {
     total: questions.length,
     warning_count: warningCount,
     skipped,
+    passage_groups: passageGroups,
     questions,
   };
   await writeFile(path.join(targetDir, TRYOUT_EXPORT_FILENAME), JSON.stringify(payload, null, 2), "utf-8");

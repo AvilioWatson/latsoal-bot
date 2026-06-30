@@ -30,6 +30,7 @@ const batchResults = document.querySelector("#batchResults");
 const batchResultCount = document.querySelector("#batchResultCount");
 const batchResultList = document.querySelector("#batchResultList");
 const saveAllBatchButton = document.querySelector("#saveAllBatchButton");
+const resetCacheButton = document.querySelector("#resetCacheButton");
 const BATCH_STORAGE_KEY = "latsoal:auto-generator:latest";
 
 let topicsByMapel = {};
@@ -149,6 +150,30 @@ function hideBatchResults({clearStored = true} = {}) {
     saveAllBatchButton.disabled = true;
     saveAllBatchButton.textContent = "Simpan semua soal";
   }
+}
+
+function clearPreviewDraft() {
+  currentRunId = "";
+  previewTitle.textContent = "Belum ada output";
+  runNote.textContent = "Generate konten untuk mulai review.";
+  sourceLabel.textContent = "Manual";
+  validationScore.textContent = "Skor belum tersedia";
+  questionText.textContent = "Generate konten untuk melihat soal.";
+  choicesList.innerHTML = "";
+  captionText.textContent = "Caption akan muncul di sini.";
+  hashtagText.textContent = "";
+  imageCount.textContent = "0 page";
+  imagePreviewList.innerHTML = '<p class="body-copy">Gambar 1000x1000 akan muncul di sini.</p>';
+  metadataLink.hidden = true;
+  metadataLink.href = "#";
+  downloadAllLink.hidden = true;
+  downloadAllLink.href = "#";
+  saveButton.disabled = true;
+  saveButton.textContent = "Simpan";
+  copyCaptionButton.disabled = true;
+  debugPanel.hidden = true;
+  debugSource.textContent = "Tidak ada";
+  debugText.textContent = "";
 }
 
 function fillSubtests(selectedMapel = "") {
@@ -503,6 +528,35 @@ async function saveAllBatchResults() {
   persistBatchState();
 }
 
+async function resetGeneratorCache() {
+  const confirmed = window.confirm("Reset cache generator? Soal di Bank Review tidak dihapus. Output yang belum tersimpan akan dibersihkan.");
+  if (!confirmed) return;
+  resetCacheButton.disabled = true;
+  resetCacheButton.textContent = "Resetting";
+  setStatus("Reset cache");
+  try {
+    const response = await fetch("/api/generator/cache", {method: "DELETE"});
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || "Reset cache gagal.");
+    }
+    clearBatchState();
+    hideBatchResults({clearStored: false});
+    clearPreviewDraft();
+    setStatus("Cache reset");
+    runNote.textContent = `Cache dibersihkan: ${data.deleted_count || 0} output belum tersimpan dihapus. Draft ${data.unsaved_draft || 0}, fallback ${data.unsaved_fallback || 0}.`;
+    renderDebug(data);
+  } catch (error) {
+    setStatus("Error");
+    debugPanel.hidden = false;
+    debugSource.textContent = "reset-cache";
+    debugText.textContent = error.stack || error.message;
+  } finally {
+    resetCacheButton.disabled = false;
+    resetCacheButton.textContent = "Reset cache";
+  }
+}
+
 function restoreBatchState() {
   const stored = readStoredBatchState();
   if (!stored?.results?.length) return;
@@ -598,6 +652,7 @@ autoGenerateButton?.addEventListener("click", async () => {
 });
 
 saveAllBatchButton?.addEventListener("click", saveAllBatchResults);
+resetCacheButton?.addEventListener("click", resetGeneratorCache);
 
 saveButton.addEventListener("click", async () => {
   if (!currentRunId) return;

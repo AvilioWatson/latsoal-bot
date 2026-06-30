@@ -690,10 +690,29 @@ def _chunks(items, size):
     return [items[index:index + size] for index in range(0, len(items), size)]
 
 
+def _display_question_text(question):
+    text = str(question.get("soal", "") or "")
+    passage = question.get("bacaan")
+    if not isinstance(passage, dict) or not str(passage.get("teks", "")).strip():
+        return text
+    title = str(passage.get("judul", "") or "").strip()
+    passage_text = str(passage.get("teks", "") or "").strip()
+    number = passage.get("nomor_soal")
+    total = passage.get("total_soal")
+    label = "Bacaan"
+    if title:
+        label = f"{label}: {title}"
+    question_label = "Soal"
+    if number and total:
+        question_label = f"Soal {number}/{total}"
+    return f"{label}\n{passage_text}\n\n{question_label}\n{text}"
+
+
 def _paginate_quiz(draw, question, fonts):
-    q_paragraphs = _wrap_question_paragraphs(draw, question.get("soal", ""), fonts["question"], 790)
+    display_text = _display_question_text(question)
+    q_paragraphs = _wrap_question_paragraphs(draw, display_text, fonts["question"], 790)
     q_lines = _flatten_paragraphs(q_paragraphs)
-    formula_parts = _question_formula_parts(question.get("soal", ""))
+    formula_parts = _question_formula_parts(display_text)
     choices = question.get("pilihan", {})
     choice_page_limit = 460 if len(q_lines) <= 8 else 742
     choice_pages = []
@@ -901,7 +920,7 @@ def render_quiz_images(question, run_dir, page_offset=0, total_pages=None):
     pages = _paginate_quiz(probe_draw, question, fonts)
     display_total = total_pages or len(pages)
     logo = _load_quiz_logo()
-    formula_parts = _question_formula_parts(question.get("soal", ""))
+    formula_parts = _question_formula_parts(_display_question_text(question))
     output_paths = []
 
     for page_index, page in enumerate(pages, start=1):
@@ -2208,9 +2227,10 @@ def attach_cartesian_latex_visual(question):
 
 
 def _latex_quiz_sources(question):
-    question_text = _compact_math_for_line_wrap(_format_question_text(question.get("soal", "")))
+    display_text = _display_question_text(question)
+    question_text = _compact_math_for_line_wrap(_format_question_text(display_text))
     q_lines = _wrap_plain_lines(question_text, 76)
-    formula_parts = _question_formula_parts(question.get("soal", ""))
+    formula_parts = _question_formula_parts(display_text)
     choices = question.get("pilihan") or {}
     choice_lines = {
         key: _wrap_plain_lines(choices.get(key, ""), 52, 3)

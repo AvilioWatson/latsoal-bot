@@ -53,6 +53,7 @@ test("generator page exposes the auto generator controls and endpoint", async ()
   assert.match(html, /id="batchResults"/);
   assert.match(html, /id="batchResultList"/);
   assert.match(html, /id="saveAllBatchButton"/);
+  assert.match(html, /id="resetCacheButton"/);
   assert.match(html, /name="auto_count" value="5"/);
   assert.match(html, /name="auto_count" value="10"/);
   assert.match(html, /name="auto_count" value="15"/);
@@ -62,6 +63,9 @@ test("generator page exposes the auto generator controls and endpoint", async ()
   assert.match(script, /data\.results \|\| \[\]/);
   assert.match(script, /function saveAllBatchResults/);
   assert.match(script, /saveAllBatchButton\?\.addEventListener\("click", saveAllBatchResults\)/);
+  assert.match(script, /function resetGeneratorCache/);
+  assert.match(script, /resetCacheButton\?\.addEventListener\("click", resetGeneratorCache\)/);
+  assert.match(script, /\/api\/generator\/cache/);
   assert.match(script, /BATCH_STORAGE_KEY/);
   assert.match(script, /localStorage\.setItem/);
   assert.match(script, /restoreBatchState\(\)/);

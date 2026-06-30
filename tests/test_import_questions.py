@@ -34,6 +34,30 @@ def question(stem="Jika semua peserta belajar, simpulan yang benar adalah?"):
     }
 
 
+def passage_question(number, total=5, passage_id="PM-001"):
+    item = question(f"Berdasarkan bacaan, pernyataan nomor {number} yang paling tepat adalah?")
+    item["mapel"] = "Penalaran Matematika"
+    item["kelompok_tes"] = "Tes Literasi"
+    item["topik"] = "Aljabar Dan Fungsi"
+    item["pilihan"] = {
+        "A": f"Pernyataan benar {number}.",
+        "B": f"Pernyataan keliru {number}.",
+        "C": f"Pernyataan tidak relevan {number}.",
+        "D": f"Pernyataan terlalu luas {number}.",
+        "E": f"Pernyataan bertentangan {number}.",
+    }
+    item["bacaan"] = {
+        "id": passage_id,
+        "judul": "Model Pertumbuhan",
+        "teks": "Sebuah UMKM mencatat pertumbuhan produksi secara linear selama lima bulan dan membandingkannya dengan biaya tetap.",
+        "bahasa": "id",
+        "nomor_soal": number,
+        "total_soal": total,
+        "sumber_pdf": {"nama_file": "", "halaman": ""},
+    }
+    return item
+
+
 def run_importer(data_root, payload, *args):
     environment = {
         **os.environ,
@@ -108,6 +132,24 @@ class ImportQuestionsTest(unittest.TestCase):
             self.assertEqual(payload["items"][0]["status"], "valid")
             self.assertEqual(payload["items"][0]["question"]["topik"], "Penalaran Induktif")
             self.assertTrue(payload["items"][0]["warnings"])
+
+    def test_passage_subtest_requires_exactly_five_questions_per_passage(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            items = [passage_question(index) for index in range(1, 5)]
+            result, payload = run_importer(Path(tmp), {"questions": items}, "--validate-only", "--skip-render")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(payload["summary"]["invalid"], 4)
+            self.assertIn("harus dipakai tepat 5 soal", payload["items"][0]["errors"][0])
+
+    def test_passage_subtest_accepts_five_question_group(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            items = [passage_question(index) for index in range(1, 6)]
+            result, payload = run_importer(Path(tmp), {"questions": items}, "--validate-only", "--skip-render")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(payload["summary"]["invalid"], 0)
+            self.assertEqual(payload["items"][0]["question"]["bacaan"]["total_soal"], 5)
 
 
 if __name__ == "__main__":

@@ -98,6 +98,32 @@
                 <p class="eyebrow">Konten utama</p>
                 <h3 id="editorQuestionTitle">Soal dan pilihan</h3>
               </div>
+              <div class="editor-field-grid">
+                <label>
+                  ID bacaan
+                  <input id="editPassageId" autocomplete="off">
+                </label>
+                <label>
+                  Nomor soal
+                  <input id="editPassageNumber" type="number" min="1" max="5" step="1">
+                </label>
+                <label>
+                  Total soal
+                  <input id="editPassageTotal" type="number" min="1" max="20" step="1">
+                </label>
+                <label>
+                  Bahasa
+                  <input id="editPassageLanguage" autocomplete="off" maxlength="8">
+                </label>
+              </div>
+              <label class="editor-field-wide">
+                Judul bacaan
+                <input id="editPassageTitle" autocomplete="off">
+              </label>
+              <label class="editor-field-wide">
+                Teks bacaan
+                <textarea id="editPassageText" rows="6"></textarea>
+              </label>
               <label class="editor-field-wide">
                 Teks soal
                 <textarea id="editQuestion" rows="6" required></textarea>

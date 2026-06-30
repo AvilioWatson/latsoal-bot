@@ -26,12 +26,27 @@ def jaccard_similarity(left, right):
 
 
 def _question_text(question):
+    passage = question.get("bacaan")
+    passage_key = ""
+    if isinstance(passage, dict):
+        passage_key = " ".join([
+            str(passage.get("id", "")),
+            str(passage.get("nomor_soal", "")),
+        ])
     return " ".join([
         question.get("mapel", ""),
         question.get("topik", ""),
+        passage_key,
         question.get("soal", ""),
         " ".join(str(value) for value in question.get("pilihan", {}).values()),
     ])
+
+
+def _passage_id(question):
+    passage = question.get("bacaan")
+    if isinstance(passage, dict):
+        return str(passage.get("id") or "").strip()
+    return ""
 
 
 def check_duplicate(question, exclude_run_id=None, additional_questions=None):
@@ -50,6 +65,8 @@ def check_duplicate(question, exclude_run_id=None, additional_questions=None):
 
     def compare(candidate_question, run_id=None, status=None, batch_index=None):
         nonlocal best
+        if _passage_id(question) and _passage_id(question) == _passage_id(candidate_question or {}):
+            return
         similarity = jaccard_similarity(current_text, _question_text(candidate_question or {}))
         if similarity > best["similarity"]:
             best.update({

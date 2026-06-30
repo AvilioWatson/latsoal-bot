@@ -11,6 +11,12 @@ const editTopik = $("#editTopik");
 const editLevel = $("#editLevel");
 const editAnswer = $("#editAnswer");
 const editAccount = $("#editAccount");
+const editPassageId = $("#editPassageId");
+const editPassageTitle = $("#editPassageTitle");
+const editPassageText = $("#editPassageText");
+const editPassageNumber = $("#editPassageNumber");
+const editPassageTotal = $("#editPassageTotal");
+const editPassageLanguage = $("#editPassageLanguage");
 const editQuestion = $("#editQuestion");
 const editExplanation = $("#editExplanation");
 const editCaption = $("#editCaption");
@@ -114,6 +120,13 @@ function renderMetadata(metadata) {
   editLevel.value = question.level || "sedang";
   editAnswer.value = String(question.jawaban || "A").toUpperCase();
   editAccount.value = question.akun || "@utbk_neareducation";
+  const passage = question.bacaan || {};
+  editPassageId.value = passage.id || "";
+  editPassageTitle.value = passage.judul || "";
+  editPassageText.value = passage.teks || "";
+  editPassageNumber.value = passage.nomor_soal || "";
+  editPassageTotal.value = passage.total_soal || "";
+  editPassageLanguage.value = passage.bahasa || "";
   editQuestion.value = question.soal || "";
   Object.entries(choiceFields).forEach(([key, field]) => {
     field.value = choices[key] || "";
@@ -148,6 +161,21 @@ function buildMetadataPayload() {
     akun: editAccount.value.trim() || "@utbk_neareducation",
     butuh_visual: editNeedsVisual.checked,
   };
+  const passageText = editPassageText.value.trim();
+  if (passageText || editPassageId.value.trim()) {
+    payload.question.bacaan = {
+      ...(payload.question.bacaan || {}),
+      id: editPassageId.value.trim(),
+      judul: editPassageTitle.value.trim(),
+      teks: passageText,
+      bahasa: editPassageLanguage.value.trim(),
+      nomor_soal: Number(editPassageNumber.value || 0),
+      total_soal: Number(editPassageTotal.value || 0),
+      sumber_pdf: payload.question.bacaan?.sumber_pdf || {nama_file: "", halaman: ""},
+    };
+  } else {
+    delete payload.question.bacaan;
+  }
   payload.caption = {
     ...(payload.caption || {}),
     caption: editCaption.value.trim(),

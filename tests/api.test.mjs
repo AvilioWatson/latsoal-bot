@@ -8,6 +8,7 @@ import {fileURLToPath} from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const RUN_ID = "20990101-010101";
+const UNSAVED_RUN_ID = "20990101-010102";
 
 function metadata() {
   const question = {
@@ -53,6 +54,19 @@ async function writeOutput(dataRoot) {
   await writeFile(path.join(runDir, "metadata.json"), JSON.stringify(payload, null, 2), "utf-8");
   await writeFile(path.join(runDir, "soal.json"), JSON.stringify(payload.question, null, 2), "utf-8");
   await writeFile(path.join(runDir, "caption.txt"), "Latihan penalaran deduktif\n\n#UTBK #UTBK2027 #LatsoalUTBK\n", "utf-8");
+}
+
+async function writeUnsavedOutput(dataRoot) {
+  const runDir = path.join(dataRoot, "outputs", UNSAVED_RUN_ID);
+  const payload = {
+    ...metadata(),
+    run_id: UNSAVED_RUN_ID,
+    source: "fallback",
+    fallback_used: true,
+    fallbacks: ["question"],
+  };
+  await mkdir(runDir, {recursive: true});
+  await writeFile(path.join(runDir, "metadata.json"), JSON.stringify(payload, null, 2), "utf-8");
 }
 
 async function writeTaxonomyCopy(dataRoot) {
@@ -212,6 +226,21 @@ test("bank review API can save, approve, export, and delete in an isolated data 
     });
     assert.equal(response.status, 200);
     assert.equal((await response.json()).run_id, RUN_ID);
+
+    await writeUnsavedOutput(dataRoot);
+    response = await fetch(`${baseUrl}/api/generator/cache`);
+    assert.equal(response.status, 200);
+    body = await response.json();
+    assert.equal(body.unsaved_total, 1);
+    assert.equal(body.unsaved_fallback, 1);
+
+    response = await fetch(`${baseUrl}/api/generator/cache`, {method: "DELETE"});
+    assert.equal(response.status, 200);
+    body = await response.json();
+    assert.equal(body.deleted_count, 1);
+    assert.equal(body.deleted_run_ids.includes(UNSAVED_RUN_ID), true);
+    await assert.rejects(readFile(path.join(dataRoot, "outputs", UNSAVED_RUN_ID, "metadata.json"), "utf-8"));
+    assert.match(await readFile(path.join(dataRoot, "outputs", RUN_ID, "metadata.json"), "utf-8"), /20990101-010101/);
 
     response = await fetch(`${baseUrl}/saved/${RUN_ID}/classification`, {
       method: "POST",
@@ -452,6 +481,9 @@ test("import page validates and imports a JSON batch", async () => {
     let body = await response.json();
     assert.equal(body.threshold, 0.82);
     assert.ok(Array.isArray(body.template));
+    assert.ok(body.prompts["Penalaran Matematika"].includes("1 bacaan untuk tepat 5 soal"));
+    assert.equal(body.templates["Penalaran Matematika"][0].bacaan.total_soal, 5);
+    assert.equal(body.default_subtest, "Penalaran Matematika");
     assert.match(body.prompt, /JSON array/);
     assert.match(body.prompt, /Prompt PK - Pengetahuan Kuantitatif/);
     assert.match(body.prompt, /Aljabar Dan Fungsi/);

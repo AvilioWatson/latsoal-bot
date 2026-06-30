@@ -15,6 +15,12 @@ import content_generator
 CHOICE_KEYS = ["A", "B", "C", "D", "E"]
 VALID_LEVELS = {"mudah", "sedang", "sulit"}
 MAX_BATCH = 1000
+PASSAGE_SUBTESTS = {
+    "Penalaran Matematika",
+    "Literasi Bahasa Indonesia",
+    "Literasi Bahasa Inggris",
+    "Pengetahuan dan Pemahaman Umum",
+}
 
 
 MOJIBAKE_REPLACEMENTS = {
@@ -41,7 +47,12 @@ def fix_text(value):
 
 
 def normalize_question_text(question):
-    return " ".join(str(question.get("soal", "")).lower().split())
+    parts = [str(question.get("soal", ""))]
+    passage = question.get("bacaan")
+    if isinstance(passage, dict):
+        parts.append(str(passage.get("id", "")))
+        parts.append(str(passage.get("nomor_soal", "")))
+    return " ".join(" ".join(parts).lower().split())
 
 
 def existing_question_records():
@@ -124,6 +135,60 @@ def validate_and_normalize_question(raw_question):
     if answer and answer not in CHOICE_KEYS:
         errors.append("Jawaban harus salah satu dari A sampai E.")
 
+    passage = question.get("bacaan")
+    if mapel in PASSAGE_SUBTESTS:
+        if not isinstance(passage, dict):
+            errors.append("Field bacaan wajib berupa object untuk subtes berbasis bacaan.")
+        else:
+            passage = fix_text(dict(passage))
+            passage_id = str(passage.get("id") or "").strip()
+            passage_text = str(passage.get("teks") or "").strip()
+            title = str(passage.get("judul") or "").strip()
+            language = str(passage.get("bahasa") or ("en" if mapel == "Literasi Bahasa Inggris" else "id")).strip().lower()
+            try:
+                number = int(passage.get("nomor_soal"))
+            except (TypeError, ValueError):
+                number = 0
+            try:
+                total = int(passage.get("total_soal"))
+            except (TypeError, ValueError):
+                total = 0
+            if not passage_id:
+                errors.append("bacaan.id wajib diisi.")
+            if not passage_text:
+                errors.append("bacaan.teks wajib diisi.")
+            if total != 5:
+                errors.append("bacaan.total_soal wajib bernilai 5.")
+            if number < 1 or number > 5:
+                errors.append("bacaan.nomor_soal wajib 1 sampai 5.")
+            passage_source = passage.get("sumber_pdf")
+            if passage_source is not None and not isinstance(passage_source, dict):
+                errors.append("bacaan.sumber_pdf harus berupa object atau dihilangkan.")
+                passage_source = {}
+            passage["id"] = passage_id
+            passage["judul"] = title
+            passage["teks"] = passage_text
+            passage["bahasa"] = language
+            passage["nomor_soal"] = number
+            passage["total_soal"] = total
+            passage["sumber_pdf"] = {
+                "nama_file": str((passage_source or {}).get("nama_file") or "").strip(),
+                "halaman": str((passage_source or {}).get("halaman") or "").strip(),
+            }
+            question["bacaan"] = passage
+    elif passage is not None:
+        if not isinstance(passage, dict):
+            errors.append("bacaan harus berupa object atau dihilangkan.")
+        else:
+            passage = fix_text(dict(passage))
+            if passage.get("teks"):
+                passage["id"] = str(passage.get("id") or "").strip()
+                passage["judul"] = str(passage.get("judul") or "").strip()
+                passage["teks"] = str(passage.get("teks") or "").strip()
+                question["bacaan"] = passage
+            else:
+                question.pop("bacaan", None)
+
     source = question.get("sumber_pdf")
     if source is not None and not isinstance(source, dict):
         errors.append("sumber_pdf harus berupa object atau dihilangkan.")
@@ -136,6 +201,38 @@ def validate_and_normalize_question(raw_question):
             "halaman": str(source.get("halaman") or "").strip(),
         }
     return question, list(dict.fromkeys(errors)), list(dict.fromkeys(warnings))
+
+
+def validate_passage_groups(items):
+    groups = {}
+    for item in items:
+        question = item.get("question") or {}
+        if question.get("mapel") not in PASSAGE_SUBTESTS:
+            continue
+        passage = question.get("bacaan") if isinstance(question.get("bacaan"), dict) else {}
+        passage_id = passage.get("id")
+        if not passage_id:
+            continue
+        groups.setdefault((question.get("mapel"), passage_id), []).append(item)
+
+    for (mapel, passage_id), group_items in groups.items():
+        numbers = sorted((item.get("question") or {}).get("bacaan", {}).get("nomor_soal") for item in group_items)
+        texts = {str((item.get("question") or {}).get("bacaan", {}).get("teks") or "").strip() for item in group_items}
+        message = None
+        if len(group_items) != 5:
+            message = f"Bacaan '{passage_id}' untuk {mapel} harus dipakai tepat 5 soal; saat ini {len(group_items)} soal."
+        elif numbers != [1, 2, 3, 4, 5]:
+            message = f"Bacaan '{passage_id}' harus memiliki nomor_soal 1 sampai 5 tanpa duplikat."
+        elif len(texts) != 1:
+            message = f"Bacaan '{passage_id}' memiliki teks bacaan yang tidak konsisten antar soal."
+        if not message:
+            continue
+        for item in group_items:
+            item["errors"] = list(dict.fromkeys([*item.get("errors", []), message]))
+            item["status"] = "invalid"
+            item["selectable"] = False
+            item["selected_by_default"] = False
+            item["dedup"] = None
 
 
 def evaluate_batch(raw_questions):
@@ -182,6 +279,7 @@ def evaluate_batch(raw_questions):
             earlier.append(candidate)
             earlier_by_text[normalized_text] = candidate
 
+    validate_passage_groups(items)
     counts = {key: sum(1 for item in items if item["status"] == key) for key in ["valid", "similar", "exact_duplicate", "invalid"]}
     return {"ok": True, "total": len(items), "summary": counts, "items": items}
 

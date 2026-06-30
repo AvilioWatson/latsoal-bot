@@ -496,6 +496,30 @@ h3 {
   margin: 12px 0;
 }
 
+.prompt-subtest-field {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.prompt-subtest-field select {
+  min-height: 38px;
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-sm);
+  padding: 0 10px;
+  color: var(--text);
+  background: var(--surface);
+}
+
+.passage-meta {
+  margin-top: 4px !important;
+  color: var(--gold-hover) !important;
+  font-weight: 700;
+}
+
 .copy-preview {
   max-height: 360px;
   margin: 0;

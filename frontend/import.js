@@ -12,6 +12,7 @@ const elements = {
   rows: document.querySelector("#validationRows"),
   selection: document.querySelector("#selectionNote"),
   import: document.querySelector("#importSelectedButton"),
+  promptSubtest: document.querySelector("#promptSubtestSelect"),
   prompt: document.querySelector("#promptPreview"),
   template: document.querySelector("#templatePreview"),
   copyPrompt: document.querySelector("#copyPromptButton"),
@@ -28,6 +29,7 @@ let questions = [];
 let validationItems = [];
 let failedRenderIds = [];
 let topicsByMapel = {};
+let importConfig = {};
 
 function setStatus(text, state = "") {
   elements.status.textContent = text;
@@ -146,6 +148,14 @@ function renderValidation(result) {
     const excerpt = document.createElement("p");
     excerpt.textContent = String(item.question?.soal || "").replace(/\s+/g, " ").slice(0, 150) || "Soal tidak terbaca.";
     questionCell.append(title, excerpt);
+    if (item.question?.bacaan?.id) {
+      const passage = document.createElement("p");
+      passage.className = "passage-meta";
+      const number = item.question.bacaan.nomor_soal || "-";
+      const total = item.question.bacaan.total_soal || "-";
+      passage.textContent = `Bacaan ${item.question.bacaan.id} · Soal ${number}/${total}`;
+      questionCell.append(passage);
+    }
     const topicControl = renderTopicControl(item, title);
     if (topicControl) questionCell.append(topicControl);
     if (item.errors?.length) {
@@ -181,6 +191,14 @@ function renderValidation(result) {
   }
   elements.panel.hidden = false;
   updateSelectionNote();
+}
+
+function syncPromptPreview() {
+  const selected = elements.promptSubtest?.value || importConfig.default_subtest;
+  const prompt = importConfig.prompts?.[selected] || importConfig.prompt || "";
+  const template = importConfig.templates?.[selected] || importConfig.template || [];
+  elements.prompt.textContent = prompt;
+  elements.template.textContent = JSON.stringify(template, null, 2);
 }
 
 async function validateInput() {
@@ -283,14 +301,25 @@ elements.file.addEventListener("change", () => loadFile(elements.file.files[0]))
 elements.retry.addEventListener("click", () => renderQueue(failedRenderIds));
 elements.copyPrompt.addEventListener("click", () => copyText(elements.prompt.textContent, elements.copyPrompt).catch((error) => setStatus(error.message, "error")));
 elements.copyTemplate.addEventListener("click", () => copyText(elements.template.textContent, elements.copyTemplate).catch((error) => setStatus(error.message, "error")));
+elements.promptSubtest?.addEventListener("change", syncPromptPreview);
 for (const eventName of ["dragenter", "dragover"]) elements.drop.addEventListener(eventName, (event) => { event.preventDefault(); elements.drop.dataset.dragging = "true"; });
 for (const eventName of ["dragleave", "drop"]) elements.drop.addEventListener(eventName, (event) => { event.preventDefault(); elements.drop.dataset.dragging = "false"; });
 elements.drop.addEventListener("drop", (event) => loadFile(event.dataTransfer.files[0]));
 
 api("/api/import/config").then((config) => {
+  importConfig = config;
   topicsByMapel = config.topics || {};
-  elements.prompt.textContent = config.prompt;
-  elements.template.textContent = JSON.stringify(config.template, null, 2);
+  if (elements.promptSubtest) {
+    elements.promptSubtest.innerHTML = "";
+    for (const subtest of Object.keys(config.topics || {})) {
+      const option = document.createElement("option");
+      option.value = subtest;
+      option.textContent = subtest;
+      option.selected = subtest === config.default_subtest;
+      elements.promptSubtest.append(option);
+    }
+  }
+  syncPromptPreview();
 }).catch((error) => { setStatus("Config gagal", "error"); elements.prompt.textContent = error.message; });
 
 try {

@@ -64,3 +64,31 @@ test("metadataToTryoutQuestion warns when approved question is not review-ready"
   assert.equal(item.warnings.length, 1);
   assert.equal(item.warnings[0].code, "review_not_ready");
 });
+
+test("metadataToTryoutQuestion exports passage metadata additively", () => {
+  const item = metadataToTryoutQuestion("20990101-010102", {
+    review_status: "ready",
+    question: {
+      mapel: "Literasi Bahasa Indonesia",
+      topik: "Memahami Informasi",
+      level: "sedang",
+      soal: "Simpulan utama bacaan tersebut adalah ...",
+      bacaan: {
+        id: "LBI-001",
+        judul: "Ruang Terbuka",
+        teks: "Ruang terbuka membantu warga berinteraksi dan menjaga kualitas udara kota.",
+        bahasa: "id",
+        nomor_soal: 3,
+        total_soal: 5,
+      },
+      pilihan: {A: "A", B: "B", C: "C", D: "D", E: "E"},
+      jawaban: "A",
+      pembahasan: "Bacaan menekankan fungsi ruang terbuka bagi interaksi warga dan kualitas udara.",
+    },
+  }, "export-3");
+
+  assert.equal(item.passage_id, "LBI-001");
+  assert.equal(item.passage_order, 3);
+  assert.equal(item.stem_text, "Simpulan utama bacaan tersebut adalah ...");
+  assert.match(item.question_text, /Ruang terbuka membantu warga/);
+});
