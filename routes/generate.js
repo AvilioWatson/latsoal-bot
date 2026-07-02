@@ -1,8 +1,11 @@
 import {readdir, readFile, rm} from "node:fs/promises";
 import path from "node:path";
+import {readJsonValidated, writeJsonValidated} from "../lib/dbschema.js";
 import {readIndex} from "../lib/filestore.js";
 import {errorStatus, readJsonBody, sendError, sendJson} from "../lib/http.js";
-import {OUTPUTS} from "../lib/paths.js";
+import {OUTPUTS, SAVED, buildWebFiles, canonicalTopic, isValidRunId, pathFromIndexEntry, safeJoin} from "../lib/paths.js";
+import {requestError} from "../lib/route-utils.js";
+import {DEDUP_THRESHOLD, checkDuplicateAgainstSaved} from "../lib/similarity.js";
 import {TOPICS, addTopicToSubtest, configPayload, deleteTopicFromSubtest} from "../lib/taxonomy.js";
 import {generateAutoBatchFromPayload, generateFromPayload} from "../services/generate-service.js";
 
@@ -86,6 +89,86 @@ async function resetOutputCache() {
   };
 }
 
+async function resolveOutputRun(runId) {
+  if (!isValidRunId(runId)) return null;
+  const metadataFiles = await collectOutputMetadata();
+  for (const metadataPath of metadataFiles) {
+    const runDir = path.dirname(metadataPath);
+    if (path.basename(runDir) !== runId) continue;
+    const artifactPath = path.relative(OUTPUTS, runDir).replace(/\\/g, "/");
+    return {dir: runDir, artifactPath};
+  }
+  return null;
+}
+
+async function resolveSavedRun(runId) {
+  if (!isValidRunId(runId)) return null;
+  const index = await readIndex();
+  const entry = index.find((item) => item.run_id === runId);
+  const candidates = [];
+  if (entry) candidates.push(pathFromIndexEntry(entry, "saved"));
+  candidates.push(runId);
+
+  for (const candidate of candidates) {
+    const target = safeJoin(SAVED, candidate);
+    if (!target) continue;
+    try {
+      const metadata = await readJsonValidated(path.join(target, "metadata.json"), "metadata");
+      return {dir: target, artifactPath: candidate, entry, metadata};
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+function publicMatchPayload(resolved) {
+  if (!resolved?.metadata) return null;
+  return {
+    run_id: resolved.metadata.run_id || path.basename(resolved.dir),
+    source: resolved.metadata.source || "saved",
+    review_status: resolved.metadata.review_status || null,
+    question: resolved.metadata.question || {},
+    caption: resolved.metadata.caption || {},
+    validation: resolved.metadata.validation || {},
+    dedup: resolved.metadata.dedup || null,
+    canonical_topik: resolved.metadata.question
+      ? canonicalTopic(resolved.metadata.question.mapel, resolved.metadata.question.topik)
+      : null,
+    web_files: buildWebFiles("/saved", resolved.artifactPath, resolved.metadata.files),
+  };
+}
+
+async function recalculateOutputSimilarity(runId) {
+  if (!isValidRunId(runId)) {
+    throw requestError(400, "Run ID tidak valid.");
+  }
+
+  const resolved = await resolveOutputRun(runId);
+  if (!resolved) {
+    throw requestError(404, "Output run tidak ditemukan.");
+  }
+
+  const metadataPath = path.join(resolved.dir, "metadata.json");
+  const metadata = await readJsonValidated(metadataPath, "metadata");
+  const {dedup, match} = await checkDuplicateAgainstSaved(metadata.question || {}, {excludeRunId: runId});
+  metadata.dedup = dedup;
+  await writeJsonValidated(metadataPath, metadata, "metadata");
+
+  let matched = null;
+  if (match?.run_id) {
+    matched = publicMatchPayload(await resolveSavedRun(match.run_id));
+  }
+
+  return {
+    ok: true,
+    run_id: runId,
+    dedup,
+    threshold: DEDUP_THRESHOLD,
+    match: matched,
+  };
+}
+
 export async function handle(request, response, route) {
   if (request.method === "GET" && (route === "/api/config" || route === "/config")) {
     sendJson(response, configPayload());
@@ -148,6 +231,16 @@ export async function handle(request, response, route) {
       } else {
         sendError(response, errorStatus(error), error.message);
       }
+    }
+    return true;
+  }
+
+  if (request.method === "POST" && (route === "/api/generate/similarity" || route === "/generate/similarity")) {
+    try {
+      const payload = await readJsonBody(request, {limitBytes: 32 * 1024});
+      sendJson(response, await recalculateOutputSimilarity(payload.run_id || ""));
+    } catch (error) {
+      sendError(response, errorStatus(error), error.message);
     }
     return true;
   }

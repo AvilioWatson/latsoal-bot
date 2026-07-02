@@ -4,7 +4,6 @@ const savedLayout = document.querySelector(".saved-layout");
 const savedPreview = document.querySelector(".saved-preview");
 const savedSearch = document.querySelector("#savedSearch");
 const savedStatusFilter = document.querySelector("#savedStatusFilter");
-const tryoutReadinessFilter = document.querySelector("#tryoutReadinessFilter");
 const tryoutReadinessSummary = document.querySelector("#tryoutReadinessSummary");
 const refreshSavedButton = document.querySelector("#refreshSavedButton");
 const exportApprovedButton = document.querySelector("#exportApprovedButton");
@@ -12,6 +11,7 @@ const subtestTabs = document.querySelector("#subtestTabs");
 const subtopicTabs = document.querySelector("#subtopicTabs");
 const closePreviewButton = document.querySelector("#closePreviewButton");
 const reviewExplanationButton = document.querySelector("#reviewExplanationButton");
+const checkSimilarityPreviewButton = document.querySelector("#checkSimilarityPreviewButton");
 const aiReviewDraft = document.querySelector("#aiReviewDraft");
 const aiReviewDraftScore = document.querySelector("#aiReviewDraftScore");
 const aiReviewDraftSummary = document.querySelector("#aiReviewDraftSummary");
@@ -48,9 +48,24 @@ let activeSubtopic = "all";
 let activePreviewRunId = "";
 let activePreviewStatus = "";
 let activePreviewSource = "";
+let activePreviewData = null;
 let pendingExplanationReview = null;
 let subtests = [];
 let topicsBySubtest = {};
+let previewOpenScrollY = 0;
+const REVIEW_JOBS_KEY = "latsoal-explanation-review-jobs";
+const reviewJobs = new Map();
+const reviewPollTimers = new Map();
+const SUBTEST_SHORT_LABELS = {
+  "Pengetahuan dan Pemahaman Umum": "PPU",
+  "Penalaran Umum": "PU",
+  "Pemahaman Bacaan dan Menulis": "PBM",
+  "Literasi Bahasa Inggris": "LBE",
+  "Literasi Bahasa Indonesia": "LBI",
+  "Pengetahuan Kuantitatif": "PK",
+  "Penalaran Kuantitatif": "PK",
+  "Penalaran Matematika": "PM",
+};
 const {
   copyCaption: sharedCopyCaption = async (elements, setStatusCallback) => {
     const {captionText, hashtagText, debugPanel, debugSource, debugText} = elements;
@@ -82,8 +97,80 @@ const {
   sourceText: sharedSourceText = (data) => data.source || "-",
 } = window.LatsoalShared || {};
 
+function saveReviewJobs() {
+  const payload = Object.fromEntries(reviewJobs.entries());
+  sessionStorage.setItem(REVIEW_JOBS_KEY, JSON.stringify(payload));
+}
+
+function loadReviewJobs() {
+  try {
+    const payload = JSON.parse(sessionStorage.getItem(REVIEW_JOBS_KEY) || "{}");
+    for (const [runId, job] of Object.entries(payload)) {
+      if (job && typeof job === "object") reviewJobs.set(runId, job);
+    }
+  } catch {
+    sessionStorage.removeItem(REVIEW_JOBS_KEY);
+  }
+}
+
+function setReviewJob(runId, job) {
+  if (!runId || !job) return;
+  reviewJobs.set(runId, job);
+  saveReviewJobs();
+}
+
+function clearReviewJob(runId) {
+  reviewJobs.delete(runId);
+  saveReviewJobs();
+}
+
+function reviewJobFor(runId) {
+  return reviewJobs.get(runId) || savedItems.find((item) => item.run_id === runId)?.explanation_review_job || null;
+}
+
+function isReviewRunning(runId) {
+  return reviewJobFor(runId)?.status === "running";
+}
+
+function isReviewDone(runId) {
+  return reviewJobFor(runId)?.status === "done";
+}
+
+function updateReviewControls(runId = activePreviewRunId) {
+  const running = isReviewRunning(runId);
+  reviewExplanationButton.disabled = !runId || running;
+  reviewExplanationButton.textContent = running ? "Checking" : "Cek pembahasan AI";
+  if (runId && activePreviewRunId === runId && running) {
+    runNote.textContent = "Cek pembahasan AI sedang berjalan. Kamu bisa buka soal lain; hasilnya tetap disimpan di halaman ini.";
+  }
+}
+
+function reviewProgressText(job) {
+  if (job?.status === "running") return "Checking pembahasan AI";
+  if (job?.status === "done") return "Draft review siap";
+  if (job?.status === "error") return "Review gagal";
+  return "";
+}
+
+function updateReviewJobIndicator(runId) {
+  const card = Array.from(savedList.querySelectorAll(".saved-item"))
+    .find((item) => item.dataset.runId === runId);
+  if (!card) return;
+  const job = reviewJobFor(runId);
+  const progress = card.querySelector("[data-review-progress]");
+  card.dataset.reviewJob = job?.status || "";
+  if (!progress) return;
+  const text = reviewProgressText(job);
+  progress.hidden = !text;
+  progress.textContent = text;
+}
+
 function slugifySubtest(name) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+function subtestDisplayName(name) {
+  return SUBTEST_SHORT_LABELS[name] || name || "Tanpa subtes";
 }
 
 function topicLabel(item) {
@@ -120,9 +207,67 @@ function statusLabel(status) {
   return "Saved";
 }
 
+function similarityPercent(similarity) {
+  const value = Number(similarity);
+  if (!Number.isFinite(value)) return "-";
+  return `${Math.round(value * 1000) / 10}%`;
+}
+
+function similarityBadgeState(dedup) {
+  const similarity = Number(dedup?.similarity);
+  if (!Number.isFinite(similarity)) return "pending";
+  if (dedup?.is_duplicate) return "similar";
+  return similarity > 0 ? "checked" : "clear";
+}
+
+function similaritySummary(dedup) {
+  const similarity = Number(dedup?.similarity);
+  if (!Number.isFinite(similarity)) return "Similarity -";
+  return `Similarity ${similarityPercent(similarity)}`;
+}
+
+function applySimilarityBadge(element, dedup) {
+  if (!element) return;
+  const similarity = Number(dedup?.similarity);
+  element.hidden = !Number.isFinite(similarity);
+  element.textContent = Number.isFinite(similarity) ? similaritySummary(dedup) : "";
+  element.dataset.similarityState = Number.isFinite(similarity) ? similarityBadgeState(dedup) : "";
+  element.title = dedup?.matched_run_id ? `Paling mirip dengan ${dedup.matched_run_id}` : "";
+}
+
+function syncSavedItemSimilarity(runId, dedup) {
+  const item = savedItems.find((entry) => entry.run_id === runId);
+  if (item) item.dedup = dedup;
+  const card = Array.from(savedList.querySelectorAll(".saved-item"))
+    .find((entry) => entry.dataset.runId === runId);
+  applySimilarityBadge(card?.querySelector("[data-similarity]"), dedup);
+}
+
+function setSimilarityButtonState(runId, checking) {
+  const buttons = Array.from(document.querySelectorAll("[data-check-similarity-run-id]"))
+    .filter((button) => button.dataset.checkSimilarityRunId === runId);
+  if (activePreviewRunId === runId && checkSimilarityPreviewButton) buttons.push(checkSimilarityPreviewButton);
+  for (const button of buttons) {
+    button.disabled = checking || !runId;
+    button.textContent = checking ? "Mengecek..." : "Cek Similarity";
+  }
+}
+
+function updatePreviewSimilarityUi(dedup) {
+  if (!activePreviewRunId) return;
+  activePreviewData = activePreviewData ? {...activePreviewData, dedup} : activePreviewData;
+  const validation = activePreviewData?.validation || {};
+  validationScore.textContent = `Skor ${validation.skor ?? "-"} - ${similaritySummary(dedup)}`;
+}
+
 function openPreviewPanel(runId) {
+  if (!savedLayout?.classList.contains("has-preview")) {
+    previewOpenScrollY = window.scrollY;
+  }
+  window.scrollTo(0, 0);
   savedLayout?.classList.add("has-preview");
   savedPreview?.setAttribute("aria-hidden", "false");
+  document.body.dataset.savedPreviewOpen = "true";
   savedList.querySelectorAll(".saved-item").forEach((card) => {
     card.dataset.active = card.dataset.runId === runId ? "true" : "false";
   });
@@ -130,10 +275,13 @@ function openPreviewPanel(runId) {
 
 function closePreviewPanel() {
   activePreviewRunId = "";
+  activePreviewData = null;
   clearAiReviewDraft();
   setPreviewActionState(null);
   savedLayout?.classList.remove("has-preview");
   savedPreview?.setAttribute("aria-hidden", "true");
+  document.body.dataset.savedPreviewOpen = "false";
+  requestAnimationFrame(() => window.scrollTo(0, previewOpenScrollY));
   savedList.querySelectorAll(".saved-item").forEach((card) => {
     card.dataset.active = "false";
   });
@@ -165,12 +313,89 @@ function clearAiReviewDraft() {
 function showAiReviewDraft(review) {
   pendingExplanationReview = review;
   const notes = [...(review.catatan || []), ...(review.saran_revisi || [])].filter(Boolean);
+  const draftJson = Array.isArray(review.question_group_revisi) && review.question_group_revisi.length
+    ? review.question_group_revisi
+    : review.question_revisi;
   aiReviewDraftScore.textContent = `Skor ${review.skor ?? "-"}`;
   aiReviewDraftSummary.textContent = notes[0]
     || "AI sudah menyiapkan JSON revisi. Periksa isinya sebelum diterapkan.";
-  aiReviewDraftJson.textContent = JSON.stringify(review.question_revisi, null, 2);
+  aiReviewDraftJson.textContent = JSON.stringify(draftJson, null, 2);
   aiReviewDraft.hidden = false;
   aiReviewDraft.scrollIntoView({behavior: "smooth", block: "nearest"});
+}
+
+function completeReviewJob(runId, job) {
+  setReviewJob(runId, job);
+  const review = job.result?.explanation_review;
+  if (activePreviewRunId === runId) {
+    if (job.status === "done" && review?.question_revisi) {
+      showAiReviewDraft(review);
+      setStatus("Draft ready");
+      runNote.textContent = "Review selesai. JSON asli belum berubah; periksa draft lalu pilih Terapkan atau Cancel.";
+    } else if (job.status === "error") {
+      setStatus("Error");
+      debugPanel.hidden = false;
+      debugSource.textContent = "explanation-review";
+      debugText.textContent = job.error || "Cek pembahasan gagal.";
+      runNote.textContent = "Cek pembahasan gagal. Detail ada di panel debug.";
+    }
+    updateReviewControls(runId);
+  }
+  updateReviewJobIndicator(runId);
+}
+
+async function pollReviewJob(runId) {
+  if (!runId || reviewPollTimers.has(runId)) return;
+  const tick = async () => {
+    try {
+      const response = await fetch(`/saved/${runId}/explanation-review/status`, {
+        headers: {"Accept": "application/json"},
+      });
+      const job = await response.json();
+      if (!response.ok) throw new Error(job.error || "Status cek pembahasan tidak tersedia.");
+      setReviewJob(runId, job);
+      if (job.status === "running") {
+        updateReviewJobIndicator(runId);
+        if (activePreviewRunId === runId) updateReviewControls(runId);
+        const timer = window.setTimeout(tick, 1800);
+        reviewPollTimers.set(runId, timer);
+        return;
+      }
+      reviewPollTimers.delete(runId);
+      completeReviewJob(runId, job);
+    } catch (error) {
+      reviewPollTimers.delete(runId);
+      setReviewJob(runId, {
+        run_id: runId,
+        status: "error",
+        error: error.message,
+        finished_at: new Date().toISOString(),
+      });
+      if (activePreviewRunId === runId) {
+        setStatus("Error");
+        debugPanel.hidden = false;
+        debugSource.textContent = "explanation-review/status";
+        debugText.textContent = error.stack || error.message;
+        updateReviewControls(runId);
+      }
+      updateReviewJobIndicator(runId);
+    }
+  };
+  const timer = window.setTimeout(tick, 400);
+  reviewPollTimers.set(runId, timer);
+}
+
+function resumeRunningReviewJobs() {
+  for (const [runId, job] of reviewJobs.entries()) {
+    if (job.status === "running") pollReviewJob(runId);
+  }
+  for (const item of savedItems) {
+    const job = item.explanation_review_job;
+    if (job?.status === "running") {
+      setReviewJob(item.run_id, job);
+      pollReviewJob(item.run_id);
+    }
+  }
 }
 
 function setPreviewActionState(item = selectedPreviewItem()) {
@@ -195,6 +420,7 @@ function setPreviewActionState(item = selectedPreviewItem()) {
     ? "Batalkan status upload"
     : "Tandai soal sudah diupload";
   deletePreviewButton.disabled = !hasPreview;
+  checkSimilarityPreviewButton.disabled = !hasPreview;
 }
 
 function reviewNote(data) {
@@ -223,15 +449,6 @@ function matchesStatusFilter(item, status) {
   return (item.status || "saved") === status;
 }
 
-function matchesTryoutReadinessFilter(item, filter) {
-  if (filter === "all") return true;
-  if (filter === "ready") return Boolean(item.tryout_ready);
-  if (filter === "warning") return (item.status || "saved") === "approved" && Number(item.tryout_warning_count || 0) > 0;
-  if (filter === "review-ready") return item.review_status === "ready";
-  if (filter === "review-pending") return item.review_status !== "ready";
-  return true;
-}
-
 function tryoutStateLabel(item) {
   if (item.tryout_ready) return "Tryout ready";
   if ((item.status || "saved") === "approved" && Number(item.tryout_warning_count || 0) > 0) {
@@ -256,15 +473,13 @@ function renderTryoutReadinessSummary() {
 function filteredSavedItems() {
   const query = savedSearch.value.trim().toLowerCase();
   const status = savedStatusFilter.value;
-  const tryoutReadiness = tryoutReadinessFilter.value;
   return savedItems.filter((item) => {
     const statusOk = matchesStatusFilter(item, status);
-    const tryoutOk = matchesTryoutReadinessFilter(item, tryoutReadiness);
     const subtestOk = activeSubtest === "all" || item.mapel === activeSubtest;
     const topicOk = activeSubtopic === "all" || topicKey(topicLabel(item)) === activeSubtopic;
     const warningCodes = (item.tryout_warnings || []).map((warning) => warning.code).join(" ");
     const haystack = [item.run_id, item.mapel, item.topik, item.canonical_topik, item.level, item.source, item.status, item.review_status, warningCodes].join(" ").toLowerCase();
-    return subtestOk && topicOk && statusOk && tryoutOk && (!query || haystack.includes(query));
+    return subtestOk && topicOk && statusOk && (!query || haystack.includes(query));
   }).sort((left, right) => {
     const leftQuestion = left.soal_excerpt || "";
     const rightQuestion = right.soal_excerpt || "";
@@ -277,7 +492,7 @@ function filteredSavedItems() {
 function renderSubtestTabs() {
   subtestTabs.innerHTML = "";
   const tabs = [{label: "Semua", value: "all", href: "/saved"}, ...subtests.map((name) => ({
-    label: name,
+    label: subtestDisplayName(name),
     value: name,
     href: `/saved/${slugifySubtest(name)}`,
   }))];
@@ -285,6 +500,7 @@ function renderSubtestTabs() {
     const link = document.createElement("a");
     link.href = tab.href;
     link.textContent = tab.label;
+    if (tab.value !== "all") link.title = tab.value;
     link.dataset.active = tab.value === activeSubtest ? "true" : "false";
     link.addEventListener("click", (event) => {
       event.preventDefault();
@@ -358,12 +574,13 @@ async function loadConfig() {
   renderSubtopicTabs();
 }
 
-function fillSelect(select, options, selectedValue = "") {
+function fillSelect(select, options, selectedValue = "", labelForValue = (value) => value) {
   select.innerHTML = "";
   for (const value of options) {
     const option = document.createElement("option");
     option.value = value;
-    option.textContent = value;
+    option.textContent = labelForValue(value);
+    option.title = value;
     option.selected = value === selectedValue;
     select.append(option);
   }
@@ -377,7 +594,8 @@ function renderClassificationControls(item) {
 
   const subtestSelect = document.createElement("select");
   subtestSelect.setAttribute("aria-label", `Ganti subtes ${item.run_id}`);
-  fillSelect(subtestSelect, subtests, subtests.includes(item.mapel) ? item.mapel : subtests[0]);
+  subtestSelect.title = item.mapel || "";
+  fillSelect(subtestSelect, subtests, subtests.includes(item.mapel) ? item.mapel : subtests[0], subtestDisplayName);
 
   const topicSelect = document.createElement("select");
   topicSelect.setAttribute("aria-label", `Ganti subtopik ${item.run_id}`);
@@ -388,6 +606,8 @@ function renderClassificationControls(item) {
       ? item.canonical_topik || item.topik
       : topics[0];
     fillSelect(topicSelect, topics, selectedTopic);
+    subtestSelect.title = subtestSelect.value;
+    topicSelect.title = selectedTopic || "";
   };
   syncTopics();
 
@@ -444,6 +664,7 @@ function renderSavedList(items = filteredSavedItems()) {
     row.dataset.status = item.status || "saved";
     row.dataset.runId = item.run_id;
     row.dataset.active = activePreviewRunId === item.run_id ? "true" : "false";
+    row.dataset.reviewJob = reviewJobFor(item.run_id)?.status || "";
     row.style.setProperty("--item-index", String(index));
     row.innerHTML = `
       <div class="saved-card-top">
@@ -451,21 +672,34 @@ function renderSavedList(items = filteredSavedItems()) {
         <span data-status-pill></span>
       </div>
       <h3 data-topic></h3>
+      <p class="saved-review-progress" data-review-progress hidden></p>
       <p class="taxonomy-warning" data-taxonomy-warning hidden></p>
       <p class="saved-question-excerpt"></p>
       <div class="saved-card-meta">
         <span data-level></span>
         <span data-upload-state></span>
         <span data-tryout-state></span>
+        <span data-similarity hidden></span>
         <span data-run-id></span>
+      </div>
+      <div class="saved-card-actions">
+        <button class="mini-button" type="button" data-check-similarity data-check-similarity-run-id="${item.run_id}">Cek Similarity</button>
       </div>
     `;
     row.tabIndex = 0;
     row.setAttribute("role", "button");
     row.setAttribute("aria-label", `Preview ${item.mapel || item.run_id}`);
-    row.querySelector("[data-subtest]").textContent = item.mapel || "Tanpa subtes";
+    row.querySelector("[data-subtest]").textContent = subtestDisplayName(item.mapel);
+    row.querySelector("[data-subtest]").title = item.mapel || "";
     row.querySelector("[data-status-pill]").textContent = statusLabel(item.status);
     row.querySelector("[data-topic]").textContent = item.topik || item.run_id;
+    const progress = row.querySelector("[data-review-progress]");
+    const job = reviewJobFor(item.run_id);
+    const progressText = reviewProgressText(job);
+    if (progressText) {
+      progress.hidden = false;
+      progress.textContent = progressText;
+    }
     const taxonomyWarning = row.querySelector("[data-taxonomy-warning]");
     const badge = taxonomyBadgeText(item);
     if (badge) {
@@ -479,7 +713,12 @@ function renderSavedList(items = filteredSavedItems()) {
     row.querySelector("[data-tryout-state]").dataset.tryoutState = item.tryout_ready
       ? "ready"
       : (item.status || "saved") === "approved" && Number(item.tryout_warning_count || 0) > 0 ? "warning" : "pending";
+    applySimilarityBadge(row.querySelector("[data-similarity]"), item.dedup);
     row.querySelector("[data-run-id]").textContent = item.run_id;
+    row.querySelector("[data-check-similarity]").addEventListener("click", (event) => {
+      event.stopPropagation();
+      checkSimilarityForSavedRun(item.run_id);
+    });
     row.append(renderClassificationControls(item));
     row.addEventListener("click", () => loadSavedPreview(item.run_id));
     row.addEventListener("keydown", (event) => {
@@ -498,15 +737,55 @@ async function loadSavedList() {
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || "Gagal memuat saved.");
   savedItems = data.items || [];
+  for (const item of savedItems) {
+    if (item.explanation_review_job) setReviewJob(item.run_id, item.explanation_review_job);
+  }
+  resumeRunningReviewJobs();
   renderTryoutReadinessSummary();
   renderSubtopicTabs();
   renderSavedList();
+}
+
+async function checkSimilarityForSavedRun(runId) {
+  if (!runId) return;
+  setSimilarityButtonState(runId, true);
+  setStatus("Checking similarity");
+  if (activePreviewRunId === runId) {
+    runNote.textContent = "Menghitung ulang similarity terhadap item lain di Bank Review.";
+  }
+  try {
+    const response = await fetch(`/saved/${runId}/similarity`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({run_id: runId}),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Gagal menghitung ulang similarity.");
+    syncSavedItemSimilarity(runId, data.dedup);
+    if (activePreviewRunId === runId) {
+      updatePreviewSimilarityUi(data.dedup);
+      if (data.match?.run_id) {
+        runNote.textContent = `Similarity tertinggi ${similarityPercent(data.dedup?.similarity)} dengan ${data.match.run_id}.`;
+      } else {
+        runNote.textContent = `Similarity tertinggi ${similarityPercent(data.dedup?.similarity)} masih di bawah threshold ${similarityPercent(data.threshold)}.`;
+      }
+    }
+    setStatus(data.dedup?.is_duplicate ? "Similarity warning" : "Similarity checked");
+  } catch (error) {
+    setStatus("Error");
+    debugPanel.hidden = false;
+    debugSource.textContent = "saved/similarity";
+    debugText.textContent = error.stack || error.message;
+  } finally {
+    setSimilarityButtonState(runId, false);
+  }
 }
 
 async function loadSavedPreview(runId) {
   clearAiReviewDraft();
   setStatus("Loading");
   activePreviewRunId = runId;
+  activePreviewData = null;
   openPreviewPanel(runId);
   const selectedItem = savedItems.find((item) => item.run_id === runId);
   previewTitle.textContent = selectedItem?.mapel
@@ -514,6 +793,7 @@ async function loadSavedPreview(runId) {
     : "Memuat preview";
   runNote.textContent = "Memuat detail soal.";
   reviewExplanationButton.disabled = true;
+  checkSimilarityPreviewButton.disabled = true;
   const previewPanel = document.querySelector(".saved-preview");
   previewPanel?.classList.remove("is-loaded");
   previewPanel?.classList.add("is-loading");
@@ -532,14 +812,22 @@ async function loadSavedPreview(runId) {
   const question = data.question;
   const caption = data.caption;
   const validation = data.validation;
+  activePreviewData = data;
   previewTitle.textContent = `${question.mapel}: ${question.topik}`;
   activePreviewSource = sharedSourceText(data);
   setPreviewStatus(savedItems.find((item) => item.run_id === runId)?.status || "saved");
   setPreviewActionState(selectedItem);
-  validationScore.textContent = `Skor ${validation.skor ?? "-"}`;
+  validationScore.textContent = `Skor ${validation.skor ?? "-"} - ${similaritySummary(data.dedup)}`;
   runNote.textContent = reviewNote(data);
+  const job = reviewJobFor(runId);
+  if (job?.status === "done" && job.result?.explanation_review?.question_revisi) {
+    showAiReviewDraft(job.result.explanation_review);
+    runNote.textContent = "Draft review sudah siap. JSON asli belum berubah; periksa draft lalu pilih Terapkan atau Cancel.";
+  } else if (job?.status === "error") {
+    runNote.textContent = "Cek pembahasan terakhir gagal. Detail tersimpan di indikator card.";
+  }
   renderImages(data);
-  reviewExplanationButton.disabled = false;
+  updateReviewControls(runId);
   generateImageButton.disabled = false;
   deleteImageButton.disabled = !(data.web_files?.images || []).length;
   questionText.textContent = sharedFormatQuestionText(question.soal);
@@ -590,6 +878,7 @@ function clearPreviewIfDeleted(runId) {
   downloadAllLink.href = "#";
   copyCaptionButton.disabled = true;
   reviewExplanationButton.disabled = true;
+  checkSimilarityPreviewButton.disabled = true;
   setPreviewActionState(null);
   debugPanel.hidden = true;
   closePreviewPanel();
@@ -597,31 +886,36 @@ function clearPreviewIfDeleted(runId) {
 
 async function reviewExplanation() {
   if (!activePreviewRunId) return;
+  const runId = activePreviewRunId;
   reviewExplanationButton.disabled = true;
   reviewExplanationButton.textContent = "Checking";
   setStatus("Reviewing");
+  runNote.textContent = "Cek pembahasan AI dimulai. Kamu bisa buka soal lain; indikator tetap muncul di card.";
   try {
-    const response = await fetch(`/saved/${activePreviewRunId}/explanation-review`, {
+    const response = await fetch(`/saved/${runId}/explanation-review`, {
       method: "POST",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({provider: "gemini"}),
     });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "Cek pembahasan gagal.");
-    if (!data.explanation_review?.question_revisi) {
-      throw new Error("AI tidak mengembalikan draft JSON revisi.");
-    }
-    showAiReviewDraft(data.explanation_review);
-    setStatus("Draft ready");
-    runNote.textContent = "Review selesai. JSON asli belum berubah; periksa draft lalu pilih Terapkan atau Cancel.";
+    const job = await response.json();
+    if (!response.ok) throw new Error(job.error || "Cek pembahasan gagal.");
+    setReviewJob(runId, job);
+    updateReviewJobIndicator(runId);
+    updateReviewControls(runId);
+    await pollReviewJob(runId);
   } catch (error) {
     setStatus("Error");
     debugPanel.hidden = false;
     debugSource.textContent = "explanation-review";
     debugText.textContent = error.stack || error.message;
-  } finally {
-    reviewExplanationButton.disabled = false;
-    reviewExplanationButton.textContent = "Cek pembahasan AI";
+    setReviewJob(runId, {
+      run_id: runId,
+      status: "error",
+      error: error.message,
+      finished_at: new Date().toISOString(),
+    });
+    updateReviewJobIndicator(runId);
+    updateReviewControls(runId);
   }
 }
 
@@ -644,6 +938,7 @@ async function applyAiReviewDraft() {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Penerapan revisi gagal.");
     clearAiReviewDraft();
+    clearReviewJob(runId);
     await loadSavedList();
     await loadSavedPreview(runId);
     setStatus("Applied");
@@ -662,9 +957,12 @@ async function applyAiReviewDraft() {
 
 function cancelAiReviewDraft() {
   if (!pendingExplanationReview) return;
+  const runId = activePreviewRunId;
+  clearReviewJob(activePreviewRunId);
   clearAiReviewDraft();
   setStatus("Canceled");
   runNote.textContent = "Draft AI dibatalkan. JSON asli tidak berubah.";
+  updateReviewJobIndicator(runId);
 }
 
 async function updateSavedStatus(runId, status) {
@@ -809,6 +1107,9 @@ refreshSavedButton.addEventListener("click", () => {
 generateImageButton.addEventListener("click", generateSavedImages);
 deleteImageButton.addEventListener("click", deleteSavedImages);
 reviewExplanationButton.addEventListener("click", reviewExplanation);
+checkSimilarityPreviewButton.addEventListener("click", () => {
+  if (activePreviewRunId) checkSimilarityForSavedRun(activePreviewRunId);
+});
 applyAiReviewButton.addEventListener("click", applyAiReviewDraft);
 cancelAiReviewButton.addEventListener("click", cancelAiReviewDraft);
 approvePreviewButton.addEventListener("click", () => {
@@ -831,10 +1132,6 @@ closePreviewButton.addEventListener("click", closePreviewPanel);
 
 savedSearch.addEventListener("input", () => renderSavedList());
 savedStatusFilter.addEventListener("change", () => {
-  renderSubtopicTabs();
-  renderSavedList();
-});
-tryoutReadinessFilter.addEventListener("change", () => {
   renderSubtopicTabs();
   renderSavedList();
 });
@@ -872,6 +1169,7 @@ copyCaptionButton.addEventListener("click", async () => {
 });
 
 async function init() {
+  loadReviewJobs();
   await loadConfig();
   closePreviewPanel();
   await loadSavedList();

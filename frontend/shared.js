@@ -15,6 +15,22 @@ function sourceText(data) {
   return data.source || "Draft lokal";
 }
 
+function syncTopbarMetrics() {
+  const root = document.documentElement;
+  const topbar = document.querySelector(".topbar");
+  if (!topbar) {
+    root.style.setProperty("--topbar-height", "64px");
+    root.style.setProperty("--topbar-offset", "76px");
+    return;
+  }
+
+  const height = Math.ceil(topbar.getBoundingClientRect().height);
+  const offset = height + 12;
+  root.style.setProperty("--topbar-height", `${height}px`);
+  root.style.setProperty("--topbar-offset", `${offset}px`);
+  document.body.dataset.scrolled = window.scrollY > 6 ? "true" : "false";
+}
+
 function renderDebug(data, elements) {
   const {debugPanel, debugSource, debugText} = elements;
   const errors = data.errors || {};
@@ -159,5 +175,15 @@ window.LatsoalShared = {
   renderDebug,
   renderImages,
   saveImagesToFolder,
+  syncTopbarMetrics,
   sourceText,
 };
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", syncTopbarMetrics, {once: true});
+} else {
+  syncTopbarMetrics();
+}
+
+window.addEventListener("resize", syncTopbarMetrics);
+window.addEventListener("scroll", syncTopbarMetrics, {passive: true});

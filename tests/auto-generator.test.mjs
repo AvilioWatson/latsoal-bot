@@ -54,12 +54,18 @@ test("generator page exposes the auto generator controls and endpoint", async ()
   assert.match(html, /id="batchResultList"/);
   assert.match(html, /id="saveAllBatchButton"/);
   assert.match(html, /id="resetCacheButton"/);
+  assert.match(html, /id="checkSimilarityButton"/);
+  assert.match(html, /id="similarPreviewPanel"/);
+  assert.match(html, /id="currentSimilarityChip"/);
   assert.match(html, /name="auto_count" value="5"/);
   assert.match(html, /name="auto_count" value="10"/);
   assert.match(html, /name="auto_count" value="15"/);
   assert.match(script, /\/generate\/auto/);
+  assert.match(script, /\/api\/generate\/similarity/);
   assert.match(script, /delete payload\.topik/);
   assert.match(script, /function renderBatchList/);
+  assert.match(script, /function checkSimilarityForCurrentRun/);
+  assert.match(script, /function renderSimilarPreview/);
   assert.match(script, /data\.results \|\| \[\]/);
   assert.match(script, /function saveAllBatchResults/);
   assert.match(script, /saveAllBatchButton\?\.addEventListener\("click", saveAllBatchResults\)/);

@@ -90,6 +90,10 @@ EXPLANATION_REVIEW_SCHEMA = {
         },
         "pembahasan_revisi": {"type": "STRING"},
         "question_revisi": QUESTION_SCHEMA,
+        "question_group_revisi": {
+            "type": "ARRAY",
+            "items": QUESTION_SCHEMA,
+        },
     },
     "required": [
         "lolos",

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {metadataToTryoutQuestion} from "../lib/tryout-export.js";
+import {metadataToTryoutQuestion, metadataToTryoutQuestions} from "../lib/tryout-export.js";
 
 test("metadataToTryoutQuestion maps saved metadata to tryout export v1", () => {
   const item = metadataToTryoutQuestion("20990101-010101", {
@@ -91,4 +91,51 @@ test("metadataToTryoutQuestion exports passage metadata additively", () => {
   assert.equal(item.passage_order, 3);
   assert.equal(item.stem_text, "Simpulan utama bacaan tersebut adalah ...");
   assert.match(item.question_text, /Ruang terbuka membantu warga/);
+});
+
+test("metadataToTryoutQuestions flattens grouped passage questions", () => {
+  const items = metadataToTryoutQuestions("20990101-010103", {
+    review_status: "ready",
+    question: {
+      mapel: "Literasi Bahasa Indonesia",
+      topik: "Memahami Informasi",
+      level: "sedang",
+      soal: "Soal pertama",
+      pilihan: {A: "A1", B: "B1", C: "C1", D: "D1", E: "E1"},
+      jawaban: "A",
+      pembahasan: "Pembahasan pertama",
+      group_total_soal: 2,
+      bacaan: {
+        id: "LBI-002",
+        judul: "Transportasi",
+        teks: "Transportasi publik membantu mobilitas warga dan menekan kemacetan.",
+        bahasa: "id",
+        nomor_soal: 1,
+        total_soal: 2,
+      },
+      question_group: [
+        {
+          nomor_soal: 1,
+          soal: "Soal pertama",
+          pilihan: {A: "A1", B: "B1", C: "C1", D: "D1", E: "E1"},
+          jawaban: "A",
+          pembahasan: "Pembahasan pertama",
+        },
+        {
+          nomor_soal: 2,
+          soal: "Soal kedua",
+          pilihan: {A: "A2", B: "B2", C: "C2", D: "D2", E: "E2"},
+          jawaban: "B",
+          pembahasan: "Pembahasan kedua",
+        },
+      ],
+    },
+  }, "export-4");
+
+  assert.equal(items.length, 2);
+  assert.equal(items[0].external_id, "20990101-010103-1");
+  assert.equal(items[1].external_id, "20990101-010103-2");
+  assert.equal(items[1].passage_order, 2);
+  assert.equal(items[1].correct_answer, "B");
+  assert.equal(items[1].stem_text, "Soal kedua");
 });

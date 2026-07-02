@@ -31,10 +31,28 @@ const batchResultCount = document.querySelector("#batchResultCount");
 const batchResultList = document.querySelector("#batchResultList");
 const saveAllBatchButton = document.querySelector("#saveAllBatchButton");
 const resetCacheButton = document.querySelector("#resetCacheButton");
+const checkSimilarityButton = document.querySelector("#checkSimilarityButton");
+const previewCompareLayout = document.querySelector("#previewCompareLayout");
+const currentSimilarityChip = document.querySelector("#currentSimilarityChip");
+const similarPreviewPanel = document.querySelector("#similarPreviewPanel");
+const similarPreviewTitle = document.querySelector("#similarPreviewTitle");
+const similarRunNote = document.querySelector("#similarRunNote");
+const similarityMatchScore = document.querySelector("#similarityMatchScore");
+const openSavedMatchLink = document.querySelector("#openSavedMatchLink");
+const similarMetadataLink = document.querySelector("#similarMetadataLink");
+const similarImagePreviewList = document.querySelector("#similarImagePreviewList");
+const similarImageCount = document.querySelector("#similarImageCount");
+const similarValidationScore = document.querySelector("#similarValidationScore");
+const similarQuestionText = document.querySelector("#similarQuestionText");
+const similarChoicesList = document.querySelector("#similarChoicesList");
+const similarCaptionText = document.querySelector("#similarCaptionText");
+const similarHashtagText = document.querySelector("#similarHashtagText");
+const similarSourceLabel = document.querySelector("#similarSourceLabel");
 const BATCH_STORAGE_KEY = "latsoal:auto-generator:latest";
 
 let topicsByMapel = {};
 let currentRunId = "";
+let currentPreviewData = null;
 let batchItems = [];
 const {
   copyCaption: sharedCopyCaption = async (elements, setStatusCallback) => {
@@ -97,12 +115,117 @@ function similarityText(data) {
   return `Similarity ${percent}%${match}`;
 }
 
+function similarityPercent(similarity) {
+  const value = Number(similarity);
+  if (!Number.isFinite(value)) return "-";
+  return `${Math.round(value * 1000) / 10}%`;
+}
+
+function similarityBadgeState(dedup) {
+  const similarity = Number(dedup?.similarity);
+  if (!Number.isFinite(similarity)) return "pending";
+  if (dedup?.is_duplicate) return "similar";
+  return similarity > 0 ? "checked" : "clear";
+}
+
+function applySimilarityBadge(element, dedup, {includeMatch = false, prefix = "Similarity"} = {}) {
+  if (!element) return;
+  const similarity = Number(dedup?.similarity);
+  if (!Number.isFinite(similarity)) {
+    element.textContent = `${prefix} -`;
+    element.dataset.state = "pending";
+    return;
+  }
+  const match = includeMatch && dedup?.matched_run_id ? ` · ${dedup.matched_run_id}` : "";
+  element.textContent = `${prefix} ${similarityPercent(similarity)}${match}`;
+  element.dataset.state = similarityBadgeState(dedup);
+}
+
+function setImagePlaceholder(container, text) {
+  container.innerHTML = "";
+  const placeholder = document.createElement("p");
+  placeholder.className = "body-copy";
+  placeholder.textContent = text;
+  container.append(placeholder);
+}
+
+function renderPreviewImages(data, elements, emptyText) {
+  renderImages(data, elements);
+  if (!Array.isArray(data?.web_files?.images) || data.web_files.images.length === 0) {
+    setImagePlaceholder(elements.imagePreviewList, emptyText);
+  }
+}
+
+function renderChoices(target, choices = {}) {
+  target.innerHTML = "";
+  for (const [key, value] of Object.entries(choices || {})) {
+    const item = document.createElement("li");
+    item.innerHTML = `<strong>${key}</strong><span></span>`;
+    item.querySelector("span").textContent = value;
+    target.append(item);
+  }
+}
+
+function syncCurrentSimilarityUi(dedup) {
+  if (!currentPreviewData) return;
+  currentPreviewData = {...currentPreviewData, dedup};
+  validationScore.textContent = `Skor ${currentPreviewData.validation?.skor ?? "-"} · ${similarityText(currentPreviewData)}`;
+  runNote.textContent = reviewNote(currentPreviewData);
+  applySimilarityBadge(currentSimilarityChip, dedup);
+}
+
+function clearSimilarPreview({hide = true, note} = {}) {
+  if (!similarPreviewPanel) return;
+  similarPreviewPanel.hidden = hide;
+  previewCompareLayout.dataset.hasMatch = hide ? "false" : "true";
+  similarPreviewTitle.textContent = hide ? "Belum dicek" : "Tidak ada soal mirip";
+  similarRunNote.textContent = note || (hide
+    ? "Klik Cek Similarity untuk melihat soal saved yang paling mirip."
+    : "Belum ada soal saved yang melewati threshold similarity.");
+  similarValidationScore.textContent = "Skor belum tersedia";
+  similarQuestionText.textContent = hide ? "Belum ada soal pembanding." : "Tidak ada pembanding yang perlu direview.";
+  similarChoicesList.innerHTML = "";
+  similarCaptionText.textContent = "Caption soal pembanding akan muncul di sini.";
+  similarHashtagText.textContent = "";
+  similarSourceLabel.textContent = "Bank Review";
+  similarImageCount.textContent = "0 page";
+  setImagePlaceholder(similarImagePreviewList, hide
+    ? "Preview soal pembanding akan muncul di sini."
+    : "Tidak ada soal saved yang cukup mirip untuk ditampilkan.");
+  applySimilarityBadge(similarityMatchScore, null);
+  openSavedMatchLink.hidden = true;
+  openSavedMatchLink.href = "#";
+  similarMetadataLink.hidden = true;
+  similarMetadataLink.href = "#";
+}
+
+function renderSimilarPreview(match, dedup) {
+  const question = match.question || {};
+  const caption = match.caption || {};
+  similarPreviewPanel.hidden = false;
+  previewCompareLayout.dataset.hasMatch = "true";
+  similarPreviewTitle.textContent = `${question.mapel || "Tanpa subtes"}: ${question.topik || "Tanpa subtopik"}`;
+  similarRunNote.textContent = `Run ${match.run_id || "-"} di Bank Review paling mirip dengan preview kanan.`;
+  similarValidationScore.textContent = `Skor ${match.validation?.skor ?? "-"} · Similarity ${similarityPercent(dedup?.similarity)}`;
+  similarSourceLabel.textContent = match.source === "import" ? "Import" : "Bank Review";
+  similarQuestionText.textContent = sharedFormatQuestionText(question.soal || "");
+  renderChoices(similarChoicesList, question.pilihan || {});
+  similarCaptionText.textContent = caption.caption || "";
+  similarHashtagText.textContent = Array.isArray(caption.hashtag) ? caption.hashtag.join(" ") : "";
+  renderPreviewImages(match, {imageCount: similarImageCount, imagePreviewList: similarImagePreviewList}, "Preview soal pembanding belum memiliki gambar.");
+  applySimilarityBadge(similarityMatchScore, dedup, {includeMatch: false});
+  openSavedMatchLink.hidden = !match.run_id;
+  openSavedMatchLink.href = match.run_id ? `/saved/${match.run_id}` : "#";
+  similarMetadataLink.hidden = !match.web_files?.metadata;
+  similarMetadataLink.href = match.web_files?.metadata || "#";
+}
+
 function renderDebug(data) {
   sharedRenderDebug(data, {debugPanel, debugSource, debugText});
 }
 
-function renderImages(data) {
-  sharedRenderImages(data, {imageCount, imagePreviewList});
+function renderImages(data, elements = {imageCount, imagePreviewList}) {
+  sharedRenderImages(data, elements);
 }
 
 function readStoredBatchState() {
@@ -154,6 +277,7 @@ function hideBatchResults({clearStored = true} = {}) {
 
 function clearPreviewDraft() {
   currentRunId = "";
+  currentPreviewData = null;
   previewTitle.textContent = "Belum ada output";
   runNote.textContent = "Generate konten untuk mulai review.";
   sourceLabel.textContent = "Manual";
@@ -171,6 +295,9 @@ function clearPreviewDraft() {
   saveButton.disabled = true;
   saveButton.textContent = "Simpan";
   copyCaptionButton.disabled = true;
+  checkSimilarityButton.disabled = true;
+  applySimilarityBadge(currentSimilarityChip, null);
+  clearSimilarPreview();
   debugPanel.hidden = true;
   debugSource.textContent = "Tidak ada";
   debugText.textContent = "";
@@ -291,6 +418,7 @@ function renderResult(data) {
 }
 
 function renderPreviewResult(data) {
+  currentPreviewData = data;
   currentRunId = data.run_id;
   const question = data.question;
   const caption = data.caption;
@@ -300,16 +428,9 @@ function renderPreviewResult(data) {
   validationScore.textContent = `Skor ${validation.skor ?? "-"} · ${similarityText(data)}`;
   runNote.textContent = reviewNote(data);
   renderDebug(data);
-  renderImages(data);
+  renderPreviewImages(data, {imageCount, imagePreviewList}, "Gambar 1000x1000 akan muncul di sini.");
   questionText.textContent = sharedFormatQuestionText(question.soal);
-
-  choicesList.innerHTML = "";
-  for (const [key, value] of Object.entries(question.pilihan)) {
-    const item = document.createElement("li");
-    item.innerHTML = `<strong>${key}</strong><span></span>`;
-    item.querySelector("span").textContent = value;
-    choicesList.append(item);
-  }
+  renderChoices(choicesList, question.pilihan);
 
   captionText.textContent = caption.caption || "";
   hashtagText.textContent = (caption.hashtag || []).join(" ");
@@ -320,6 +441,9 @@ function renderPreviewResult(data) {
   downloadAllLink.hidden = false;
   saveButton.disabled = false;
   saveButton.textContent = "Simpan";
+  checkSimilarityButton.disabled = false;
+  applySimilarityBadge(currentSimilarityChip, data.dedup);
+  clearSimilarPreview();
 }
 
 function questionExcerpt(question) {
@@ -557,6 +681,55 @@ async function resetGeneratorCache() {
   }
 }
 
+async function checkSimilarityForCurrentRun() {
+  if (!currentRunId) return;
+  checkSimilarityButton.disabled = true;
+  checkSimilarityButton.textContent = "Mengecek...";
+  setStatus("Checking similarity");
+  clearSimilarPreview({
+    hide: false,
+    note: "Menghitung ulang similarity terhadap item di Bank Review.",
+  });
+  similarPreviewTitle.textContent = "Mencari soal paling mirip";
+
+  try {
+    const response = await fetch("/api/generate/similarity", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({run_id: currentRunId}),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || "Gagal menghitung ulang similarity.");
+    }
+
+    syncCurrentSimilarityUi(data.dedup);
+    if (data.match) {
+      renderSimilarPreview(data.match, data.dedup);
+      setStatus("Similarity checked");
+    } else {
+      clearSimilarPreview({
+        hide: false,
+        note: `Similarity tertinggi ${similarityPercent(data.dedup?.similarity)} masih di bawah threshold ${similarityPercent(data.threshold)}.`,
+      });
+      applySimilarityBadge(similarityMatchScore, data.dedup);
+      setStatus("Similarity clear");
+    }
+  } catch (error) {
+    setStatus("Error");
+    clearSimilarPreview({
+      hide: false,
+      note: error.message,
+    });
+    debugPanel.hidden = false;
+    debugSource.textContent = "similarity";
+    debugText.textContent = error.stack || error.message;
+  } finally {
+    checkSimilarityButton.disabled = !currentRunId;
+    checkSimilarityButton.textContent = "Cek Similarity";
+  }
+}
+
 function restoreBatchState() {
   const stored = readStoredBatchState();
   if (!stored?.results?.length) return;
@@ -653,6 +826,7 @@ autoGenerateButton?.addEventListener("click", async () => {
 
 saveAllBatchButton?.addEventListener("click", saveAllBatchResults);
 resetCacheButton?.addEventListener("click", resetGeneratorCache);
+checkSimilarityButton?.addEventListener("click", checkSimilarityForCurrentRun);
 
 saveButton.addEventListener("click", async () => {
   if (!currentRunId) return;

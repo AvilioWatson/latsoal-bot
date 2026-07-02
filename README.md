@@ -41,17 +41,33 @@ Implemented question generation, review workflow, validation, deduplication, cap
 - Preview soal, pilihan jawaban, caption, metadata, dan error/fallback.
 - Generate gambar post soal 1000x1000 dan JPG pembahasan otomatis.
 - Tambahkan thumbnail pembuka 1080x1080 yang berisi judul subtes dan subtopik.
+- Render bacaan multi-soal sebagai satu paket gambar: thumbnail, halaman bacaan, halaman soal berurutan, lalu pembahasan.
+- Format bacaan memakai paragraf rapat dengan indent visual pada paragraf yang membungkus beberapa baris.
 - Preview dan download semua file run sebagai ZIP berisi satu folder.
 - Simpan soal yang dianggap bagus ke Bank Review.
 - Bank Review terpisah dari halaman generator.
 - Bank Review bisa dibuka per subtes.
+- Bank Review memakai label singkat subtes pada filter dan kartu, misalnya `PPU`, `PU`, `PBM`, `LBE`, `LBI`, `PK`, dan `PM`, sementara JSON tetap menyimpan nama panjang.
 - Bank Review mempertahankan topik asli soal, sekaligus tetap bisa mencari topik kanonis seperti `Aljabar dan Fungsi`.
+- Panel preview Bank Review dibuka sebagai preview setengah layar dan menyembunyikan navbar agar area gambar lebih penuh.
 - Generate ulang atau hapus gambar dari item saved.
 - Approve atau reject soal saved.
 - Tandai soal saved yang sudah diupload.
 - Export semua item approved ke folder `approved/`.
 - Dedup lokal terhadap soal yang sudah tersimpan.
+- Cek similarity ulang dari Generator atau Bank Review untuk memperbarui skor dedup terhadap item saved terbaru.
 - Validator lokal untuk mengecek struktur soal, opsi jawaban, caption, hashtag, dan potensi masalah dasar.
+- Cek pembahasan AI mendukung paket bacaan multi-soal lewat `question_group_revisi`, lalu bisa menerapkan revisi ke semua run dalam satu grup bacaan.
+
+## Peta Cepat Untuk Agent
+
+Panduan kerja cepat untuk agent berikutnya tersedia di:
+
+```text
+AGENTS.md
+```
+
+Gunakan file tersebut sebagai entry point sebelum mengubah kode. Isinya merangkum struktur folder, alur request, area renderer, Bank Review, import/export, data runtime, dan perintah verifikasi yang paling relevan per jenis perubahan.
 
 ## Halaman Web
 
@@ -87,6 +103,7 @@ Halaman untuk meninjau semua soal yang sudah disimpan. Di halaman ini kamu bisa:
 - copy caption;
 - buka metadata JSON;
 - download folder saved sebagai ZIP;
+- cek similarity ulang dari kartu item atau panel preview untuk membandingkan soal terhadap item saved lain;
 - approve, reject, atau hapus soal saved;
 - tandai soal yang sudah diupload;
 - export semua soal approved.
@@ -411,6 +428,8 @@ Metadata soal pembanding tetap dibaca dari:
 saved/<kode-subtes>/<topik>/<run-id>/metadata.json
 ```
 
+Di halaman Generator, tombol `Cek Similarity` menghitung ulang kemiripan output aktif terhadap Bank Review sebelum item disimpan. Di halaman Bank Review, tombol yang sama tersedia pada setiap kartu saved dan pada panel preview. Tombol ini mengecualikan `run-id` item yang sedang dicek, memperbarui `metadata.dedup`, memperbarui status duplicate di `bank/index.json`, lalu menyegarkan chip `Similarity ...%` di UI.
+
 ## Output File
 
 Setiap run membuat folder:
@@ -459,6 +478,15 @@ LATSOAL_RENDER_ENGINE=latex  # paksa LaTeX/TikZ -> PDF -> JPG
 ```
 
 Mode PIL cukup membutuhkan Pillow dan menghasilkan thumbnail, soal, pilihan ganda, serta pembahasan siap upload. Layout soal, opsi, jawaban, dan pembahasan memakai kotak putih; jika masih muat, pilihan ganda digabung di halaman soal agar ruang kosong tidak terbuang. Konten di halaman lanjutan dimulai dari area atas, bukan dipusatkan ke bawah.
+
+Untuk soal berbasis bacaan dengan `bacaan.total_soal > 1`, renderer PIL mencari soal lain yang memiliki `mapel`, `bacaan.id`, dan teks bacaan yang sama. Jika semua nomor soal tersedia, output dibuat sebagai satu paket bacaan:
+
+- thumbnail subtes/topik;
+- halaman bacaan dengan judul di tengah;
+- halaman soal berurutan `Soal 1/N`, `Soal 2/N`, dst;
+- halaman pembahasan berurutan.
+
+Format halaman bacaan tidak memberi jarak kosong besar antarparagraf. Paragraf baru tetap turun baris rapat. Baris pertama paragraf diberi indent visual hanya jika paragraf tersebut membungkus menjadi lebih dari satu baris; paragraf satu baris tetap rata kiri.
 
 Mode LaTeX membutuhkan:
 
@@ -514,6 +542,10 @@ Tombol `Export approved` hanya menyalin item berstatus `Approved` ke folder `app
 Tombol `Sudah diupload` menandai item dengan `uploaded_at`, sedangkan `Tidak jadi diupload` mengosongkan tanda tersebut tanpa mengubah status review. Catatan upload tetap terpisah dari alur approve/reject/export.
 
 Di Bank Review, tombol `Generate` pada panel gambar menjalankan ulang renderer dari `metadata.json`. Tombol `Hapus gambar` menghapus `1.jpg`, `2.jpg`, dst serta file render intermediate dari item saved tanpa menghapus data soal, caption, atau metadata utama.
+
+Tombol `Cek Similarity` di kartu atau panel preview Bank Review menjalankan ulang dedup untuk item saved aktif. Hasilnya disimpan ke `metadata.json`, chip similarity pada kartu diperbarui, dan panel preview menampilkan run pembanding dengan skor tertinggi jika ada.
+
+Tombol `Cek pembahasan AI` memakai `content_generator.py --review-explanation`. Untuk soal bacaan multi-soal, prompt dikirim sebagai satu paket `question_group`; hasil AI dapat mengembalikan `question_group_revisi`. Saat revisi diterapkan, server mencari semua run dengan `mapel`, `bacaan.id`, dan teks bacaan yang sama, lalu menyimpan revisi ke masing-masing `metadata.json` dan `soal.json`.
 
 Bank Review dibangun ulang dari file `saved/**/metadata.json` saat daftar dimuat. Ini membuat item lama tetap muncul walaupun index pernah tertinggal. Status review terbaru di `bank/index.json` tetap dipertahankan saat rebuild.
 

@@ -91,6 +91,18 @@ async function waitForHealth(baseUrl) {
   throw lastError || new Error("Server did not become healthy.");
 }
 
+async function waitForReviewJob(baseUrl, runId) {
+  const deadline = Date.now() + 8000;
+  let body = null;
+  while (Date.now() < deadline) {
+    const response = await fetch(`${baseUrl}/saved/${runId}/explanation-review/status`);
+    body = await response.json();
+    if (response.ok && body.status !== "running") return body;
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+  throw new Error(`Review job did not finish: ${JSON.stringify(body)}`);
+}
+
 test("bank review API can save, approve, export, and delete in an isolated data root", async () => {
   const dataRoot = await mkdtemp(path.join(os.tmpdir(), "latsoal-api-"));
   const taxonomyPath = await writeTaxonomyCopy(dataRoot);
@@ -228,6 +240,21 @@ test("bank review API can save, approve, export, and delete in an isolated data 
     assert.equal((await response.json()).run_id, RUN_ID);
 
     await writeUnsavedOutput(dataRoot);
+    response = await fetch(`${baseUrl}/api/generate/similarity`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({run_id: UNSAVED_RUN_ID}),
+    });
+    assert.equal(response.status, 200);
+    body = await response.json();
+    assert.equal(body.run_id, UNSAVED_RUN_ID);
+    assert.equal(body.dedup.matched_run_id, RUN_ID);
+    assert.equal(body.dedup.is_duplicate, true);
+    assert.equal(body.match.run_id, RUN_ID);
+    assert.equal(body.match.question.soal, metadata().question.soal);
+    const unsavedSimilarity = JSON.parse(await readFile(path.join(dataRoot, "outputs", UNSAVED_RUN_ID, "metadata.json"), "utf-8"));
+    assert.equal(unsavedSimilarity.dedup.matched_run_id, RUN_ID);
+
     response = await fetch(`${baseUrl}/api/generator/cache`);
     assert.equal(response.status, 200);
     body = await response.json();
@@ -266,10 +293,26 @@ test("bank review API can save, approve, export, and delete in an isolated data 
     body = await response.json();
     assert.equal(body.items.length, 1);
     assert.equal(body.items[0].status, "saved");
+    assert.equal(body.items[0].dedup, null);
     assert.equal(body.items[0].uploaded_at, null);
     assert.equal(body.items[0].tryout_ready, false);
     assert.ok(Array.isArray(body.items[0].tryout_warnings));
     assert.equal(body.items[0].taxonomy_state.ok, true);
+
+    response = await fetch(`${baseUrl}/saved/${RUN_ID}`, {headers: {Accept: "application/json"}});
+    assert.equal(response.status, 200);
+    body = await response.json();
+    response = await fetch(`${baseUrl}/saved/${RUN_ID}/explanation-review`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({provider: "gemini"}),
+    });
+    assert.equal(response.status, 202);
+    body = await response.json();
+    assert.equal(body.status, "running");
+    body = await waitForReviewJob(baseUrl, RUN_ID);
+    assert.equal(body.status, "done");
+    assert.equal(body.result.explanation_review.question_revisi.soal, metadata().question.soal);
 
     response = await fetch(`${baseUrl}/saved/${RUN_ID}`, {headers: {Accept: "application/json"}});
     assert.equal(response.status, 200);
@@ -394,6 +437,7 @@ test("bank review API can save, approve, export, and delete in an isolated data 
     assert.equal(response.status, 200);
     body = await response.json();
     assert.equal(body.items[0].uploaded_at, null);
+    assert.equal(body.items[0].dedup, null);
     assert.equal(body.items[0].tryout_ready, true);
     assert.equal(body.items[0].tryout_warning_count, 0);
 
@@ -481,8 +525,9 @@ test("import page validates and imports a JSON batch", async () => {
     let body = await response.json();
     assert.equal(body.threshold, 0.82);
     assert.ok(Array.isArray(body.template));
-    assert.ok(body.prompts["Penalaran Matematika"].includes("1 bacaan untuk tepat 5 soal"));
-    assert.equal(body.templates["Penalaran Matematika"][0].bacaan.total_soal, 5);
+    assert.ok(body.prompts["Penalaran Matematika"].includes("1 sampai 5 soal"));
+    assert.ok(body.prompts["Penalaran Matematika"].includes("file .json yang bisa saya download"));
+    assert.equal(body.templates["Penalaran Matematika"][0].bacaan.total_soal, 3);
     assert.equal(body.default_subtest, "Penalaran Matematika");
     assert.match(body.prompt, /JSON array/);
     assert.match(body.prompt, /Prompt PK - Pengetahuan Kuantitatif/);

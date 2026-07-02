@@ -172,6 +172,17 @@ def build_validation_prompt(question):
 
 
 def build_explanation_review_prompt(question):
+    has_group = isinstance(question, dict) and isinstance(question.get("question_group"), list) and question.get("question_group")
+    group_rules = (
+        "Input berisi satu bacaan dengan beberapa soal dalam question_group. "
+        "Review semua soal dalam grup tersebut sebagai satu paket bacaan. "
+        "Jangan hanya mengembalikan satu soal. "
+        "Kembalikan question_group_revisi berupa array berisi semua soal yang sudah direvisi, "
+        "dengan urutan, bacaan.nomor_soal, dan jumlah item yang sama seperti input question_group. "
+        "question_revisi harus berisi revisi untuk soal aktif/current_question saja. "
+        if has_group else
+        "Jika input tidak memiliki question_group, cukup kembalikan question_revisi untuk satu soal. "
+    )
     return (
         "Kamu adalah reviewer akademik UTBK/SNBT yang ketat. "
         "Periksa pembahasan soal berikut sebelum soal di-approve. "
@@ -185,6 +196,7 @@ def build_explanation_review_prompt(question):
         "butuh_visual, dan deskripsi_visual bila diperlukan agar konsisten dan akurat. "
         "Nilai lolos dan skor harus merujuk pada question_revisi final, bukan versi awal. "
         "pembahasan_revisi harus sama dengan question_revisi.pembahasan. "
+        f"{group_rules}"
         "Output harus satu objek JSON valid tanpa markdown, pagar kode, atau teks tambahan. "
         "Gunakan escape \\n untuk newline di dalam string. Jangan memakai backslash selain escape JSON resmi.\n\n"
         f"{json.dumps(question, ensure_ascii=False, indent=2)}\n\n"
@@ -194,7 +206,8 @@ def build_explanation_review_prompt(question):
         '"question_revisi": {"mapel": "", "kelompok_tes": "", "topik": "", "level": "", '
         '"soal": "", "pilihan": {"A": "", "B": "", "C": "", "D": "", "E": ""}, '
         '"jawaban": "", "pembahasan": "", "konsep_kunci": "", "tips_pengerjaan": "", '
-        '"butuh_visual": false, "deskripsi_visual": ""}}'
+        '"butuh_visual": false, "deskripsi_visual": ""}, '
+        '"question_group_revisi": []}'
     )
 
 

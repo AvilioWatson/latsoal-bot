@@ -1,4 +1,5 @@
 import argparse
+import copy
 import datetime as dt
 import importlib
 import io
@@ -555,6 +556,8 @@ def _split_sentences(text):
 
 def _format_question_text(text):
     formatted = str(text).replace("\r\n", "\n").replace("\r", "\n")
+    paragraph_break = "__LATSOAL_QUESTION_PARAGRAPH_BREAK__"
+    formatted = re.sub(r"(?<=[.!?:])\s*\n\s*\n+", f" {paragraph_break} ", formatted)
     # LLM output can contain arbitrary hard wraps or blank lines in the middle
     # of a sentence. Treat those as spaces, then add back only the structural
     # line breaks that the renderer intentionally supports below.
@@ -572,6 +575,7 @@ def _format_question_text(text):
     if len(numbered_statements) >= 2:
         formatted = re.sub(r"\s+(?=\([1-9]\d?\)(?=\s))", "\n", formatted)
     formatted = re.sub(r"\s+(Simpulan\b)", r"\n\1", formatted)
+    formatted = formatted.replace(f" {paragraph_break} ", "\n\n").replace(paragraph_break, "\n\n")
     return re.sub(r"\n{3,}", "\n\n", formatted).strip()
 
 
@@ -606,13 +610,53 @@ def _question_formula_parts(text):
     }
 
 
+PASSAGE_PARAGRAPH_BREAK = "\u2029"
+PASSAGE_INDENT_MARKER = "\u2060"
+QUESTION_INDENT_PX = 28
+
+
+def _is_numbered_paragraph(text):
+    return bool(re.match(r"^(?:\([1-9]\d?\)|[1-9]\d?\.|[A-E]\.)\s+", str(text or "").strip()))
+
+
+def _strip_indent_marker(line):
+    line = str(line or "")
+    return line[len(PASSAGE_INDENT_MARKER):] if line.startswith(PASSAGE_INDENT_MARKER) else line
+
+
+def _drawable_line_count(lines):
+    return sum(1 for line in lines if line != PASSAGE_PARAGRAPH_BREAK)
+
+
 def _wrap_question_paragraphs(draw, text, font, max_width):
-    formatted = _format_question_text(text)
+    formatted = _format_question_text(text).replace("\r\n", "\n").replace("\r", "\n")
+    raw_paragraphs = [
+        paragraph.strip()
+        for paragraph in re.split(r"\n{2,}|\n", formatted)
+        if paragraph.strip()
+    ]
     paragraphs = []
-    for paragraph in re.split(r"\n{2,}|\n", formatted):
-        paragraph = paragraph.strip()
+    for index, paragraph in enumerate(raw_paragraphs):
+        indent = index > 0 and not _is_numbered_paragraph(paragraph)
+        wrap_width = max_width - QUESTION_INDENT_PX if indent else max_width
+        wrapped = _wrap_text(draw, paragraph, font, wrap_width)
+        if indent and wrapped:
+            wrapped[0] = f"{PASSAGE_INDENT_MARKER}{wrapped[0]}"
+        paragraphs.append(wrapped)
+    return paragraphs or [[""]]
+
+
+def _wrap_passage_paragraphs(draw, text, font, max_width):
+    source = str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+
+    paragraphs = []
+    for paragraph in re.split(r"\n{2,}", source):
+        paragraph = re.sub(r"\s*\n\s*", " ", paragraph).strip()
         if paragraph:
-            paragraphs.append(_wrap_text(draw, paragraph, font, max_width))
+            wrapped = _wrap_text(draw, paragraph, font, max_width)
+            if len(wrapped) > 1:
+                wrapped[0] = f"{PASSAGE_INDENT_MARKER}{wrapped[0]}"
+            paragraphs.append(wrapped)
     return paragraphs or [[""]]
 
 
@@ -620,7 +664,7 @@ def _flatten_paragraphs(paragraphs):
     lines = []
     for index, paragraph in enumerate(paragraphs):
         if index:
-            lines.append("")
+            lines.append(PASSAGE_PARAGRAPH_BREAK)
         lines.extend(paragraph)
     return _trim_blank_lines(lines)
 
@@ -634,36 +678,43 @@ def _paginate_paragraph_lines(paragraphs, first_capacity, next_capacity, paragra
         return first_capacity if not pages else next_capacity
 
     for paragraph in paragraphs:
-        paragraph_count = len(paragraph)
-        gap = paragraph_gap if current else 0
-        capacity = capacity_for_next_page()
+        line_index = 0
+        needs_gap = bool(current and paragraph_gap > 0)
 
-        if current and current_count + gap + paragraph_count > capacity:
-            pages.append(_trim_blank_lines(current))
-            current = []
-            current_count = 0
-            gap = 0
+        while line_index < len(paragraph):
             capacity = capacity_for_next_page()
+            remaining = capacity - current_count
 
-        if paragraph_count > capacity:
-            if current:
+            if needs_gap:
+                if remaining <= paragraph_gap:
+                    if current:
+                        pages.append(_trim_blank_lines(current))
+                    current = []
+                    current_count = 0
+                    continue
+                current.extend([""] * paragraph_gap)
+                current_count += paragraph_gap
+                needs_gap = False
+                remaining = capacity - current_count
+            elif current and current[-1] != PASSAGE_PARAGRAPH_BREAK and line_index == 0:
+                current.append(PASSAGE_PARAGRAPH_BREAK)
+
+            if remaining <= 0:
+                if current:
+                    pages.append(_trim_blank_lines(current))
+                current = []
+                current_count = 0
+                continue
+
+            take = min(remaining, len(paragraph) - line_index)
+            current.extend(paragraph[line_index:line_index + take])
+            current_count += take
+            line_index += take
+
+            if line_index < len(paragraph):
                 pages.append(_trim_blank_lines(current))
                 current = []
                 current_count = 0
-            for index in range(0, paragraph_count, capacity):
-                chunk = paragraph[index:index + capacity]
-                if index + capacity >= paragraph_count:
-                    current = chunk
-                    current_count = len(chunk)
-                else:
-                    pages.append(_trim_blank_lines(chunk))
-            continue
-
-        if gap > 1:
-            current.extend([""] * gap)
-            current_count += gap
-        current.extend(paragraph)
-        current_count += paragraph_count
 
     if current:
         pages.append(_trim_blank_lines(current))
@@ -697,8 +748,14 @@ def _display_question_text(question):
         return text
     title = str(passage.get("judul", "") or "").strip()
     passage_text = str(passage.get("teks", "") or "").strip()
+    try:
+        total = int(passage.get("total_soal") or 0)
+    except (TypeError, ValueError):
+        total = 0
+    if total <= 1:
+        parts = [title, passage_text, text] if title else [passage_text, text]
+        return "\n\n".join(part for part in parts if part)
     number = passage.get("nomor_soal")
-    total = passage.get("total_soal")
     label = "Bacaan"
     if title:
         label = f"{label}: {title}"
@@ -708,13 +765,291 @@ def _display_question_text(question):
     return f"{label}\n{passage_text}\n\n{question_label}\n{text}"
 
 
+def _question_group_candidates(question, metadata=None):
+    candidates = []
+    for source in [
+        (metadata or {}).get("question_group"),
+        question.get("question_group") if isinstance(question, dict) else None,
+    ]:
+        if not isinstance(source, list):
+            continue
+        for item in source:
+            if isinstance(item, dict) and isinstance(item.get("question"), dict):
+                candidates.append(item["question"])
+            elif isinstance(item, dict):
+                if isinstance(question, dict) and "nomor_soal" in item and "soal" in item:
+                    expanded = copy.deepcopy(question)
+                    expanded["soal"] = item.get("soal", "")
+                    expanded["pilihan"] = dict(item.get("pilihan") or {})
+                    expanded["jawaban"] = item.get("jawaban", "")
+                    expanded["pembahasan"] = item.get("pembahasan", "")
+                    expanded["konsep_kunci"] = item.get("konsep_kunci", "")
+                    expanded["tips_pengerjaan"] = item.get("tips_pengerjaan", "")
+                    expanded["butuh_visual"] = bool(item.get("butuh_visual"))
+                    expanded["deskripsi_visual"] = item.get("deskripsi_visual", "")
+                    passage = copy.deepcopy(expanded.get("bacaan") or {})
+                    passage["nomor_soal"] = int(item.get("nomor_soal") or 0)
+                    passage["total_soal"] = int(question.get("group_total_soal") or passage.get("total_soal") or 0)
+                    expanded["bacaan"] = passage
+                    expanded.pop("question_group", None)
+                    candidates.append(expanded)
+                else:
+                    candidates.append(item)
+    return candidates
+
+
+def _question_group_fingerprint(question):
+    if not isinstance(question, dict):
+        return ""
+    cloned = copy.deepcopy(question)
+    cloned.pop("visual_latex", None)
+    cloned.pop("question_group", None)
+    return json.dumps(cloned, ensure_ascii=False, sort_keys=True)
+
+
+def _normalize_passage_question_group(question, candidates):
+    passage = question.get("bacaan") if isinstance(question.get("bacaan"), dict) else None
+    if not passage:
+        return [question]
+
+    passage_id = str(passage.get("id") or "").strip()
+    passage_text = str(passage.get("teks") or "").strip()
+    mapel = str(question.get("mapel") or "").strip()
+    try:
+        expected_total = int(passage.get("total_soal") or 0)
+    except (TypeError, ValueError):
+        expected_total = 0
+    if not passage_id or not passage_text or expected_total < 1:
+        return [question]
+
+    grouped = {}
+    fingerprints = {}
+    for candidate in [question, *candidates]:
+        if not isinstance(candidate, dict):
+            continue
+        candidate_passage = candidate.get("bacaan") if isinstance(candidate.get("bacaan"), dict) else None
+        if not candidate_passage:
+            continue
+        if str(candidate.get("mapel") or "").strip() != mapel:
+            continue
+        if str(candidate_passage.get("id") or "").strip() != passage_id:
+            continue
+        if str(candidate_passage.get("teks") or "").strip() != passage_text:
+            continue
+        try:
+            number = int(candidate_passage.get("nomor_soal") or 0)
+            total = int(candidate_passage.get("total_soal") or 0)
+        except (TypeError, ValueError):
+            return [question]
+        fingerprint = _question_group_fingerprint(candidate)
+        if total != expected_total or number < 1 or number > expected_total:
+            return [question]
+        if number in grouped:
+            if fingerprints.get(number) == fingerprint:
+                continue
+            return [question]
+        grouped[number] = candidate
+        fingerprints[number] = fingerprint
+
+    ordered_numbers = list(range(1, expected_total + 1))
+    if [number for number in ordered_numbers if number in grouped] != ordered_numbers:
+        return [question]
+    return [grouped[number] for number in ordered_numbers]
+
+
+def _load_saved_passage_question_group(question, metadata_path):
+    passage = question.get("bacaan") if isinstance(question.get("bacaan"), dict) else None
+    if not passage or not metadata_path:
+        return [question]
+
+    metadata_path = Path(metadata_path).resolve()
+    try:
+        metadata_path.relative_to(SAVED_DIR.resolve())
+    except ValueError:
+        return [question]
+
+    candidates = []
+    for candidate_path in SAVED_DIR.rglob("metadata.json"):
+        try:
+            metadata = json.loads(candidate_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        candidate_question = metadata.get("question")
+        if isinstance(candidate_question, dict):
+            candidates.append(candidate_question)
+    return _normalize_passage_question_group(question, candidates)
+
+
+def _resolve_render_questions(question, metadata_path=None, metadata=None):
+    explicit_group = _question_group_candidates(question, metadata=metadata)
+    if explicit_group:
+        resolved = _normalize_passage_question_group(question, explicit_group)
+        if resolved:
+            return resolved
+    return _load_saved_passage_question_group(question, metadata_path)
+
+
+def _is_passage_bundle(question_group):
+    if not question_group:
+        return False
+    first = question_group[0]
+    passage = first.get("bacaan") if isinstance(first.get("bacaan"), dict) else None
+    if not passage or not str(passage.get("teks") or "").strip():
+        return False
+    try:
+        total = int(passage.get("total_soal") or len(question_group) or 0)
+    except (TypeError, ValueError):
+        total = len(question_group)
+    return total > 1 and len(question_group) > 1
+
+
+def _clone_group_render_question(question, number, total):
+    cloned = copy.deepcopy(question)
+    topic = str(cloned.get("topik") or cloned.get("mapel", "Soal")).strip()
+    label = f"Soal {number}/{total}"
+    cloned["topik"] = f"{topic} • {label}"
+    cloned["soal"] = str(cloned.get("soal", "") or "").strip()
+    cloned.pop("question_group", None)
+    cloned.pop("bacaan", None)
+    return attach_cartesian_latex_visual(cloned)
+
+
+def _paginate_passage_intro(draw, question, fonts):
+    passage = question.get("bacaan") if isinstance(question.get("bacaan"), dict) else {}
+    passage_text = str(passage.get("teks") or "").strip()
+    paragraphs = _wrap_passage_paragraphs(draw, passage_text, fonts["body"], 764)
+    return _paginate_paragraph_lines(paragraphs, 20, 20, paragraph_gap=0) or [[""]]
+
+
+def _count_passage_intro_pages(question):
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError:
+        return 0
+
+    probe = Image.new("RGB", (1000, 1000), "#f5f0e8")
+    fonts = {
+        "body": _load_font(24, family="anthropic_sans"),
+    }
+    return len(_paginate_passage_intro(ImageDraw.Draw(probe), question, fonts))
+
+
+def render_passage_intro_images(question, question_count, run_dir, page_offset=0, total_pages=None, start_index=1):
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError:
+        return []
+
+    width = height = 1000
+    colors = {
+        "bg": "#f6f0e6",
+        "panel": "#fffaf2",
+        "ink": "#201a14",
+        "muted": "#7f7466",
+        "line": "#d9cec0",
+        "accent": "#26405a",
+        "accent_soft": "#dbe5ee",
+    }
+    fonts = {
+        "category": _load_font(23, bold=True, family="anthropic_sans"),
+        "title": _load_font(34, bold=True, family="anthropic_sans"),
+        "passage_title": _load_font(28, bold=True, family="anthropic_sans"),
+        "body": _load_font(24, family="anthropic_sans"),
+        "small": _load_font(22, family="anthropic_sans"),
+        "small_bold": _load_font(22, bold=True, family="anthropic_sans"),
+    }
+
+    probe = Image.new("RGB", (width, height), colors["bg"])
+    pages = _paginate_passage_intro(ImageDraw.Draw(probe), question, fonts)
+    display_total = total_pages or len(pages)
+    logo = _load_quiz_logo()
+    passage = question.get("bacaan") if isinstance(question.get("bacaan"), dict) else {}
+    title = str(passage.get("judul") or "").strip()
+    title_lines = _wrap_text(ImageDraw.Draw(probe), title, fonts["passage_title"], 764)[:3] if title else []
+    output_paths = []
+
+    for page_index, lines in enumerate(pages, start=1):
+        image = Image.new("RGB", (width, height), colors["bg"])
+        draw = ImageDraw.Draw(image)
+        account = question.get("akun", "@utbk_neareducation")
+
+        draw.rectangle((0, 0, width, height), fill=colors["bg"])
+        if logo:
+            image.paste(logo, (928 - logo.width, 68), logo)
+        _draw_page_header(draw, question, fonts, colors)
+        content_start_y = 236
+
+        line_h = _line_height(draw, fonts["body"]) + 9
+        title_block_h = 0
+        if page_index == 1 and title_lines:
+            title_block_h = len(title_lines) * _line_height(draw, fonts["passage_title"]) + max(len(title_lines) - 1, 0) * 8 + 20
+            content_start_y += title_block_h
+
+        drawable_lines = [line for line in lines if line != PASSAGE_PARAGRAPH_BREAK]
+        line_count = max(len(drawable_lines), 1)
+        text_block_h = (line_count - 1) * line_h + _line_height(draw, fonts["body"])
+        content_bottom = int(content_start_y + text_block_h + 34)
+        panel_bottom = min(896, max(792, content_bottom))
+        panel = (72, 188, 928, panel_bottom)
+        draw.rounded_rectangle(panel, radius=18, fill=colors["panel"], outline=colors["line"], width=2)
+
+        if page_index == 1 and title_lines:
+            title_y = 236
+            for title_line in title_lines:
+                title_w = _text_width(draw, title_line, fonts["passage_title"])
+                _draw_text_with_math(draw, (width - title_w) / 2, title_y, title_line, fonts["passage_title"], colors["ink"])
+                title_y += _line_height(draw, fonts["passage_title"]) + 8
+
+        text_y = content_start_y
+        starts_paragraph = True
+        for index, line in enumerate(lines):
+            if line == PASSAGE_PARAGRAPH_BREAK:
+                starts_paragraph = True
+                continue
+            has_indent = line.startswith(PASSAGE_INDENT_MARKER)
+            if has_indent:
+                line = line[len(PASSAGE_INDENT_MARKER):]
+            next_line = lines[index + 1] if index + 1 < len(lines) else ""
+            justify_line = bool(line.strip()) and next_line != PASSAGE_PARAGRAPH_BREAK and bool(next_line.strip())
+            line_x = 146 if starts_paragraph and has_indent else 118
+            line_width = 736 if starts_paragraph and has_indent else 764
+            _draw_justified_line(draw, line_x, text_y, line, fonts["body"], colors["ink"], line_width, justify=justify_line)
+            starts_paragraph = False
+            text_y += line_h
+
+        draw.text((72, 942), account, font=fonts["small"], fill="#9ca3af")
+        footer_right = 928
+        if display_total > 1:
+            page_text = f"{page_offset + page_index}/{display_total}"
+            page_w = _text_width(draw, page_text, fonts["small"])
+            draw.text((928 - page_w, 942), page_text, font=fonts["small"], fill=colors["muted"])
+            footer_right = 928 - page_w - 32
+        if page_index == len(pages):
+            discussion_text = "Lanjut Soal  →"
+            discussion_w = _text_width(draw, discussion_text, fonts["small_bold"])
+            draw.text(
+                (footer_right - discussion_w, 942),
+                discussion_text,
+                font=fonts["small_bold"],
+                fill=colors["ink"],
+            )
+
+        output_path = run_dir / f"post-{start_index + page_index - 1}.png"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        image.save(output_path, format="PNG", optimize=True)
+        output_paths.append(output_path)
+
+    return output_paths
+
+
 def _paginate_quiz(draw, question, fonts):
     display_text = _display_question_text(question)
     q_paragraphs = _wrap_question_paragraphs(draw, display_text, fonts["question"], 790)
     q_lines = _flatten_paragraphs(q_paragraphs)
+    q_line_count = _drawable_line_count(q_lines)
     formula_parts = _question_formula_parts(display_text)
     choices = question.get("pilihan", {})
-    choice_page_limit = 460 if len(q_lines) <= 8 else 742
+    choice_page_limit = 560 if q_line_count <= 8 else 742
     choice_pages = []
     current = []
     used = 0
@@ -732,7 +1067,7 @@ def _paginate_quiz(draw, question, fonts):
         choice_pages.append(current)
 
     pages = []
-    if len(q_lines) <= 8:
+    if q_line_count <= 8:
         pages.append({"question_lines": q_lines, "choices": choice_pages[0] if choice_pages else []})
         for choice_page in choice_pages[1:]:
             pages.append({"question_lines": [], "choices": choice_page})
@@ -886,7 +1221,7 @@ def render_thumbnail_image(question, run_dir):
     return output_path
 
 
-def render_quiz_images(question, run_dir, page_offset=0, total_pages=None):
+def render_quiz_images(question, run_dir, page_offset=0, total_pages=None, start_index=1):
     try:
         from PIL import Image, ImageDraw
     except ImportError:
@@ -933,7 +1268,9 @@ def render_quiz_images(question, run_dir, page_offset=0, total_pages=None):
             image.paste(logo, (928 - logo.width, 68), logo)
         _draw_page_header(draw, question, fonts, colors)
 
-        has_question = bool(page["question_lines"])
+        q_lines = page["question_lines"]
+        q_line_count = _drawable_line_count(q_lines)
+        has_question = q_line_count > 0
         has_choices = bool(page["choices"])
         formula_layout = bool(formula_parts and has_question and page_index == 1)
         q_line_h = _line_height(draw, fonts["question"]) + 8
@@ -965,17 +1302,16 @@ def render_quiz_images(question, run_dir, page_offset=0, total_pages=None):
             formula_box_h = max(220, 24 + formula_content_h + 18)
             question_box = (72, 188, 928, min(480, 188 + formula_box_h))
         elif has_question and not has_choices:
-            q_box_h = min(696, max(240, len(page["question_lines"]) * q_line_h + 56))
+            q_box_h = min(696, max(240, q_line_count * q_line_h + 56))
             available_top = 188
             q_box_top = available_top
             question_box = (72, q_box_top, 928, q_box_top + q_box_h)
         elif has_question:
-            q_box_bottom = min(474, 188 + 24 + len(page["question_lines"]) * q_line_h + 30)
+            q_box_bottom = min(474, 188 + 24 + q_line_count * q_line_h + 30)
             question_box = (72, 188, 928, max(328, q_box_bottom))
         else:
             question_box = None
 
-        q_lines = page["question_lines"]
         if question_box:
             draw.rounded_rectangle(question_box, radius=7, fill=colors["white"], outline=colors["line"], width=2)
 
@@ -1015,7 +1351,7 @@ def render_quiz_images(question, run_dir, page_offset=0, total_pages=None):
                     conclusion_y += q_line_h
             else:
                 glyph_h = _line_height(draw, fonts["question"])
-                q_text_h = glyph_h + max(0, len(q_lines) - 1) * q_line_h
+                q_text_h = glyph_h + max(0, q_line_count - 1) * q_line_h
                 q_y = question_box[1] + max(
                     0,
                     (question_box[3] - question_box[1] - q_text_h) // 2,
@@ -1023,17 +1359,29 @@ def render_quiz_images(question, run_dir, page_offset=0, total_pages=None):
             if not formula_layout:
                 text_x = question_box[0] + 40
                 text_w = question_box[2] - question_box[0] - 80
+                starts_paragraph = True
                 for line_index, line in enumerate(q_lines):
+                    if line == PASSAGE_PARAGRAPH_BREAK:
+                        starts_paragraph = True
+                        continue
+                    has_indent = line.startswith(PASSAGE_INDENT_MARKER)
+                    line = _strip_indent_marker(line)
+                    next_line = q_lines[line_index + 1] if line_index + 1 < len(q_lines) else ""
+                    next_text = _strip_indent_marker(next_line)
+                    justify_line = bool(line.strip()) and next_line != PASSAGE_PARAGRAPH_BREAK and bool(next_text.strip())
+                    line_x = text_x + QUESTION_INDENT_PX if starts_paragraph and has_indent else text_x
+                    line_w = text_w - QUESTION_INDENT_PX if starts_paragraph and has_indent else text_w
                     _draw_justified_line(
                         draw,
-                        text_x,
+                        line_x,
                         q_y,
                         line,
                         fonts["question"],
                         colors["ink"],
-                        text_w,
-                        justify=False,
+                        line_w,
+                        justify=justify_line,
                     )
+                    starts_paragraph = False
                     q_y += q_line_h
 
         GAP = 12
@@ -1105,7 +1453,7 @@ def render_quiz_images(question, run_dir, page_offset=0, total_pages=None):
                 fill="#000000",
             )
 
-        output_path = run_dir / f"post-{page_index}.png"
+        output_path = run_dir / f"post-{start_index + page_index - 1}.png"
         output_path.parent.mkdir(parents=True, exist_ok=True)
         image.save(output_path, format="PNG", optimize=True)
         output_paths.append(output_path)
@@ -1396,7 +1744,7 @@ def _count_explanation_image_pages(question):
     return len(_paginate_structured_explanation(ImageDraw.Draw(probe), question, fonts))
 
 
-def render_explanation_images(question, run_dir, page_offset=0, total_pages=None):
+def render_explanation_images(question, run_dir, page_offset=0, total_pages=None, start_index=1):
     try:
         from PIL import Image, ImageDraw
     except ImportError:
@@ -1557,7 +1905,7 @@ def render_explanation_images(question, run_dir, page_offset=0, total_pages=None
             page_w = _text_width(draw, page_text, fonts["small"])
             draw.text((928 - page_w, 942), page_text, font=fonts["small"], fill=colors["muted"])
 
-        output_path = run_dir / f"pembahasan-{page_index}.jpg"
+        output_path = run_dir / f"pembahasan-{start_index + page_index - 1}.jpg"
         output_path.parent.mkdir(parents=True, exist_ok=True)
         image.save(output_path, format="JPEG", quality=95, subsampling=0, optimize=True)
         output_paths.append(output_path)
@@ -2560,7 +2908,68 @@ def render_pil_content_images(question, run_dir):
     return thumbnail_paths + image_paths + explanation_paths
 
 
-def render_content_images(question, run_dir):
+def render_passage_bundle_content_images(question_group, run_dir):
+    base_question = copy.deepcopy(question_group[0])
+    question_count = len(question_group)
+    thumbnail_question = copy.deepcopy(base_question)
+    thumbnail_question["topik"] = str(base_question.get("topik") or base_question.get("mapel", "Bacaan")).strip()
+    numbered_pages = _count_passage_intro_pages(base_question)
+    cloned_questions = []
+    for index, grouped_question in enumerate(question_group, start=1):
+        cloned = _clone_group_render_question(grouped_question, index, question_count)
+        cloned_questions.append(cloned)
+        numbered_pages += _count_quiz_image_pages(cloned) + _count_explanation_image_pages(cloned)
+
+    thumbnail_path = render_thumbnail_image(thumbnail_question, run_dir)
+    rendered = [thumbnail_path] if thumbnail_path else []
+    page_offset = 0
+    quiz_index = 1
+    explanation_index = 1
+
+    intro_paths = render_passage_intro_images(
+        base_question,
+        question_count,
+        run_dir,
+        page_offset=page_offset,
+        total_pages=numbered_pages,
+        start_index=quiz_index,
+    )
+    rendered.extend(intro_paths)
+    page_offset += len(intro_paths)
+    quiz_index += len(intro_paths)
+
+    for grouped_question in cloned_questions:
+        quiz_paths = render_quiz_images(
+            grouped_question,
+            run_dir,
+            page_offset=page_offset,
+            total_pages=numbered_pages,
+            start_index=quiz_index,
+        )
+        rendered.extend(quiz_paths)
+        page_offset += len(quiz_paths)
+        quiz_index += len(quiz_paths)
+
+    for grouped_question in cloned_questions:
+        explanation_paths = render_explanation_images(
+            grouped_question,
+            run_dir,
+            page_offset=page_offset,
+            total_pages=numbered_pages,
+            start_index=explanation_index,
+        )
+        rendered.extend(explanation_paths)
+        page_offset += len(explanation_paths)
+        explanation_index += len(explanation_paths)
+
+    return rendered
+
+
+def render_content_images(question, run_dir, metadata_path=None, metadata=None):
+    question_group = _resolve_render_questions(question, metadata_path=metadata_path, metadata=metadata)
+    if _is_passage_bundle(question_group):
+        return render_passage_bundle_content_images(question_group, run_dir), "pil_grouped"
+
     engine = RENDER_ENGINE or "latex"
     if engine not in {"latex", "pil", "auto"}:
         raise ValueError("LATSOAL_RENDER_ENGINE harus salah satu dari: latex, pil, auto.")
@@ -2611,6 +3020,92 @@ def _ai_generate(prompt, schema=None, provider="gemini"):
     if provider == "kimi":
         return _kimi_generate(prompt)
     return _gemini_generate(prompt, schema=schema)
+
+
+def _passage_question_number(question):
+    passage = question.get("bacaan") if isinstance(question.get("bacaan"), dict) else {}
+    try:
+        return int(passage.get("nomor_soal") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _review_question_payload(question):
+    payload = copy.deepcopy(question)
+    payload.pop("visual_latex", None)
+    payload.pop("question_group", None)
+    return payload
+
+
+def _build_explanation_review_input(question, question_group):
+    if not _is_passage_bundle(question_group):
+        return _review_question_payload(question)
+    return {
+        "current_question": _review_question_payload(question),
+        "bacaan": copy.deepcopy((question_group[0].get("bacaan") or {})),
+        "question_group": [_review_question_payload(item) for item in question_group],
+    }
+
+
+def _merge_review_question(original, revision):
+    revision = revision if isinstance(revision, dict) else {}
+    return normalize_question({
+        **original,
+        **revision,
+        "pilihan": {
+            **(original.get("pilihan") or {}),
+            **(revision.get("pilihan") or {}),
+        },
+    })
+
+
+def _normalize_review_question_group(question_group, review):
+    raw_group = review.get("question_group_revisi")
+    if not _is_passage_bundle(question_group) or not isinstance(raw_group, list):
+        return None
+
+    by_number = {}
+    for item in raw_group:
+        if not isinstance(item, dict):
+            continue
+        number = _passage_question_number(item)
+        if number:
+            by_number[number] = item
+
+    normalized = []
+    for index, original in enumerate(question_group):
+        number = _passage_question_number(original)
+        revision = by_number.get(number)
+        if revision is None and index < len(raw_group) and isinstance(raw_group[index], dict):
+            revision = raw_group[index]
+        normalized.append(_merge_review_question(original, revision or {}))
+    return normalized
+
+
+def _fallback_explanation_review(question, provider, exc):
+    revised_question = normalize_question(dict(question))
+    explanation = str(revised_question.get("pembahasan") or "").strip()
+    validation = local_validation(revised_question, draft_caption(revised_question))
+    issue_text = clean_error_message(exc)
+    return {
+        "lolos": bool(validation.get("lolos_validasi")),
+        "skor": int(validation.get("skor") or 0),
+        "akurasi": "Belum direview AI karena respons provider tidak bisa diparse.",
+        "bahasa_formal": "Perlu cek manual.",
+        "catatan": [
+            "Fallback lokal dipakai; cek akurasi pembahasan secara manual sebelum approve.",
+            issue_text,
+        ],
+        "saran_revisi": [
+            "Periksa kembali jawaban, langkah pembahasan, dan konsistensi pilihan jawaban.",
+        ],
+        "pembahasan_revisi": explanation,
+        "question_revisi": revised_question,
+        "fallback_used": True,
+        "fallback_reason": issue_text,
+        "provider": provider,
+        "usage": list(GEMINI_USAGE),
+    }
 
 
 def _gemini_generate(prompt, schema=None):
@@ -3218,7 +3713,13 @@ def render_images_for_metadata(metadata_path):
         raise ValueError("Metadata tidak memiliki question.")
     question = attach_cartesian_latex_visual(question)
     metadata["question"] = question
-    all_image_paths, render_engine = render_content_images(question, run_dir)
+    question_group = _resolve_render_questions(question, metadata_path=metadata_path, metadata=metadata)
+    all_image_paths, render_engine = render_content_images(
+        question,
+        run_dir,
+        metadata_path=metadata_path,
+        metadata={"question_group": question_group},
+    )
     numbered_image_paths = render_numbered_jpg_images(all_image_paths, run_dir)
     explanation_start = next(
         (
@@ -3236,6 +3737,11 @@ def render_images_for_metadata(metadata_path):
     metadata["files"]["explanation"] = str(numbered_explanation_paths[0]) if numbered_explanation_paths else None
     metadata["files"]["explanations"] = [str(path) for path in numbered_explanation_paths]
     metadata["render_engine"] = render_engine
+    metadata["render_group"] = {
+        "kind": "passage_bundle",
+        "question_count": len(question_group),
+        "passage_id": ((question_group[0].get("bacaan") or {}).get("id") if question_group else None),
+    } if _is_passage_bundle(question_group) else None
     metadata["image_generated_at"] = dt.datetime.now().isoformat(timespec="seconds")
     (run_dir / "soal.json").write_text(json.dumps(question, ensure_ascii=False, indent=2), encoding="utf-8")
     metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -3243,6 +3749,7 @@ def render_images_for_metadata(metadata_path):
         "ok": True,
         "run_id": metadata.get("run_id") or run_dir.name,
         "files": metadata["files"],
+        "render_group": metadata["render_group"],
     }
 
 
@@ -3256,22 +3763,30 @@ def review_explanation_for_metadata(metadata_path, provider="gemini"):
         raise ValueError("Pembahasan tidak tersedia untuk dicek.")
     provider = provider if provider in {"gemini", "kimi"} else "gemini"
     GEMINI_USAGE.clear()
-    review = _ai_json(
-        build_explanation_review_prompt(question),
-        "review pembahasan",
-        retries=2,
-        schema=EXPLANATION_REVIEW_SCHEMA,
-        provider=provider,
-    )
-    revised_question = {
-        **question,
-        **(review.get("question_revisi") or {}),
-        "pilihan": {
-            **(question.get("pilihan") or {}),
-            **((review.get("question_revisi") or {}).get("pilihan") or {}),
-        },
-    }
-    revised_question = normalize_question(revised_question)
+    question_group = _resolve_render_questions(question, metadata_path=metadata_path, metadata=metadata)
+    review_input = _build_explanation_review_input(question, question_group)
+    try:
+        review = _ai_json(
+            build_explanation_review_prompt(review_input),
+            "review pembahasan",
+            retries=2,
+            schema=EXPLANATION_REVIEW_SCHEMA,
+            provider=provider,
+        )
+    except Exception as exc:
+        review = _fallback_explanation_review(question, provider, exc)
+        if _is_passage_bundle(question_group):
+            review["question_group_revisi"] = [normalize_question(copy.deepcopy(item)) for item in question_group]
+    revised_group = _normalize_review_question_group(question_group, review)
+    if revised_group:
+        review["question_group_revisi"] = revised_group
+        current_number = _passage_question_number(question)
+        revised_question = next(
+            (item for item in revised_group if _passage_question_number(item) == current_number),
+            revised_group[0],
+        )
+    else:
+        revised_question = _merge_review_question(question, review.get("question_revisi") or {})
     review["question_revisi"] = revised_question
     review["pembahasan_revisi"] = str(
         revised_question.get("pembahasan") or review.get("pembahasan_revisi") or ""

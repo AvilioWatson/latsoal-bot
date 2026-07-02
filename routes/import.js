@@ -55,10 +55,10 @@ function templateForSubtest(mapel) {
     template.bacaan = {
       id: `${TAXONOMY.subtest_codes?.[mapel] || "SUB"}-001`,
       judul: "Judul atau konteks bacaan",
-      teks: "Tulis satu bacaan lengkap yang sama untuk 5 soal.",
+      teks: "Tulis satu bacaan lengkap yang sama untuk 1 sampai 5 soal.",
       bahasa: mapel === "Literasi Bahasa Inggris" ? "en" : "id",
       nomor_soal: 1,
-      total_soal: 5,
+      total_soal: 3,
       sumber_pdf: {nama_file: "", halaman: ""},
     };
   }
@@ -83,7 +83,7 @@ ${topicListForPrompt(mapel)}`;
 
 function extractionPrompt() {
   const subtestPrompts = Object.keys(TAXONOMY.topics || {}).map(subtestPrompt).join("\n\n");
-  return `Anda adalah editor dan validator soal UTBK/SNBT. Ekstrak seluruh soal pilihan ganda dari PDF yang saya lampirkan dan keluarkan hasilnya sebagai satu JSON array valid.
+  return `Anda adalah editor dan validator soal UTBK/SNBT. Ekstrak seluruh soal pilihan ganda dari PDF yang saya lampirkan dan buat hasilnya sebagai file .json yang bisa saya download. Isi file harus berupa satu JSON array valid.
 
 Aturan kerja:
 1. Ambil setiap stem, pilihan jawaban, tabel, dan informasi penting dari PDF secara akurat.
@@ -103,8 +103,9 @@ ${subtestPrompts}
 Jika PDF hanya berisi satu subtes, pakai prompt subtes yang sesuai. Jika PDF campuran, klasifikasikan setiap soal per object berdasarkan mapel dan topik resmi terdekat. Jangan membuat judul topik baru di luar daftar.
 
 Aturan keluaran:
-- Keluarkan hanya JSON array valid.
-- Jangan gunakan markdown, code fence, komentar, atau teks di luar JSON.
+- Buat file .json yang bisa didownload, berisi hanya JSON array valid.
+- Jika platform tidak mendukung pembuatan file, tampilkan hanya JSON array valid agar bisa saya simpan manual sebagai file .json.
+- Jangan gunakan markdown, code fence, komentar, atau teks di luar JSON/file.
 - Pertahankan struktur setiap object persis seperti template yang diberikan.
 
 Template JSON:
@@ -116,15 +117,15 @@ function extractionPromptForSubtest(mapel) {
   const usesPassage = PASSAGE_SUBTESTS.has(mapel);
   const passageRules = usesPassage ? `
 Aturan khusus ${code}:
-- Format utama adalah 1 bacaan untuk tepat 5 soal.
-- Untuk setiap set bacaan, buat 5 object soal terpisah dalam JSON array.
-- Kelima object harus memiliki field bacaan.id yang sama, bacaan.teks yang sama, bacaan.total_soal = 5, dan bacaan.nomor_soal berurutan 1 sampai 5.
+- Format utama adalah 1 bacaan untuk satu atau beberapa soal terkait. Jumlahnya mengikuti PDF, bisa 1 sampai 5 soal.
+- Untuk setiap set bacaan, buat satu object soal terpisah per nomor dalam JSON array.
+- Object dalam set yang sama harus memiliki field bacaan.id yang sama, bacaan.teks yang sama, bacaan.total_soal sesuai jumlah soal pada set tersebut, dan bacaan.nomor_soal berurutan mulai dari 1.
 - Field soal berisi pertanyaan per nomor saja; jangan menyalin ulang seluruh bacaan ke field soal.
 - Setiap pembahasan harus merujuk bagian bacaan yang relevan dan tetap membuktikan jawaban benar.` : `
 Aturan khusus ${code}:
 - Gunakan format soal mandiri seperti template.
 - Field bacaan tidak wajib dan boleh dihilangkan.`;
-  return `Anda adalah editor dan validator soal UTBK/SNBT. Ekstrak soal pilihan ganda dari PDF untuk subtes ${code} - ${mapel}, lalu keluarkan hanya JSON array valid.
+  return `Anda adalah editor dan validator soal UTBK/SNBT. Ekstrak soal pilihan ganda dari PDF untuk subtes ${code} - ${mapel}, lalu buat hasilnya sebagai file .json yang bisa saya download. Isi file harus berupa satu JSON array valid.
 
 Aturan umum:
 1. Gunakan field mapel persis: "${mapel}".
@@ -140,8 +141,9 @@ ${topicListForPrompt(mapel)}
 ${passageRules}
 
 Aturan keluaran:
-- Keluarkan hanya JSON array valid.
-- Jangan gunakan markdown, code fence, komentar, atau teks di luar JSON.
+- Buat file .json yang bisa didownload, berisi hanya JSON array valid.
+- Jika platform tidak mendukung pembuatan file, tampilkan hanya JSON array valid agar bisa saya simpan manual sebagai file .json.
+- Jangan gunakan markdown, code fence, komentar, atau teks di luar JSON/file.
 - Pertahankan struktur object seperti template.
 
 Template JSON:

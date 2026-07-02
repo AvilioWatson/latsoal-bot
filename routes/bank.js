@@ -14,10 +14,12 @@ import {
 import {errorStatus, readJsonBody, sendError, sendJson} from "../lib/http.js";
 import {OUTPUTS, ROOT, SAVED, buildStoragePath, buildWebFiles, canonicalTopic, isValidRunId, pathFromIndexEntry, safeJoin} from "../lib/paths.js";
 import {requestError, wantsJson} from "../lib/route-utils.js";
+import {DEDUP_THRESHOLD, checkDuplicateAgainstSaved} from "../lib/similarity.js";
 import {TOPICS} from "../lib/taxonomy.js";
 import {tryoutQuestionWarnings} from "../lib/tryout-export.js";
 
 const DEFAULT_PYTHON = process.env.PYTHON || "python";
+const explanationReviewJobs = new Map();
 
 function retargetMetadataFiles(metadata, targetDir) {
   const artifactName = (file) => String(file || "").split(/[\\/]/).pop();
@@ -76,6 +78,49 @@ async function resolveSavedRun(runId) {
     }
   }
   return null;
+}
+
+function passageGroupKey(question = {}) {
+  const passage = question?.bacaan && typeof question.bacaan === "object" ? question.bacaan : null;
+  const passageId = String(passage?.id || "").trim();
+  const passageText = String(passage?.teks || "").replace(/\s+/g, " ").trim();
+  const mapel = String(question?.mapel || "").trim();
+  if (!mapel || !passageId || !passageText) return "";
+  return `${mapel}\u001f${passageId}\u001f${passageText}`;
+}
+
+function passageQuestionNumber(question = {}) {
+  const passage = question?.bacaan && typeof question.bacaan === "object" ? question.bacaan : null;
+  return Number(passage?.nomor_soal || 0);
+}
+
+async function loadSavedPassageGroup(runId, baseMetadata) {
+  const baseQuestion = baseMetadata?.question || {};
+  const key = passageGroupKey(baseQuestion);
+  const expectedTotal = Number(baseQuestion?.bacaan?.total_soal || 0);
+  if (!key || expectedTotal <= 1) return [];
+
+  const index = await readIndex();
+  const grouped = new Map();
+  for (const entry of index) {
+    if (!isValidRunId(entry.run_id)) continue;
+    const artifactPath = pathFromIndexEntry(entry, "saved");
+    const metadataPath = path.join(SAVED, artifactPath, "metadata.json");
+    let metadata = null;
+    try {
+      metadata = await readJsonValidated(metadataPath, "metadata");
+    } catch {
+      continue;
+    }
+    if (passageGroupKey(metadata.question || {}) !== key) continue;
+    const number = passageQuestionNumber(metadata.question || {});
+    if (number < 1 || number > expectedTotal) continue;
+    grouped.set(number, {entry, artifactPath, metadataPath, runDir: path.dirname(metadataPath), metadata});
+  }
+
+  return Array.from(grouped.entries())
+    .sort(([left], [right]) => left - right)
+    .map(([, value]) => value);
 }
 
 async function resolveOutputRun(runId) {
@@ -188,11 +233,13 @@ async function listSavedRuns() {
       status,
       source: metadata?.source || null,
       review_status: metadata?.review_status || null,
+      dedup: metadata?.dedup || null,
       mapel: metadata?.question?.mapel || null,
       topik: metadata?.question?.topik || null,
       canonical_topik: canonicalTopic(metadata?.question?.mapel, metadata?.question?.topik) || null,
       taxonomy_state: taxonomyState(metadata?.question || {}),
       explanation_review: metadata?.explanation_review || null,
+      explanation_review_job: publicExplanationReviewJob(explanationReviewJobs.get(item.run_id)),
       tryout_ready: status === "approved" && tryoutWarnings.length === 0,
       tryout_warning_count: tryoutWarnings.length,
       tryout_warnings: tryoutWarnings,
@@ -272,6 +319,7 @@ async function deleteSavedRun(runId) {
 
   await removeEntry(runId);
   await rm(target, {recursive: true, force: true});
+  explanationReviewJobs.delete(runId);
 
   return {
     run_id: runId,
@@ -386,6 +434,56 @@ async function generateSavedImages(runId) {
   };
 }
 
+function publicSavedMatchPayload(match) {
+  if (!match?.metadata) return null;
+  return {
+    run_id: match.metadata.run_id || match.run_id,
+    source: match.metadata.source || "saved",
+    review_status: match.metadata.review_status || null,
+    question: match.metadata.question || {},
+    caption: match.metadata.caption || {},
+    validation: match.metadata.validation || {},
+    dedup: match.metadata.dedup || null,
+    canonical_topik: match.metadata.question
+      ? canonicalTopic(match.metadata.question.mapel, match.metadata.question.topik)
+      : null,
+    web_files: buildWebFiles("/saved", match.artifactPath, match.metadata.files),
+  };
+}
+
+async function recalculateSavedSimilarity(runId) {
+  if (!isValidRunId(runId)) {
+    throw requestError(400, "Run ID tidak valid.");
+  }
+
+  const resolved = await resolveSavedRun(runId);
+  const runDir = resolved?.dir;
+  const artifactPath = resolved?.artifactPath || runId;
+  if (!runDir) {
+    throw requestError(404, "Saved run tidak ditemukan.");
+  }
+
+  const metadataPath = path.join(runDir, "metadata.json");
+  const metadata = await readJsonValidated(metadataPath, "metadata");
+  const {dedup, match} = await checkDuplicateAgainstSaved(metadata.question || {}, {excludeRunId: runId});
+  metadata.dedup = dedup;
+  await writeJsonValidated(metadataPath, metadata, "metadata");
+
+  const patchedEntry = createEntryFromMetadata(runId, metadata, {
+    ...(resolved.entry || {}),
+    path: `saved/${artifactPath}`,
+  });
+  await updateEntry(runId, patchedEntry);
+
+  return {
+    ok: true,
+    run_id: runId,
+    dedup,
+    threshold: DEDUP_THRESHOLD,
+    match: publicSavedMatchPayload(match),
+  };
+}
+
 async function reviewSavedExplanation(runId, provider = "gemini") {
   if (!isValidRunId(runId)) {
     throw requestError(400, "Run ID tidak valid.");
@@ -412,13 +510,78 @@ async function reviewSavedExplanation(runId, provider = "gemini") {
   };
 }
 
+function publicExplanationReviewJob(job) {
+  if (!job) return null;
+  return {
+    run_id: job.run_id,
+    status: job.status,
+    provider: job.provider,
+    started_at: job.started_at,
+    finished_at: job.finished_at || null,
+    error: job.error || null,
+    result: job.result || null,
+  };
+}
+
+async function startSavedExplanationReview(runId, provider = "gemini") {
+  if (!isValidRunId(runId)) {
+    throw requestError(400, "Run ID tidak valid.");
+  }
+  const existing = explanationReviewJobs.get(runId);
+  if (existing?.status === "running") {
+    return publicExplanationReviewJob(existing);
+  }
+
+  const resolved = await resolveSavedRun(runId);
+  if (!resolved) {
+    throw requestError(404, "Saved run tidak ditemukan.");
+  }
+
+  const job = {
+    run_id: runId,
+    status: "running",
+    provider: provider === "kimi" ? "kimi" : "gemini",
+    started_at: new Date().toISOString(),
+    finished_at: null,
+    error: null,
+    result: null,
+  };
+  explanationReviewJobs.set(runId, job);
+
+  reviewSavedExplanation(runId, job.provider)
+    .then((result) => {
+      job.status = "done";
+      job.finished_at = new Date().toISOString();
+      job.result = result;
+    })
+    .catch((error) => {
+      job.status = "error";
+      job.finished_at = new Date().toISOString();
+      job.error = error.message || "Cek pembahasan gagal.";
+    });
+
+  return publicExplanationReviewJob(job);
+}
+
+function getSavedExplanationReviewJob(runId) {
+  if (!isValidRunId(runId)) {
+    throw requestError(400, "Run ID tidak valid.");
+  }
+  const job = explanationReviewJobs.get(runId);
+  if (!job) {
+    throw requestError(404, "Job cek pembahasan tidak ditemukan.");
+  }
+  return publicExplanationReviewJob(job);
+}
+
 async function applySavedExplanationReview(runId, payload) {
   if (!isValidRunId(runId)) {
     throw requestError(400, "Run ID tidak valid.");
   }
   const revisedQuestion = payload?.question_revisi;
   const review = payload?.explanation_review;
-  if (!revisedQuestion || typeof revisedQuestion !== "object" || Array.isArray(revisedQuestion)) {
+  const revisedGroup = Array.isArray(review?.question_group_revisi) ? review.question_group_revisi : null;
+  if ((!revisedGroup || !revisedGroup.length) && (!revisedQuestion || typeof revisedQuestion !== "object" || Array.isArray(revisedQuestion))) {
     throw requestError(400, "Draft revisi soal tidak valid.");
   }
   if (!review || typeof review !== "object" || Array.isArray(review)) {
@@ -427,9 +590,18 @@ async function applySavedExplanationReview(runId, payload) {
   if (typeof review.lolos !== "boolean") {
     throw requestError(400, "Status lolos pada hasil review tidak valid.");
   }
-  const warnings = validateQuestion(revisedQuestion, "question_revisi");
-  if (warnings.length) {
-    throw requestError(400, `Draft revisi belum valid: ${warnings[0].path} ${warnings[0].message}`);
+  if (revisedGroup?.length) {
+    for (const [index, question] of revisedGroup.entries()) {
+      const warnings = validateQuestion(question, `question_group_revisi[${index}]`);
+      if (warnings.length) {
+        throw requestError(400, `Draft revisi grup belum valid: ${warnings[0].path} ${warnings[0].message}`);
+      }
+    }
+  } else {
+    const warnings = validateQuestion(revisedQuestion, "question_revisi");
+    if (warnings.length) {
+      throw requestError(400, `Draft revisi belum valid: ${warnings[0].path} ${warnings[0].message}`);
+    }
   }
 
   const resolved = await resolveSavedRun(runId);
@@ -440,8 +612,63 @@ async function applySavedExplanationReview(runId, payload) {
   }
   const metadataPath = path.join(runDir, "metadata.json");
   const metadata = await readJsonValidated(metadataPath, "metadata");
-  const {question_revisi: _ignoredQuestion, ...reviewSummary} = review;
+  const {question_revisi: _ignoredQuestion, question_group_revisi: _ignoredGroup, ...reviewSummary} = review;
   const now = new Date().toISOString();
+  if (revisedGroup?.length) {
+    const groupItems = await loadSavedPassageGroup(runId, metadata);
+    const revisionsByNumber = new Map(revisedGroup.map((question) => [passageQuestionNumber(question), question]));
+    if (!groupItems.length) {
+      throw requestError(400, "Grup bacaan untuk revisi AI tidak ditemukan.");
+    }
+    const updatedRunIds = [];
+    for (const [index, groupItem] of groupItems.entries()) {
+      const number = passageQuestionNumber(groupItem.metadata.question || {});
+      const revised = revisionsByNumber.get(number) || revisedGroup[index];
+      if (!revised) continue;
+      groupItem.metadata.question = normalizeQuestionForStorage(revised);
+      if (groupItem.metadata.caption) {
+        groupItem.metadata.caption = normalizeCaptionForStorage(groupItem.metadata.question, groupItem.metadata.caption);
+      }
+      groupItem.metadata.explanation_review = {
+        ...reviewSummary,
+        pembahasan_revisi: groupItem.metadata.question.pembahasan,
+        group_applied: true,
+        group_question_count: revisedGroup.length,
+        applied_at: now,
+      };
+      groupItem.metadata.review_status = reviewSummary.lolos ? "ready" : "needs_review";
+      groupItem.metadata.edited_at = now;
+      await writeJsonValidated(groupItem.metadataPath, groupItem.metadata, "metadata");
+      await writeJsonValidated(path.join(groupItem.runDir, "soal.json"), groupItem.metadata.question, "question");
+      const patchedEntry = createEntryFromMetadata(groupItem.entry.run_id, groupItem.metadata, {
+        ...(groupItem.entry || {}),
+        path: `saved/${groupItem.artifactPath}`,
+        status: "saved",
+        status_updated_at: now,
+        approved_at: null,
+        rejected_at: null,
+      });
+      await updateEntry(groupItem.entry.run_id, patchedEntry);
+      updatedRunIds.push(groupItem.entry.run_id);
+      explanationReviewJobs.delete(groupItem.entry.run_id);
+    }
+    return {
+      ok: true,
+      run_id: runId,
+      updated_run_ids: updatedRunIds,
+      group_question_count: updatedRunIds.length,
+      question: revisionsByNumber.get(passageQuestionNumber(metadata.question || {})) || revisedGroup[0],
+      explanation_review: {
+        ...reviewSummary,
+        group_applied: true,
+        group_question_count: revisedGroup.length,
+        applied_at: now,
+      },
+      review_status: reviewSummary.lolos ? "ready" : "needs_review",
+      web_files: buildWebFiles("/saved", artifactPath, metadata.files),
+    };
+  }
+
   metadata.question = normalizeQuestionForStorage(revisedQuestion);
   if (metadata.caption) metadata.caption = normalizeCaptionForStorage(metadata.question, metadata.caption);
   metadata.explanation_review = {
@@ -453,6 +680,7 @@ async function applySavedExplanationReview(runId, payload) {
   metadata.edited_at = now;
   await writeJsonValidated(metadataPath, metadata, "metadata");
   await writeJsonValidated(path.join(runDir, "soal.json"), metadata.question, "question");
+  explanationReviewJobs.delete(runId);
 
   const patchedEntry = createEntryFromMetadata(runId, metadata, {
     ...(resolved.entry || {}),
@@ -766,10 +994,33 @@ export async function handle(request, response, route) {
     return true;
   }
 
+  if (request.method === "POST" && savedRoute?.length === 3 && savedRoute[2] === "similarity") {
+    try {
+      sendJson(response, await recalculateSavedSimilarity(savedRoute[1]));
+    } catch (error) {
+      sendError(response, errorStatus(error), error.message);
+    }
+    return true;
+  }
+
   if (request.method === "POST" && savedRoute?.length === 3 && savedRoute[2] === "explanation-review") {
     try {
       const payload = await readJsonBody(request).catch(() => ({}));
-      sendJson(response, await reviewSavedExplanation(savedRoute[1], payload.provider || "gemini"));
+      sendJson(response, await startSavedExplanationReview(savedRoute[1], payload.provider || "gemini"), 202);
+    } catch (error) {
+      sendError(response, errorStatus(error), error.message);
+    }
+    return true;
+  }
+
+  if (
+    request.method === "GET"
+    && savedRoute?.length === 4
+    && savedRoute[2] === "explanation-review"
+    && savedRoute[3] === "status"
+  ) {
+    try {
+      sendJson(response, getSavedExplanationReviewJob(savedRoute[1]));
     } catch (error) {
       sendError(response, errorStatus(error), error.message);
     }

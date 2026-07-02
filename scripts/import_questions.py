@@ -15,6 +15,8 @@ import content_generator
 CHOICE_KEYS = ["A", "B", "C", "D", "E"]
 VALID_LEVELS = {"mudah", "sedang", "sulit"}
 MAX_BATCH = 1000
+MIN_PASSAGE_QUESTIONS = 1
+MAX_PASSAGE_QUESTIONS = 5
 PASSAGE_SUBTESTS = {
     "Penalaran Matematika",
     "Literasi Bahasa Indonesia",
@@ -157,10 +159,10 @@ def validate_and_normalize_question(raw_question):
                 errors.append("bacaan.id wajib diisi.")
             if not passage_text:
                 errors.append("bacaan.teks wajib diisi.")
-            if total != 5:
-                errors.append("bacaan.total_soal wajib bernilai 5.")
-            if number < 1 or number > 5:
-                errors.append("bacaan.nomor_soal wajib 1 sampai 5.")
+            if total < MIN_PASSAGE_QUESTIONS or total > MAX_PASSAGE_QUESTIONS:
+                errors.append("bacaan.total_soal wajib bernilai 1 sampai 5.")
+            if number < 1 or number > MAX_PASSAGE_QUESTIONS:
+                errors.append("bacaan.nomor_soal wajib mulai dari 1 dan maksimal 5, sesuai total_soal.")
             passage_source = passage.get("sumber_pdf")
             if passage_source is not None and not isinstance(passage_source, dict):
                 errors.append("bacaan.sumber_pdf harus berupa object atau dihilangkan.")
@@ -217,12 +219,18 @@ def validate_passage_groups(items):
 
     for (mapel, passage_id), group_items in groups.items():
         numbers = sorted((item.get("question") or {}).get("bacaan", {}).get("nomor_soal") for item in group_items)
+        totals = {(item.get("question") or {}).get("bacaan", {}).get("total_soal") for item in group_items}
         texts = {str((item.get("question") or {}).get("bacaan", {}).get("teks") or "").strip() for item in group_items}
         message = None
-        if len(group_items) != 5:
-            message = f"Bacaan '{passage_id}' untuk {mapel} harus dipakai tepat 5 soal; saat ini {len(group_items)} soal."
-        elif numbers != [1, 2, 3, 4, 5]:
-            message = f"Bacaan '{passage_id}' harus memiliki nomor_soal 1 sampai 5 tanpa duplikat."
+        expected_total = next(iter(totals)) if len(totals) == 1 else 0
+        if len(totals) != 1:
+            message = f"Bacaan '{passage_id}' memiliki total_soal yang tidak konsisten antar soal."
+        elif expected_total < MIN_PASSAGE_QUESTIONS or expected_total > MAX_PASSAGE_QUESTIONS:
+            message = f"Bacaan '{passage_id}' harus memiliki total_soal 1 sampai 5."
+        elif len(group_items) != expected_total:
+            message = f"Bacaan '{passage_id}' untuk {mapel} harus dipakai sesuai total_soal ({expected_total}); saat ini {len(group_items)} soal."
+        elif numbers != list(range(1, expected_total + 1)):
+            message = f"Bacaan '{passage_id}' harus memiliki nomor_soal 1 sampai {expected_total} tanpa duplikat."
         elif len(texts) != 1:
             message = f"Bacaan '{passage_id}' memiliki teks bacaan yang tidak konsisten antar soal."
         if not message:
@@ -287,6 +295,64 @@ def evaluate_batch(raw_questions):
 def caption_for(question):
     caption = content_generator.normalize_caption(question, content_generator.draft_caption(question))
     return caption, f"{caption.get('caption', '')}\n\n{' '.join(caption.get('hashtag', []))}\n"
+
+
+def grouped_storage_question(questions):
+    ordered = list(questions)
+    first = dict(ordered[0])
+    passage = dict(first.get("bacaan") or {})
+    total = int(passage.get("total_soal") or len(ordered) or 1)
+    group_items = []
+    for question in ordered:
+        item_passage = dict(question.get("bacaan") or {})
+        group_items.append({
+            "nomor_soal": int(item_passage.get("nomor_soal") or len(group_items) + 1),
+            "soal": question.get("soal", ""),
+            "pilihan": dict(question.get("pilihan") or {}),
+            "jawaban": question.get("jawaban", ""),
+            "pembahasan": question.get("pembahasan", ""),
+            "konsep_kunci": question.get("konsep_kunci", ""),
+            "tips_pengerjaan": question.get("tips_pengerjaan", ""),
+            "butuh_visual": bool(question.get("butuh_visual")),
+            "deskripsi_visual": question.get("deskripsi_visual", ""),
+        })
+    group_items.sort(key=lambda item: item["nomor_soal"])
+    first["question_group"] = group_items
+    first["group_total_soal"] = total
+    first["soal"] = group_items[0]["soal"]
+    first["pilihan"] = group_items[0]["pilihan"]
+    first["jawaban"] = group_items[0]["jawaban"]
+    first["pembahasan"] = group_items[0]["pembahasan"]
+    first["konsep_kunci"] = group_items[0]["konsep_kunci"]
+    first["tips_pengerjaan"] = group_items[0]["tips_pengerjaan"]
+    first["butuh_visual"] = group_items[0]["butuh_visual"]
+    first["deskripsi_visual"] = group_items[0]["deskripsi_visual"]
+    first["bacaan"] = passage
+    first["bacaan"]["nomor_soal"] = 1
+    first["bacaan"]["total_soal"] = total
+    return first
+
+
+def grouped_accepted_items(items):
+    grouped = []
+    bucket = {}
+    for item in items:
+        question = item["question"]
+        passage = question.get("bacaan") if isinstance(question.get("bacaan"), dict) else None
+        if question.get("mapel") in PASSAGE_SUBTESTS and passage and passage.get("id"):
+            key = (question.get("mapel"), str(passage.get("id")))
+            bucket.setdefault(key, []).append(item)
+        else:
+            grouped.append({"items": [item], "question": question, "dedup": item.get("dedup")})
+    for key_items in bucket.values():
+        key_items.sort(key=lambda item: (item["question"].get("bacaan") or {}).get("nomor_soal", 0))
+        grouped_question = grouped_storage_question([item["question"] for item in key_items])
+        grouped.append({
+            "items": key_items,
+            "question": grouped_question,
+            "dedup": key_items[0].get("dedup"),
+        })
+    return grouped
 
 
 def write_imported_question(question, run_id, account, dedup, render_images=False):
@@ -373,21 +439,35 @@ def import_batch(payload, account, render_images=False):
         else:
             accepted.append(item)
 
+    accepted_groups = grouped_accepted_items(accepted)
     index_entries = [item for item in load_index() if item.get("run_id")]
     occupied = {item["run_id"] for item in index_entries}
-    run_ids = allocate_run_ids(len(accepted), occupied)
+    run_ids = allocate_run_ids(len(accepted_groups), occupied)
     imported = []
-    for item, run_id in zip(accepted, run_ids):
-        run_dir, storage_path = write_imported_question(item["question"], run_id, account, item["dedup"], render_images)
+    for accepted_group, run_id in zip(accepted_groups, run_ids):
+        run_dir, storage_path = write_imported_question(
+            accepted_group["question"],
+            run_id,
+            account,
+            accepted_group["dedup"],
+            render_images,
+        )
         now = dt.datetime.now(dt.timezone.utc).isoformat(timespec="milliseconds")
         index_entries.insert(0, {
-            "run_id": run_id, "subtes": content_generator.slugify(item["question"].get("mapel")),
-            "topik": content_generator.slugify(item["question"].get("topik")), "level": item["question"].get("level"),
-            "status": "saved", "source": "import", "is_duplicate": bool(item["dedup"] and item["dedup"].get("is_duplicate")),
+            "run_id": run_id, "subtes": content_generator.slugify(accepted_group["question"].get("mapel")),
+            "topik": content_generator.slugify(accepted_group["question"].get("topik")), "level": accepted_group["question"].get("level"),
+            "status": "saved", "source": "import", "is_duplicate": bool(accepted_group["dedup"] and accepted_group["dedup"].get("is_duplicate")),
             "saved_at": now, "status_updated_at": None, "approved_at": None, "rejected_at": None,
             "exported_at": None, "export_batch_id": None, "uploaded_at": None, "path": f"saved/{storage_path}",
         })
-        imported.append({"index": item["index"], "run_id": run_id, "path": str(run_dir), "topik": item["question"].get("topik")})
+        imported.append({
+            "indices": [entry["index"] for entry in accepted_group["items"]],
+            "index": accepted_group["items"][0]["index"],
+            "run_id": run_id,
+            "path": str(run_dir),
+            "topik": accepted_group["question"].get("topik"),
+            "group_total_soal": accepted_group["question"].get("group_total_soal", 1),
+        })
     save_index(index_entries)
     return {"ok": True, "imported": imported, "rejected": rejected, "summary": evaluation["summary"]}
 

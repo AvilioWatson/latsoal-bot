@@ -158,6 +158,7 @@
             <p id="runNote" class="run-note">Generate konten untuk mulai review.</p>
           </div>
           <div class="review-actions">
+            <button id="checkSimilarityButton" class="secondary" type="button" disabled>Cek Similarity</button>
             <button id="resetCacheButton" class="secondary danger-button" type="button">Reset cache</button>
             <button id="saveButton" class="secondary" type="button" disabled>Simpan</button>
             <a id="downloadAllLink" class="secondary link-button" href="#" hidden>Download ZIP</a>
@@ -165,36 +166,98 @@
           </div>
         </div>
 
-        <div class="detail-grid">
-          <section class="detail-block image-block">
-            <div class="block-title">
-              <h3>Gambar</h3>
-              <span id="imageCount">0 page</span>
-            </div>
-            <div id="imagePreviewList" class="post-preview-list">
-              <p class="body-copy">Gambar 1000x1000 akan muncul di sini.</p>
-            </div>
-          </section>
-
-          <section class="detail-block">
-            <div class="block-title">
-              <h3>Soal</h3>
-              <span id="validationScore">Skor belum tersedia</span>
-            </div>
-            <p id="questionText" class="body-copy">Generate konten untuk melihat soal.</p>
-            <ol id="choicesList" class="choices"></ol>
-          </section>
-
-          <section class="detail-block">
-            <div class="block-title">
-              <h3>Caption</h3>
-              <div class="inline-actions">
-                <button id="copyCaptionButton" class="mini-button" type="button" disabled>Copy</button>
-                <span id="sourceLabel">Manual</span>
+        <div id="previewCompareLayout" class="preview-compare-layout" data-has-match="false">
+          <section id="similarPreviewPanel" class="comparison-panel comparison-panel--similar" hidden>
+            <div class="comparison-panel-head">
+              <div>
+                <p class="eyebrow">Soal Paling Mirip</p>
+                <h3 id="similarPreviewTitle">Belum dicek</h3>
+                <p id="similarRunNote" class="run-note">Klik Cek Similarity untuk melihat soal saved yang paling mirip.</p>
+              </div>
+              <div class="comparison-panel-actions">
+                <span id="similarityMatchScore" class="status-pill" data-state="pending">Similarity -</span>
+                <a id="openSavedMatchLink" class="ghost-link" href="#" hidden>Buka Saved</a>
+                <a id="similarMetadataLink" class="ghost-link" href="#" hidden>Metadata</a>
               </div>
             </div>
-            <p id="captionText" class="body-copy">Caption akan muncul di sini.</p>
-            <p id="hashtagText" class="hashtags"></p>
+
+            <div class="detail-grid detail-grid--stacked">
+              <section class="detail-block image-block">
+                <div class="block-title">
+                  <h3>Gambar</h3>
+                  <span id="similarImageCount">0 page</span>
+                </div>
+                <div id="similarImagePreviewList" class="post-preview-list">
+                  <p class="body-copy">Preview soal pembanding akan muncul di sini.</p>
+                </div>
+              </section>
+
+              <section class="detail-block">
+                <div class="block-title">
+                  <h3>Soal</h3>
+                  <span id="similarValidationScore">Skor belum tersedia</span>
+                </div>
+                <p id="similarQuestionText" class="body-copy">Belum ada soal pembanding.</p>
+                <ol id="similarChoicesList" class="choices"></ol>
+              </section>
+
+              <section class="detail-block">
+                <div class="block-title">
+                  <h3>Caption</h3>
+                  <div class="inline-actions">
+                    <span id="similarSourceLabel">Bank Review</span>
+                  </div>
+                </div>
+                <p id="similarCaptionText" class="body-copy">Caption soal pembanding akan muncul di sini.</p>
+                <p id="similarHashtagText" class="hashtags"></p>
+              </section>
+            </div>
+          </section>
+
+          <section class="comparison-panel comparison-panel--current">
+            <div class="comparison-panel-head">
+              <div>
+                <p class="eyebrow">Preview Aktif</p>
+                <h3>Soal Saat Ini</h3>
+                <p class="run-note">Panel kanan menampilkan output yang sedang direview.</p>
+              </div>
+              <div class="comparison-panel-actions">
+                <span id="currentSimilarityChip" class="status-pill" data-state="pending">Similarity -</span>
+              </div>
+            </div>
+
+            <div class="detail-grid">
+              <section class="detail-block image-block">
+                <div class="block-title">
+                  <h3>Gambar</h3>
+                  <span id="imageCount">0 page</span>
+                </div>
+                <div id="imagePreviewList" class="post-preview-list">
+                  <p class="body-copy">Gambar 1000x1000 akan muncul di sini.</p>
+                </div>
+              </section>
+
+              <section class="detail-block">
+                <div class="block-title">
+                  <h3>Soal</h3>
+                  <span id="validationScore">Skor belum tersedia</span>
+                </div>
+                <p id="questionText" class="body-copy">Generate konten untuk melihat soal.</p>
+                <ol id="choicesList" class="choices"></ol>
+              </section>
+
+              <section class="detail-block">
+                <div class="block-title">
+                  <h3>Caption</h3>
+                  <div class="inline-actions">
+                    <button id="copyCaptionButton" class="mini-button" type="button" disabled>Copy</button>
+                    <span id="sourceLabel">Manual</span>
+                  </div>
+                </div>
+                <p id="captionText" class="body-copy">Caption akan muncul di sini.</p>
+                <p id="hashtagText" class="hashtags"></p>
+              </section>
+            </div>
           </section>
         </div>
 

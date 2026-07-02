@@ -15,6 +15,41 @@ def load_generator(data_root):
     return importlib.reload(content_generator)
 
 
+def passage_question(number, total=3, passage_id="PM-001"):
+    return {
+        "mapel": "Penalaran Matematika",
+        "kelompok_tes": "Tes Literasi",
+        "topik": "Aljabar Dan Fungsi",
+        "level": "sedang",
+        "soal": f"Berdasarkan bacaan, pernyataan nomor {number} yang paling tepat adalah?",
+        "pilihan": {
+            "A": f"Pernyataan benar {number}.",
+            "B": f"Pernyataan keliru {number}.",
+            "C": f"Pernyataan tidak relevan {number}.",
+            "D": f"Pernyataan terlalu luas {number}.",
+            "E": f"Pernyataan bertentangan {number}.",
+        },
+        "jawaban": "A",
+        "pembahasan": f"Pembahasan soal {number} mengacu pada bagian relevan di bacaan.",
+        "konsep_kunci": "Informasi eksplisit",
+        "tips_pengerjaan": "Baca bacaan sekali, lalu cocokkan dengan detail tiap opsi.",
+        "butuh_visual": False,
+        "deskripsi_visual": "",
+        "bacaan": {
+            "id": passage_id,
+            "judul": "Model Pertumbuhan",
+            "teks": (
+                "Sebuah UMKM mencatat pertumbuhan produksi secara linear selama beberapa bulan "
+                "dan membandingkannya dengan biaya tetap untuk menentukan titik impas usaha."
+            ),
+            "bahasa": "id",
+            "nomor_soal": number,
+            "total_soal": total,
+            "sumber_pdf": {"nama_file": "", "halaman": ""},
+        },
+    }
+
+
 class ContentGeneratorTest(unittest.TestCase):
     def test_extract_json_accepts_wrapped_or_loose_gemini_json(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -84,6 +119,73 @@ class ContentGeneratorTest(unittest.TestCase):
             self.assertIn("Jawaban tidak cocok dengan pilihan.", result["issues"])
             self.assertIn("Ada opsi duplikat.", result["issues"])
 
+    def test_review_explanation_falls_back_when_ai_json_is_invalid(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_root = Path(tmp)
+            generator = load_generator(data_root)
+            question = generator.draft_question("Penalaran Umum", "Penalaran deduktif", "mudah")
+            run_dir = data_root / "saved" / "20990101-010101"
+            run_dir.mkdir(parents=True)
+            metadata_path = run_dir / "metadata.json"
+            metadata_path.write_text(
+                json.dumps({"run_id": "20990101-010101", "question": question}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+            with mock.patch.object(generator, "_ai_json", side_effect=ValueError("Gemini mengembalikan JSON yang tidak valid.")):
+                result = generator.review_explanation_for_metadata(metadata_path)
+
+            review = result["explanation_review"]
+            self.assertTrue(result["ok"])
+            self.assertTrue(review["fallback_used"])
+            self.assertEqual(review["question_revisi"]["soal"], question["soal"])
+            self.assertEqual(review["pembahasan_revisi"], question["pembahasan"])
+            self.assertIn("Fallback lokal", review["catatan"][0])
+
+    def test_review_explanation_reviews_passage_group(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_root = Path(tmp)
+            generator = load_generator(data_root)
+            saved_root = data_root / "saved"
+            questions = [passage_question(index, total=3) for index in range(1, 4)]
+            metadata_path = None
+            for question in questions:
+                run_dir = saved_root / f"20990101-01010{question['bacaan']['nomor_soal']}"
+                run_dir.mkdir(parents=True)
+                current_path = run_dir / "metadata.json"
+                current_path.write_text(
+                    json.dumps({"run_id": run_dir.name, "question": question}, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+                if question["bacaan"]["nomor_soal"] == 2:
+                    metadata_path = current_path
+
+            revised = [
+                {**question, "pembahasan": f"Langkah 1: Revisi soal {index}. Kesimpulan: jawaban A."}
+                for index, question in enumerate(questions, start=1)
+            ]
+            ai_result = {
+                "lolos": True,
+                "skor": 96,
+                "akurasi": "Akurat",
+                "bahasa_formal": "Formal",
+                "catatan": [],
+                "saran_revisi": [],
+                "pembahasan_revisi": revised[1]["pembahasan"],
+                "question_revisi": revised[1],
+                "question_group_revisi": revised,
+            }
+
+            with mock.patch.object(generator, "_ai_json", return_value=ai_result) as ai_json:
+                result = generator.review_explanation_for_metadata(metadata_path)
+
+            prompt = ai_json.call_args.args[0]
+            review = result["explanation_review"]
+            self.assertIn("question_group_revisi", prompt)
+            self.assertEqual(len(review["question_group_revisi"]), 3)
+            self.assertEqual(review["question_revisi"]["bacaan"]["nomor_soal"], 2)
+            self.assertIn("Revisi soal 2", review["pembahasan_revisi"])
+
     def test_check_duplicate_reads_bank_index(self):
         with tempfile.TemporaryDirectory() as tmp:
             data_root = Path(tmp)
@@ -131,6 +233,174 @@ class ContentGeneratorTest(unittest.TestCase):
             self.assertFalse(result["is_duplicate"])
             self.assertEqual(result["similarity"], 0.0)
             self.assertIsNone(result["matched_run_id"])
+
+    def test_resolve_render_questions_reads_saved_passage_group(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_root = Path(tmp)
+            generator = load_generator(data_root)
+            saved_root = data_root / "saved"
+            questions = [passage_question(index, total=3) for index in [2, 3, 1]]
+            metadata_path = None
+
+            for index, question in enumerate(questions, start=1):
+                run_dir = saved_root / f"20990101-01010{index}"
+                run_dir.mkdir(parents=True)
+                current_metadata_path = run_dir / "metadata.json"
+                current_metadata_path.write_text(
+                    json.dumps({"question": question}, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+                if question["bacaan"]["nomor_soal"] == 2:
+                    metadata_path = current_metadata_path
+
+            resolved = generator._resolve_render_questions(questions[0], metadata_path=metadata_path)
+
+            self.assertEqual(len(resolved), 3)
+            self.assertEqual(
+                [item["bacaan"]["nomor_soal"] for item in resolved],
+                [1, 2, 3],
+            )
+
+    def test_wrap_passage_paragraphs_keeps_tight_new_paragraphs_without_uppercase_marker(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            generator = load_generator(Path(tmp))
+            from PIL import Image, ImageDraw
+
+            image = Image.new("RGB", (1000, 1000), "#f5f0e8")
+            draw = ImageDraw.Draw(image)
+            font = generator._load_font(24, family="anthropic_sans")
+            paragraphs = generator._wrap_passage_paragraphs(
+                draw,
+                "Paragraf pertama baris satu.\nParagraf pertama baris dua.\n\n(2) paragraf kedua.",
+                font,
+                700,
+            )
+
+            self.assertEqual(len(paragraphs), 2)
+            self.assertTrue(any("Paragraf pertama" in line for line in paragraphs[0]))
+            self.assertTrue(any("(2) paragraf kedua" in line for line in paragraphs[1]))
+            self.assertFalse(paragraphs[1][0].startswith(generator.PASSAGE_INDENT_MARKER))
+
+    def test_wrap_passage_paragraphs_marks_only_wrapped_paragraphs_for_indent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            generator = load_generator(Path(tmp))
+            from PIL import Image, ImageDraw
+
+            image = Image.new("RGB", (1000, 1000), "#f5f0e8")
+            draw = ImageDraw.Draw(image)
+            font = generator._load_font(24, family="anthropic_sans")
+            paragraphs = generator._wrap_passage_paragraphs(
+                draw,
+                "Paragraf pendek.\n\n"
+                "Paragraf kedua sangat panjang sehingga perlu turun ke beberapa baris saat dibungkus di area teks yang sempit.",
+                font,
+                220,
+            )
+
+            self.assertFalse(paragraphs[0][0].startswith(generator.PASSAGE_INDENT_MARKER))
+            self.assertTrue(paragraphs[1][0].startswith(generator.PASSAGE_INDENT_MARKER))
+
+    def test_wrap_question_paragraphs_indents_new_paragraphs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            generator = load_generator(Path(tmp))
+            from PIL import Image, ImageDraw
+
+            image = Image.new("RGB", (1000, 1000), "#f5f0e8")
+            draw = ImageDraw.Draw(image)
+            font = generator._load_font(29, family="anthropic_sans")
+            paragraphs = generator._wrap_question_paragraphs(
+                draw,
+                "Paragraf pertama berisi konteks soal.\n\nParagraf kedua berisi pertanyaan lanjutan.",
+                font,
+                790,
+            )
+
+            self.assertFalse(paragraphs[0][0].startswith(generator.PASSAGE_INDENT_MARKER))
+            self.assertTrue(paragraphs[1][0].startswith(generator.PASSAGE_INDENT_MARKER))
+
+    def test_paginate_quiz_uses_tight_paragraph_breaks_for_question_text(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            generator = load_generator(Path(tmp))
+            from PIL import Image, ImageDraw
+
+            question = {
+                "soal": "Paragraf pertama berisi konteks soal.\n\nParagraf kedua berisi pertanyaan lanjutan.",
+                "pilihan": {
+                    "A": "Pilihan A.",
+                    "B": "Pilihan B.",
+                    "C": "Pilihan C.",
+                    "D": "Pilihan D.",
+                    "E": "Pilihan E.",
+                },
+            }
+            image = Image.new("RGB", (1000, 1000), "#f5f0e8")
+            draw = ImageDraw.Draw(image)
+            fonts = {
+                "question": generator._load_font(29, family="anthropic_sans"),
+                "body": generator._load_font(29, family="anthropic_sans"),
+            }
+
+            pages = generator._paginate_quiz(draw, question, fonts)
+            lines = pages[0]["question_lines"]
+
+            self.assertIn(generator.PASSAGE_PARAGRAPH_BREAK, lines)
+            self.assertEqual(generator._drawable_line_count(lines), 2)
+            self.assertEqual(len(pages[0]["choices"]), 5)
+
+    def test_render_images_for_metadata_groups_passage_bundle(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_root = Path(tmp)
+            generator = load_generator(data_root)
+            run_dir = data_root / "saved" / "20990101-010101"
+            run_dir.mkdir(parents=True)
+            questions = [passage_question(index, total=3) for index in range(1, 4)]
+            metadata_path = run_dir / "metadata.json"
+            metadata_path.write_text(
+                json.dumps({
+                    "run_id": "20990101-010101",
+                    "question": questions[0],
+                    "question_group": questions,
+                    "files": {"question": str(run_dir / "soal.json"), "caption": str(run_dir / "caption.txt")},
+                }, ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+            result = generator.render_images_for_metadata(metadata_path)
+
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["render_group"]["kind"], "passage_bundle")
+            self.assertEqual(result["render_group"]["question_count"], 3)
+            self.assertGreaterEqual(len(result["files"]["images"]), 5)
+            self.assertTrue((run_dir / "thumbnail.png").exists())
+            self.assertTrue((run_dir / "post-1.png").exists())
+            self.assertTrue((run_dir / "pembahasan-1.jpg").exists())
+
+    def test_paginate_quiz_keeps_five_short_choices_on_same_page(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            generator = load_generator(Path(tmp))
+            from PIL import Image, ImageDraw
+
+            question = {
+                "soal": "Bentuk pe-an pada kata pengecekan dalam kalimat (3) mempunyai makna yang sama dengan bentuk pe-an pada kalimat ....",
+                "pilihan": {
+                    "A": "Kami sudah mempunyai pekarangan untuk mendirikan rumah.",
+                    "B": "Hasil ikan yang ditangkap nelayan langsung dibawa ke pelelangan.",
+                    "C": "Juleha senang menceritakan pengalaman selama berada di luar negeri.",
+                    "D": "Pemandian umum itu sudah lama tidak dipakai sehingga bernuansa horor.",
+                    "E": "Perjalanan itu menjadi pengalaman berharga bagi semua peserta.",
+                },
+            }
+            image = Image.new("RGB", (1000, 1000), "#f5f0e8")
+            draw = ImageDraw.Draw(image)
+            fonts = {
+                "question": generator._load_font(29, family="anthropic_sans"),
+                "body": generator._load_font(29, family="anthropic_sans"),
+            }
+
+            pages = generator._paginate_quiz(draw, question, fonts)
+
+            self.assertEqual(len(pages), 1)
+            self.assertEqual(len(pages[0]["choices"]), 5)
 
     def test_question_prompt_samples_three_same_topic_saved_examples(self):
         with tempfile.TemporaryDirectory() as tmp:

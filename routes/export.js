@@ -5,7 +5,7 @@ import {readIndex, writeIndex} from "../lib/filestore.js";
 import {errorStatus, sendError, sendJson} from "../lib/http.js";
 import {APPROVED, SAVED, isValidRunId, pathFromIndexEntry} from "../lib/paths.js";
 import {artifactName} from "../lib/route-utils.js";
-import {TRYOUT_EXPORT_FILENAME, TRYOUT_EXPORT_SCHEMA_VERSION, metadataToTryoutQuestion} from "../lib/tryout-export.js";
+import {TRYOUT_EXPORT_FILENAME, TRYOUT_EXPORT_SCHEMA_VERSION, metadataToTryoutQuestions} from "../lib/tryout-export.js";
 
 async function exportApprovedRuns() {
   const index = await readIndex();
@@ -93,7 +93,7 @@ async function exportTryoutQuestions() {
       await access(path.join(sourceDir, "metadata.json"));
       await cp(sourceDir, destinationDir, {recursive: true, force: true});
       const metadata = await readJsonValidated(path.join(sourceDir, "metadata.json"), "metadata");
-      questions.push(metadataToTryoutQuestion(item.run_id, metadata, exportId));
+      questions.push(...metadataToTryoutQuestions(item.run_id, metadata, exportId));
     } catch (error) {
       skipped.push({
         run_id: item.run_id,

@@ -49,13 +49,6 @@
             <option value="uploaded">Uploaded</option>
             <option value="rejected">Rejected</option>
           </select>
-          <select id="tryoutReadinessFilter">
-            <option value="all">Semua tryout</option>
-            <option value="ready">Siap tryout</option>
-            <option value="warning">Approved perlu cek</option>
-            <option value="review-ready">Review ready</option>
-            <option value="review-pending">Review belum ready</option>
-          </select>
           <button id="refreshSavedButton" class="secondary" type="button">Refresh</button>
           <button id="exportApprovedButton" class="primary" type="button">Export approved</button>
         </div>
@@ -79,6 +72,7 @@
               </div>
               <div class="review-actions">
                 <button id="reviewExplanationButton" class="secondary" type="button" disabled>Cek pembahasan AI</button>
+                <button id="checkSimilarityPreviewButton" class="secondary" type="button" disabled>Cek Similarity</button>
                 <button id="approvePreviewButton" class="secondary" type="button" aria-pressed="false" disabled>Approve</button>
                 <button id="rejectPreviewButton" class="secondary" type="button" aria-pressed="false" disabled>Reject</button>
                 <button id="markUploadedPreviewButton" class="secondary" type="button" aria-pressed="false" disabled>Upload</button>
