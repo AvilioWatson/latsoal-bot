@@ -71,6 +71,7 @@ from latsoal_generator.validation import (
     validate_caption,
 )
 from latsoal_generator.dedup import STOPWORDS, check_duplicate, jaccard_similarity, normalize_terms
+from latsoal_generator.render_profiles import get_render_profile
 
 def json_stdout(payload):
     print(json.dumps(payload, ensure_ascii=False, indent=2))
@@ -612,7 +613,12 @@ def _question_formula_parts(text):
 
 PASSAGE_PARAGRAPH_BREAK = "\u2029"
 PASSAGE_INDENT_MARKER = "\u2060"
-QUESTION_INDENT_PX = 28
+
+
+def _render_profile(question_or_mapel=None):
+    if isinstance(question_or_mapel, dict):
+        return get_render_profile(question_or_mapel.get("mapel"))
+    return get_render_profile(question_or_mapel)
 
 
 def _is_numbered_paragraph(text):
@@ -628,7 +634,8 @@ def _drawable_line_count(lines):
     return sum(1 for line in lines if line != PASSAGE_PARAGRAPH_BREAK)
 
 
-def _wrap_question_paragraphs(draw, text, font, max_width):
+def _wrap_question_paragraphs(draw, text, font, max_width, profile=None):
+    profile = profile or _render_profile()
     formatted = _format_question_text(text).replace("\r\n", "\n").replace("\r", "\n")
     raw_paragraphs = [
         paragraph.strip()
@@ -637,8 +644,9 @@ def _wrap_question_paragraphs(draw, text, font, max_width):
     ]
     paragraphs = []
     for index, paragraph in enumerate(raw_paragraphs):
-        indent = index > 0 and not _is_numbered_paragraph(paragraph)
-        wrap_width = max_width - QUESTION_INDENT_PX if indent else max_width
+        indent = profile.indent_question_paragraphs and index > 0 and not _is_numbered_paragraph(paragraph)
+        indent_px = max(0, int(profile.question_indent_px))
+        wrap_width = max(1, max_width - indent_px) if indent else max_width
         wrapped = _wrap_text(draw, paragraph, font, wrap_width)
         if indent and wrapped:
             wrapped[0] = f"{PASSAGE_INDENT_MARKER}{wrapped[0]}"
@@ -646,7 +654,8 @@ def _wrap_question_paragraphs(draw, text, font, max_width):
     return paragraphs or [[""]]
 
 
-def _wrap_passage_paragraphs(draw, text, font, max_width):
+def _wrap_passage_paragraphs(draw, text, font, max_width, profile=None):
+    profile = profile or _render_profile()
     source = str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
 
     paragraphs = []
@@ -654,7 +663,7 @@ def _wrap_passage_paragraphs(draw, text, font, max_width):
         paragraph = re.sub(r"\s*\n\s*", " ", paragraph).strip()
         if paragraph:
             wrapped = _wrap_text(draw, paragraph, font, max_width)
-            if len(wrapped) > 1:
+            if profile.indent_passage_wrapped_paragraphs and len(wrapped) > 1:
                 wrapped[0] = f"{PASSAGE_INDENT_MARKER}{wrapped[0]}"
             paragraphs.append(wrapped)
     return paragraphs or [[""]]
@@ -915,10 +924,16 @@ def _clone_group_render_question(question, number, total):
 
 
 def _paginate_passage_intro(draw, question, fonts):
+    profile = _render_profile(question)
     passage = question.get("bacaan") if isinstance(question.get("bacaan"), dict) else {}
     passage_text = str(passage.get("teks") or "").strip()
-    paragraphs = _wrap_passage_paragraphs(draw, passage_text, fonts["body"], 764)
-    return _paginate_paragraph_lines(paragraphs, 20, 20, paragraph_gap=0) or [[""]]
+    paragraphs = _wrap_passage_paragraphs(draw, passage_text, fonts["body"], 764, profile=profile)
+    return _paginate_paragraph_lines(
+        paragraphs,
+        profile.passage_intro_first_page_lines,
+        profile.passage_intro_next_page_lines,
+        paragraph_gap=0,
+    ) or [[""]]
 
 
 def _count_passage_intro_pages(question):
@@ -962,6 +977,7 @@ def render_passage_intro_images(question, question_count, run_dir, page_offset=0
     probe = Image.new("RGB", (width, height), colors["bg"])
     pages = _paginate_passage_intro(ImageDraw.Draw(probe), question, fonts)
     display_total = total_pages or len(pages)
+    profile = _render_profile(question)
     logo = _load_quiz_logo()
     passage = question.get("bacaan") if isinstance(question.get("bacaan"), dict) else {}
     title = str(passage.get("judul") or "").strip()
@@ -1010,9 +1026,15 @@ def render_passage_intro_images(question, question_count, run_dir, page_offset=0
             if has_indent:
                 line = line[len(PASSAGE_INDENT_MARKER):]
             next_line = lines[index + 1] if index + 1 < len(lines) else ""
-            justify_line = bool(line.strip()) and next_line != PASSAGE_PARAGRAPH_BREAK and bool(next_line.strip())
-            line_x = 146 if starts_paragraph and has_indent else 118
-            line_width = 736 if starts_paragraph and has_indent else 764
+            justify_line = (
+                profile.justify_passage_text
+                and bool(line.strip())
+                and next_line != PASSAGE_PARAGRAPH_BREAK
+                and bool(next_line.strip())
+            )
+            indent_px = max(0, int(profile.passage_indent_px))
+            line_x = 118 + indent_px if starts_paragraph and has_indent else 118
+            line_width = max(1, 764 - indent_px) if starts_paragraph and has_indent else 764
             _draw_justified_line(draw, line_x, text_y, line, fonts["body"], colors["ink"], line_width, justify=justify_line)
             starts_paragraph = False
             text_y += line_h
@@ -1042,14 +1064,19 @@ def render_passage_intro_images(question, question_count, run_dir, page_offset=0
     return output_paths
 
 
-def _paginate_quiz(draw, question, fonts):
+def _paginate_quiz(draw, question, fonts, profile=None):
+    profile = profile or _render_profile(question)
     display_text = _display_question_text(question)
-    q_paragraphs = _wrap_question_paragraphs(draw, display_text, fonts["question"], 790)
+    q_paragraphs = _wrap_question_paragraphs(draw, display_text, fonts["question"], 790, profile=profile)
     q_lines = _flatten_paragraphs(q_paragraphs)
     q_line_count = _drawable_line_count(q_lines)
     formula_parts = _question_formula_parts(display_text)
     choices = question.get("pilihan", {})
-    choice_page_limit = 560 if q_line_count <= 8 else 742
+    choice_page_limit = (
+        profile.short_question_choice_page_limit
+        if q_line_count <= profile.short_question_line_limit
+        else profile.long_question_choice_page_limit
+    )
     choice_pages = []
     current = []
     used = 0
@@ -1067,12 +1094,17 @@ def _paginate_quiz(draw, question, fonts):
         choice_pages.append(current)
 
     pages = []
-    if q_line_count <= 8:
+    if q_line_count <= profile.short_question_line_limit:
         pages.append({"question_lines": q_lines, "choices": choice_pages[0] if choice_pages else []})
         for choice_page in choice_pages[1:]:
             pages.append({"question_lines": [], "choices": choice_page})
     else:
-        for q_chunk in _paginate_paragraph_lines(q_paragraphs, 10, 10, paragraph_gap=1):
+        for q_chunk in _paginate_paragraph_lines(
+            q_paragraphs,
+            profile.long_question_page_lines,
+            profile.long_question_page_lines,
+            paragraph_gap=profile.long_question_paragraph_gap,
+        ):
             pages.append({"question_lines": q_chunk, "choices": []})
         for choice_page in choice_pages:
             pages.append({"question_lines": [], "choices": choice_page})
@@ -1156,7 +1188,7 @@ def _count_quiz_image_pages(question):
         "body": _load_font(29, family="anthropic_sans"),
     }
     probe = Image.new("RGB", (width, height), "#f5f0e8")
-    return len(_paginate_quiz(ImageDraw.Draw(probe), question, fonts))
+    return len(_paginate_quiz(ImageDraw.Draw(probe), question, fonts, profile=_render_profile(question)))
 
 
 def render_thumbnail_image(question, run_dir):
@@ -1252,7 +1284,8 @@ def render_quiz_images(question, run_dir, page_offset=0, total_pages=None, start
 
     probe = Image.new("RGB", (width, height), colors["bg"])
     probe_draw = ImageDraw.Draw(probe)
-    pages = _paginate_quiz(probe_draw, question, fonts)
+    profile = _render_profile(question)
+    pages = _paginate_quiz(probe_draw, question, fonts, profile=profile)
     display_total = total_pages or len(pages)
     logo = _load_quiz_logo()
     formula_parts = _question_formula_parts(_display_question_text(question))
@@ -1300,15 +1333,18 @@ def render_quiz_images(question, run_dir, page_offset=0, total_pages=None, start
                 + len(conclusion_lines) * q_line_h
             )
             formula_box_h = max(220, 24 + formula_content_h + 18)
-            question_box = (72, 188, 928, min(480, 188 + formula_box_h))
+            question_box = (72, 188, 928, min(profile.formula_box_max_bottom, 188 + formula_box_h))
         elif has_question and not has_choices:
-            q_box_h = min(696, max(240, q_line_count * q_line_h + 56))
+            q_box_h = min(
+                profile.question_only_box_max_height,
+                max(profile.question_only_box_min_height, q_line_count * q_line_h + 56),
+            )
             available_top = 188
             q_box_top = available_top
             question_box = (72, q_box_top, 928, q_box_top + q_box_h)
         elif has_question:
-            q_box_bottom = min(474, 188 + 24 + q_line_count * q_line_h + 30)
-            question_box = (72, 188, 928, max(328, q_box_bottom))
+            q_box_bottom = min(profile.question_with_choices_box_max_bottom, 188 + 24 + q_line_count * q_line_h + 30)
+            question_box = (72, 188, 928, max(profile.question_with_choices_box_min_height, q_box_bottom))
         else:
             question_box = None
 
@@ -1368,9 +1404,15 @@ def render_quiz_images(question, run_dir, page_offset=0, total_pages=None, start
                     line = _strip_indent_marker(line)
                     next_line = q_lines[line_index + 1] if line_index + 1 < len(q_lines) else ""
                     next_text = _strip_indent_marker(next_line)
-                    justify_line = bool(line.strip()) and next_line != PASSAGE_PARAGRAPH_BREAK and bool(next_text.strip())
-                    line_x = text_x + QUESTION_INDENT_PX if starts_paragraph and has_indent else text_x
-                    line_w = text_w - QUESTION_INDENT_PX if starts_paragraph and has_indent else text_w
+                    justify_line = (
+                        profile.justify_question_text
+                        and bool(line.strip())
+                        and next_line != PASSAGE_PARAGRAPH_BREAK
+                        and bool(next_text.strip())
+                    )
+                    indent_px = max(0, int(profile.question_indent_px))
+                    line_x = text_x + indent_px if starts_paragraph and has_indent else text_x
+                    line_w = max(1, text_w - indent_px) if starts_paragraph and has_indent else text_w
                     _draw_justified_line(
                         draw,
                         line_x,
@@ -1430,7 +1472,7 @@ def render_quiz_images(question, run_dir, page_offset=0, total_pages=None, start
                     fonts["body"],
                     colors["ink"],
                     text_w,
-                    justify=line_index < len(lines) - 1,
+                    justify=profile.justify_choice_text and line_index < len(lines) - 1,
                 )
                 text_y += line_h + 8
 

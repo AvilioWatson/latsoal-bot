@@ -3,6 +3,7 @@ import json
 import os
 import tempfile
 import unittest
+from dataclasses import replace
 from unittest import mock
 from pathlib import Path
 
@@ -317,6 +318,37 @@ class ContentGeneratorTest(unittest.TestCase):
 
             self.assertFalse(paragraphs[0][0].startswith(generator.PASSAGE_INDENT_MARKER))
             self.assertTrue(paragraphs[1][0].startswith(generator.PASSAGE_INDENT_MARKER))
+
+    def test_render_profile_is_selected_by_subtest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            generator = load_generator(Path(tmp))
+
+            pu_profile = generator._render_profile({"mapel": "Penalaran Umum"})
+            lbi_profile = generator._render_profile({"mapel": "Literasi Bahasa Indonesia"})
+
+            self.assertEqual(pu_profile.subtest, "Penalaran Umum")
+            self.assertEqual(lbi_profile.subtest, "Literasi Bahasa Indonesia")
+            self.assertIsNot(pu_profile, lbi_profile)
+
+    def test_question_indent_can_be_changed_per_profile(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            generator = load_generator(Path(tmp))
+            from PIL import Image, ImageDraw
+
+            image = Image.new("RGB", (1000, 1000), "#f5f0e8")
+            draw = ImageDraw.Draw(image)
+            font = generator._load_font(29, family="anthropic_sans")
+            base_profile = generator._render_profile({"mapel": "Penalaran Umum"})
+            no_indent_profile = replace(base_profile, indent_question_paragraphs=False)
+            paragraphs = generator._wrap_question_paragraphs(
+                draw,
+                "Paragraf pertama berisi konteks soal.\n\nParagraf kedua berisi pertanyaan lanjutan.",
+                font,
+                790,
+                profile=no_indent_profile,
+            )
+
+            self.assertFalse(paragraphs[1][0].startswith(generator.PASSAGE_INDENT_MARKER))
 
     def test_paginate_quiz_uses_tight_paragraph_breaks_for_question_text(self):
         with tempfile.TemporaryDirectory() as tmp:
