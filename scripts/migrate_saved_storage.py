@@ -53,7 +53,9 @@ def migrate_one(run_dir, dry_run=False):
 
     target_dir.parent.mkdir(parents=True, exist_ok=True)
     if target_dir.exists():
-        shutil.rmtree(target_dir)
+        raise FileExistsError(
+            f"Target migrasi sudah ada: {target_dir}. Hentikan migrasi untuk mencegah data target tertimpa."
+        )
     shutil.move(str(run_dir), str(target_dir))
     (target_dir / "metadata.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
     cleanup_empty_parents(current_relative.parent)

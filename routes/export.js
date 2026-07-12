@@ -3,7 +3,7 @@ import path from "node:path";
 import {readJsonValidated} from "../lib/dbschema.js";
 import {readIndex, writeIndex} from "../lib/filestore.js";
 import {errorStatus, sendError, sendJson} from "../lib/http.js";
-import {APPROVED, SAVED, isValidRunId, pathFromIndexEntry} from "../lib/paths.js";
+import {APPROVED, SAVED, isValidRunId, pathFromIndexEntry, safeJoin} from "../lib/paths.js";
 import {artifactName} from "../lib/route-utils.js";
 import {TRYOUT_EXPORT_FILENAME, TRYOUT_EXPORT_SCHEMA_VERSION, metadataToTryoutQuestions} from "../lib/tryout-export.js";
 
@@ -16,10 +16,12 @@ async function exportApprovedRuns() {
   await mkdir(targetDir, {recursive: true});
 
   const manifest = [];
+  const skipped = [];
   for (const item of approved) {
-    const sourceDir = path.join(SAVED, pathFromIndexEntry(item, "saved"));
+    const sourceDir = safeJoin(SAVED, pathFromIndexEntry(item, "saved"));
     const destinationDir = path.join(targetDir, item.run_id);
     try {
+      if (!sourceDir) throw new Error("Path source export tidak valid.");
       await access(path.join(sourceDir, "metadata.json"));
       await cp(sourceDir, destinationDir, {recursive: true, force: true});
       const metadata = await readJsonValidated(path.join(sourceDir, "metadata.json"), "metadata");
@@ -47,8 +49,8 @@ async function exportApprovedRuns() {
             : [],
         },
       });
-    } catch {
-      continue;
+    } catch (error) {
+      skipped.push({run_id: item.run_id, reason: error.message});
     }
   }
 
@@ -57,6 +59,7 @@ async function exportApprovedRuns() {
     created_at: exportedAt,
     total: manifest.length,
     items: manifest,
+    skipped,
   }, null, 2), "utf-8");
 
   const exportedRunIds = new Set(manifest.map((item) => item.run_id));
@@ -71,6 +74,7 @@ async function exportApprovedRuns() {
   return {
     export_id: exportId,
     total: manifest.length,
+    skipped,
     path: targetDir,
     manifest: `/approved/${exportId}/manifest.json`,
   };
@@ -87,9 +91,10 @@ async function exportTryoutQuestions() {
   const questions = [];
   const skipped = [];
   for (const item of approved) {
-    const sourceDir = path.join(SAVED, pathFromIndexEntry(item, "saved"));
+    const sourceDir = safeJoin(SAVED, pathFromIndexEntry(item, "saved"));
     const destinationDir = path.join(targetDir, item.run_id);
     try {
+      if (!sourceDir) throw new Error("Path source export tidak valid.");
       await access(path.join(sourceDir, "metadata.json"));
       await cp(sourceDir, destinationDir, {recursive: true, force: true});
       const metadata = await readJsonValidated(path.join(sourceDir, "metadata.json"), "metadata");

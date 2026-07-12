@@ -617,8 +617,12 @@ PASSAGE_INDENT_MARKER = "\u2060"
 
 def _render_profile(question_or_mapel=None):
     if isinstance(question_or_mapel, dict):
-        return get_render_profile(question_or_mapel.get("mapel"))
-    return get_render_profile(question_or_mapel)
+        mapel = question_or_mapel.get("mapel")
+    else:
+        mapel = question_or_mapel
+    if not str(mapel or "").strip():
+        raise ValueError("Generator gambar membutuhkan subtes pada field mapel.")
+    return get_render_profile(mapel)
 
 
 def _is_numbered_paragraph(text):
@@ -635,7 +639,8 @@ def _drawable_line_count(lines):
 
 
 def _wrap_question_paragraphs(draw, text, font, max_width, profile=None):
-    profile = profile or _render_profile()
+    if profile is None:
+        raise ValueError("Profile generator gambar wajib diberikan untuk membungkus soal.")
     formatted = _format_question_text(text).replace("\r\n", "\n").replace("\r", "\n")
     raw_paragraphs = [
         paragraph.strip()
@@ -655,7 +660,8 @@ def _wrap_question_paragraphs(draw, text, font, max_width, profile=None):
 
 
 def _wrap_passage_paragraphs(draw, text, font, max_width, profile=None):
-    profile = profile or _render_profile()
+    if profile is None:
+        raise ValueError("Profile generator gambar wajib diberikan untuk membungkus bacaan.")
     source = str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
 
     paragraphs = []
@@ -752,6 +758,15 @@ def _chunks(items, size):
 
 def _display_question_text(question):
     text = str(question.get("soal", "") or "")
+    passages = _reading_passages(question, prefer_list=True)
+    if passages:
+        parts = []
+        for passage in passages:
+            heading = _passage_heading(passage)
+            passage_text = str(passage.get("teks") or "").strip()
+            parts.append("\n".join(part for part in [heading, passage_text] if part))
+        parts.append(text)
+        return "\n\n".join(part for part in parts if part)
     passage = question.get("bacaan")
     if not isinstance(passage, dict) or not str(passage.get("teks", "")).strip():
         return text
@@ -772,6 +787,42 @@ def _display_question_text(question):
     if number and total:
         question_label = f"Soal {number}/{total}"
     return f"{label}\n{passage_text}\n\n{question_label}\n{text}"
+
+
+def _reading_passages(question, prefer_list=False):
+    raw_passages = []
+    bacaan_list = question.get("bacaan_list") if isinstance(question, dict) else None
+    if isinstance(bacaan_list, list):
+        raw_passages = [item for item in bacaan_list if isinstance(item, dict)]
+    if not raw_passages and not prefer_list:
+        passage = question.get("bacaan") if isinstance(question, dict) else None
+        if isinstance(passage, dict):
+            raw_passages = [passage]
+
+    passages = []
+    total = len(raw_passages)
+    for index, passage in enumerate(raw_passages, start=1):
+        passage_text = str(passage.get("teks") or "").strip()
+        if not passage_text:
+            continue
+        normalized = dict(passage)
+        normalized["teks"] = passage_text
+        label = str(normalized.get("label") or "").strip()
+        if total > 1 and not label:
+            language = str(normalized.get("bahasa") or "").casefold()
+            label = f"Text {index}" if language == "en" else f"Teks {index}"
+        normalized["label"] = label
+        normalized["judul"] = str(normalized.get("judul") or "").strip()
+        passages.append(normalized)
+    return passages
+
+
+def _passage_heading(passage):
+    label = str(passage.get("label") or "").strip()
+    title = str(passage.get("judul") or "").strip()
+    if label and title:
+        return f"{label}: {title}"
+    return label or title
 
 
 def _question_group_candidates(question, metadata=None):
@@ -924,16 +975,27 @@ def _clone_group_render_question(question, number, total):
 
 
 def _paginate_passage_intro(draw, question, fonts):
+    return [segment["lines"] for segment in _paginate_passage_intro_segments(draw, question, fonts)]
+
+
+def _paginate_passage_intro_segments(draw, question, fonts):
     profile = _render_profile(question)
-    passage = question.get("bacaan") if isinstance(question.get("bacaan"), dict) else {}
-    passage_text = str(passage.get("teks") or "").strip()
-    paragraphs = _wrap_passage_paragraphs(draw, passage_text, fonts["body"], 764, profile=profile)
-    return _paginate_paragraph_lines(
-        paragraphs,
-        profile.passage_intro_first_page_lines,
-        profile.passage_intro_next_page_lines,
-        paragraph_gap=0,
-    ) or [[""]]
+    segments = []
+    for passage in _reading_passages(question):
+        paragraphs = _wrap_passage_paragraphs(draw, passage["teks"], fonts["body"], 764, profile=profile)
+        pages = _paginate_paragraph_lines(
+            paragraphs,
+            profile.passage_intro_first_page_lines,
+            profile.passage_intro_next_page_lines,
+            paragraph_gap=0,
+        ) or [[""]]
+        heading = _passage_heading(passage)
+        for index, lines in enumerate(pages):
+            segments.append({
+                "heading": heading if index == 0 else "",
+                "lines": lines,
+            })
+    return segments or [{"heading": "", "lines": [""]}]
 
 
 def _count_passage_intro_pages(question):
@@ -975,16 +1037,14 @@ def render_passage_intro_images(question, question_count, run_dir, page_offset=0
     }
 
     probe = Image.new("RGB", (width, height), colors["bg"])
-    pages = _paginate_passage_intro(ImageDraw.Draw(probe), question, fonts)
-    display_total = total_pages or len(pages)
+    page_segments = _paginate_passage_intro_segments(ImageDraw.Draw(probe), question, fonts)
+    display_total = total_pages or len(page_segments)
     profile = _render_profile(question)
     logo = _load_quiz_logo()
-    passage = question.get("bacaan") if isinstance(question.get("bacaan"), dict) else {}
-    title = str(passage.get("judul") or "").strip()
-    title_lines = _wrap_text(ImageDraw.Draw(probe), title, fonts["passage_title"], 764)[:3] if title else []
     output_paths = []
 
-    for page_index, lines in enumerate(pages, start=1):
+    for page_index, segment in enumerate(page_segments, start=1):
+        lines = segment["lines"]
         image = Image.new("RGB", (width, height), colors["bg"])
         draw = ImageDraw.Draw(image)
         account = question.get("akun", "@utbk_neareducation")
@@ -997,7 +1057,10 @@ def render_passage_intro_images(question, question_count, run_dir, page_offset=0
 
         line_h = _line_height(draw, fonts["body"]) + 9
         title_block_h = 0
-        if page_index == 1 and title_lines:
+        title_to_show = str(segment.get("heading") or "").strip()
+        title_lines = _wrap_text(draw, title_to_show, fonts["passage_title"], 764)[:2] if title_to_show else []
+
+        if title_lines:
             title_block_h = len(title_lines) * _line_height(draw, fonts["passage_title"]) + max(len(title_lines) - 1, 0) * 8 + 20
             content_start_y += title_block_h
 
@@ -1009,7 +1072,7 @@ def render_passage_intro_images(question, question_count, run_dir, page_offset=0
         panel = (72, 188, 928, panel_bottom)
         draw.rounded_rectangle(panel, radius=18, fill=colors["panel"], outline=colors["line"], width=2)
 
-        if page_index == 1 and title_lines:
+        if title_lines:
             title_y = 236
             for title_line in title_lines:
                 title_w = _text_width(draw, title_line, fonts["passage_title"])
@@ -1046,7 +1109,7 @@ def render_passage_intro_images(question, question_count, run_dir, page_offset=0
             page_w = _text_width(draw, page_text, fonts["small"])
             draw.text((928 - page_w, 942), page_text, font=fonts["small"], fill=colors["muted"])
             footer_right = 928 - page_w - 32
-        if page_index == len(pages):
+        if page_index == len(page_segments):
             discussion_text = "Lanjut Soal  →"
             discussion_w = _text_width(draw, discussion_text, fonts["small_bold"])
             draw.text(
@@ -1191,7 +1254,7 @@ def _count_quiz_image_pages(question):
     return len(_paginate_quiz(ImageDraw.Draw(probe), question, fonts, profile=_render_profile(question)))
 
 
-def render_thumbnail_image(question, run_dir):
+def render_thumbnail_image(question, run_dir, question_count=None):
     try:
         from PIL import Image, ImageDraw
     except ImportError:
@@ -1246,7 +1309,12 @@ def render_thumbnail_image(question, run_dir):
         draw.text(((width - line_w) / 2, text_y), line, font=fonts["title"], fill=colors["muted"])
         text_y += _line_height(draw, fonts["title"]) + 8
 
-    draw.text((left + 70, height - 45), account, font=fonts["small"], fill="#9ca3af")
+    footer_color = "#9ca3af"
+    draw.text((left + 70, height - 45), account, font=fonts["small"], fill=footer_color)
+    if question_count and question_count > 1:
+        account_w = _text_width(draw, account, fonts["small"])
+        count_text = f"{question_count} soal"
+        draw.text((left + 70 + account_w + 28, height - 45), count_text, font=fonts["small"], fill=footer_color)
     output_path = run_dir / "thumbnail.png"
     output_path.parent.mkdir(parents=True, exist_ok=True)
     image.save(output_path, format="PNG", optimize=True)
@@ -1260,6 +1328,7 @@ def render_quiz_images(question, run_dir, page_offset=0, total_pages=None, start
         return []
 
     width = height = 1000
+    profile = _render_profile(question)
     colors = {
         "bg": "#f5f0e8",       # krem hangat untuk background & pilihan
         "panel": "#ede8df",    # sedikit lebih gelap untuk kotak soal
@@ -1274,9 +1343,9 @@ def render_quiz_images(question, run_dir, page_offset=0, total_pages=None, start
     fonts = {
         "category": _load_font(23, bold=True, family="anthropic_sans"),
         "title": _load_font(34, bold=True, family="anthropic_sans"),
-        "question": _load_font(29, family="anthropic_sans"),
-        "body": _load_font(29, family="anthropic_sans"),
-        "body_bold": _load_font(29, bold=True, family="anthropic_sans"),
+        "question": _load_font(profile.question_font_size, family="anthropic_sans"),
+        "body": _load_font(profile.choice_font_size, family="anthropic_sans"),
+        "body_bold": _load_font(profile.choice_font_size, bold=True, family="anthropic_sans"),
         "mono": _load_font(27, family="anthropic_mono"),
         "small": _load_font(22, family="anthropic_sans"),
         "small_bold": _load_font(22, bold=True, family="anthropic_sans"),
@@ -1284,7 +1353,6 @@ def render_quiz_images(question, run_dir, page_offset=0, total_pages=None, start
 
     probe = Image.new("RGB", (width, height), colors["bg"])
     probe_draw = ImageDraw.Draw(probe)
-    profile = _render_profile(question)
     pages = _paginate_quiz(probe_draw, question, fonts, profile=profile)
     display_total = total_pages or len(pages)
     logo = _load_quiz_logo()
@@ -1307,6 +1375,8 @@ def render_quiz_images(question, run_dir, page_offset=0, total_pages=None, start
         has_choices = bool(page["choices"])
         formula_layout = bool(formula_parts and has_question and page_index == 1)
         q_line_h = _line_height(draw, fonts["question"]) + 8
+        question_box_pad_y = 42
+        question_box_pad_x = 52
         intro_lines = []
         formula_lines = []
         conclusion_lines = []
@@ -1337,13 +1407,13 @@ def render_quiz_images(question, run_dir, page_offset=0, total_pages=None, start
         elif has_question and not has_choices:
             q_box_h = min(
                 profile.question_only_box_max_height,
-                max(profile.question_only_box_min_height, q_line_count * q_line_h + 56),
+                max(profile.question_only_box_min_height, q_line_count * q_line_h + question_box_pad_y * 2),
             )
             available_top = 188
             q_box_top = available_top
             question_box = (72, q_box_top, 928, q_box_top + q_box_h)
         elif has_question:
-            q_box_bottom = min(profile.question_with_choices_box_max_bottom, 188 + 24 + q_line_count * q_line_h + 30)
+            q_box_bottom = min(profile.question_with_choices_box_max_bottom, 188 + q_line_count * q_line_h + question_box_pad_y * 2)
             question_box = (72, 188, 928, max(profile.question_with_choices_box_min_height, q_box_bottom))
         else:
             question_box = None
@@ -1352,7 +1422,7 @@ def render_quiz_images(question, run_dir, page_offset=0, total_pages=None, start
             draw.rounded_rectangle(question_box, radius=7, fill=colors["white"], outline=colors["line"], width=2)
 
         if question_box:
-            content_top = question_box[1] + 24
+            content_top = question_box[1] + question_box_pad_y
             if formula_layout:
                 q_y = content_top
                 for intro_line in intro_lines:
@@ -1389,12 +1459,12 @@ def render_quiz_images(question, run_dir, page_offset=0, total_pages=None, start
                 glyph_h = _line_height(draw, fonts["question"])
                 q_text_h = glyph_h + max(0, q_line_count - 1) * q_line_h
                 q_y = question_box[1] + max(
-                    0,
+                    question_box_pad_y,
                     (question_box[3] - question_box[1] - q_text_h) // 2,
                 )
             if not formula_layout:
-                text_x = question_box[0] + 40
-                text_w = question_box[2] - question_box[0] - 80
+                text_x = question_box[0] + question_box_pad_x
+                text_w = question_box[2] - question_box[0] - question_box_pad_x * 2
                 starts_paragraph = True
                 for line_index, line in enumerate(q_lines):
                     if line == PASSAGE_PARAGRAPH_BREAK:
@@ -1592,9 +1662,9 @@ def _answer_display_text(answer_key, answer_text):
 
 def _trim_blank_lines(lines):
     trimmed = list(lines)
-    while trimmed and not trimmed[0]:
+    while trimmed and (not trimmed[0] or trimmed[0] == PASSAGE_PARAGRAPH_BREAK):
         trimmed.pop(0)
-    while trimmed and not trimmed[-1]:
+    while trimmed and (not trimmed[-1] or trimmed[-1] == PASSAGE_PARAGRAPH_BREAK):
         trimmed.pop()
     return trimmed
 
@@ -2617,6 +2687,7 @@ def attach_cartesian_latex_visual(question):
 
 
 def _latex_quiz_sources(question):
+    profile = _render_profile(question)
     display_text = _display_question_text(question)
     question_text = _compact_math_for_line_wrap(_format_question_text(display_text))
     q_lines = _wrap_plain_lines(question_text, 76)
@@ -2678,12 +2749,12 @@ def _latex_quiz_sources(question):
             bottom_lines = page.get("question_bottom") or []
             body_parts.append(_rect(72, 190, 1008, 914, fill="panel"))
             if top_lines:
-                body_parts.append(_node(112, 228, 860, top_lines, size=25))
+                body_parts.append(_node(112, 228, 860, top_lines, size=profile.question_font_size))
             visual_y = 328 if len(top_lines) <= 2 else 356
             body_parts.append(_cartesian_visual_code(question, x=150, y=visual_y, w=780, h=500))
             bottom_y = visual_y + 540
             if bottom_lines:
-                body_parts.append(_node(112, bottom_y, 860, bottom_lines, size=25))
+                body_parts.append(_node(112, bottom_y, 860, bottom_lines, size=profile.question_font_size))
             choice_top = 930
         elif page["question"]:
             if page.get("formula") and formula_parts:
@@ -2703,23 +2774,23 @@ def _latex_quiz_sources(question):
                     conclusion_y + len(conclusion_lines) * intro_line_h + 18 - 190,
                 )
                 body_parts.append(_rect(72, 190, 1008, 190 + q_height, fill="panel"))
-                body_parts.append(_node(112, 230, 856, intro_lines, size=28))
+                body_parts.append(_node(112, 230, 856, intro_lines, size=profile.question_font_size))
                 body_parts.append(_rect(104, formula_top, 976, formula_bottom, fill="softpanel", radius=10))
                 body_parts.append(_node(130, formula_y, 820, formula_lines, size=24, align="left", family="mono"))
-                body_parts.append(_node(112, conclusion_y, 856, conclusion_lines, size=28))
+                body_parts.append(_node(112, conclusion_y, 856, conclusion_lines, size=profile.question_font_size))
                 choice_top = 190 + q_height + 12
             else:
                 q_height = max(118, 54 + len(page["question"]) * 42)
                 if page.get("visual"):
                     q_height = max(260, q_height)
                     body_parts.append(_rect(72, 190, 548, 190 + q_height, fill="panel"))
-                    body_parts.append(_node(112, 230, 396, page["question"], size=27))
+                    body_parts.append(_node(112, 230, 396, page["question"], size=profile.question_font_size))
                     visual = _cartesian_visual_code(question)
                     if visual:
                         body_parts.append(visual)
                 else:
                     body_parts.append(_rect(72, 190, 1008, 190 + q_height, fill="panel"))
-                    body_parts.append(_node(126, 230, 828, page["question"], size=29))
+                    body_parts.append(_node(126, 230, 828, page["question"], size=profile.question_font_size))
                 choice_top = 220 + q_height
         else:
             choice_top = 210
@@ -2730,7 +2801,7 @@ def _latex_quiz_sources(question):
             body_parts.append(_rect(72, y, 1008, y + height, fill="panel"))
             body_parts.append(_circle(134, badge_y, 27, fill="softpanel"))
             body_parts.append(_centered_node(107, badge_y - 27, 54, 54, [key], size=27, color="ink", weight="bold"))
-            body_parts.append(_node(190, y + 24, 748, lines, size=29))
+            body_parts.append(_node(190, y + 24, 748, lines, size=profile.choice_font_size))
             y += height + 10
         account = str(question.get("akun", "@utbk_neareducation") or "@utbk_neareducation")
         body_parts.append(_node(72, 1010, 450, [account], size=22, color="muted"))
@@ -2950,6 +3021,52 @@ def render_pil_content_images(question, run_dir):
     return thumbnail_paths + image_paths + explanation_paths
 
 
+def render_multi_passage_content_images(question, run_dir):
+    quiz_question = copy.deepcopy(question)
+    quiz_question.pop("bacaan_list", None)
+    quiz_question.pop("bacaan", None)
+    numbered_pages = (
+        _count_passage_intro_pages(question)
+        + _count_quiz_image_pages(quiz_question)
+        + _count_explanation_image_pages(quiz_question)
+    )
+    thumbnail_path = render_thumbnail_image(question, run_dir)
+    rendered = [thumbnail_path] if thumbnail_path else []
+    page_offset = 0
+    quiz_index = 1
+
+    intro_paths = render_passage_intro_images(
+        question,
+        1,
+        run_dir,
+        page_offset=page_offset,
+        total_pages=numbered_pages,
+        start_index=quiz_index,
+    )
+    rendered.extend(intro_paths)
+    page_offset += len(intro_paths)
+    quiz_index += len(intro_paths)
+
+    quiz_paths = render_quiz_images(
+        quiz_question,
+        run_dir,
+        page_offset=page_offset,
+        total_pages=numbered_pages,
+        start_index=quiz_index,
+    )
+    rendered.extend(quiz_paths)
+    page_offset += len(quiz_paths)
+
+    explanation_paths = render_explanation_images(
+        quiz_question,
+        run_dir,
+        page_offset=page_offset,
+        total_pages=numbered_pages,
+    )
+    rendered.extend(explanation_paths)
+    return rendered
+
+
 def render_passage_bundle_content_images(question_group, run_dir):
     base_question = copy.deepcopy(question_group[0])
     question_count = len(question_group)
@@ -2962,7 +3079,7 @@ def render_passage_bundle_content_images(question_group, run_dir):
         cloned_questions.append(cloned)
         numbered_pages += _count_quiz_image_pages(cloned) + _count_explanation_image_pages(cloned)
 
-    thumbnail_path = render_thumbnail_image(thumbnail_question, run_dir)
+    thumbnail_path = render_thumbnail_image(thumbnail_question, run_dir, question_count=question_count)
     rendered = [thumbnail_path] if thumbnail_path else []
     page_offset = 0
     quiz_index = 1
@@ -3011,6 +3128,8 @@ def render_content_images(question, run_dir, metadata_path=None, metadata=None):
     question_group = _resolve_render_questions(question, metadata_path=metadata_path, metadata=metadata)
     if _is_passage_bundle(question_group):
         return render_passage_bundle_content_images(question_group, run_dir), "pil_grouped"
+    if _reading_passages(question, prefer_list=True):
+        return render_multi_passage_content_images(question, run_dir), "pil_multi_passage"
 
     engine = RENDER_ENGINE or "latex"
     if engine not in {"latex", "pil", "auto"}:
@@ -3145,6 +3264,7 @@ def _fallback_explanation_review(question, provider, exc):
         "question_revisi": revised_question,
         "fallback_used": True,
         "fallback_reason": issue_text,
+        "provider_reviewed": False,
         "provider": provider,
         "usage": list(GEMINI_USAGE),
     }
@@ -3586,7 +3706,7 @@ def generate_content(mapel, topic, level, mode="auto", account="@utbk_neareducat
     errors = {}
     topic_examples = []
 
-    if mode != "draft":
+    if use_ai:
         topic_examples = require_topic_examples(mapel, topic)
 
     if use_ai:
@@ -3835,6 +3955,7 @@ def review_explanation_for_metadata(metadata_path, provider="gemini"):
     ).strip()
     review["checked_at"] = dt.datetime.now(dt.timezone.utc).isoformat()
     review["provider"] = provider
+    review["provider_reviewed"] = not bool(review.get("fallback_used"))
     review["usage"] = list(GEMINI_USAGE)
     return {
         "ok": True,

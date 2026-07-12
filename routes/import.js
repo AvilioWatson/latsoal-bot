@@ -1,14 +1,15 @@
-import {spawn} from "node:child_process";
 import path from "node:path";
 import {rebuildIndex} from "../lib/filestore.js";
 import {errorStatus, readJsonBody, sendError, sendJson} from "../lib/http.js";
 import {ROOT} from "../lib/paths.js";
 import {requestError} from "../lib/route-utils.js";
+import {runSubprocess} from "../lib/subprocess.js";
 import {TAXONOMY} from "../lib/taxonomy.js";
 
 const PYTHON = process.env.PYTHON || "python";
 const MAX_BODY_BYTES = 10 * 1024 * 1024;
 const MAX_BATCH = 1000;
+const IMPORT_TIMEOUT_MS = Number(process.env.IMPORT_TIMEOUT_MS || 120000);
 const PASSAGE_SUBTESTS = new Set([
   "Penalaran Matematika",
   "Literasi Bahasa Indonesia",
@@ -55,7 +56,7 @@ function templateForSubtest(mapel) {
     template.bacaan = {
       id: `${TAXONOMY.subtest_codes?.[mapel] || "SUB"}-001`,
       judul: "Judul atau konteks bacaan",
-      teks: "Tulis satu bacaan lengkap yang sama untuk 1 sampai 5 soal.",
+      teks: "Tulis satu bacaan lengkap yang sama untuk 1 soal atau lebih.",
       bahasa: mapel === "Literasi Bahasa Inggris" ? "en" : "id",
       nomor_soal: 1,
       total_soal: 3,
@@ -117,7 +118,10 @@ function extractionPromptForSubtest(mapel) {
   const usesPassage = PASSAGE_SUBTESTS.has(mapel);
   const passageRules = usesPassage ? `
 Aturan khusus ${code}:
-- Format utama adalah 1 bacaan untuk satu atau beberapa soal terkait. Jumlahnya mengikuti PDF, bisa 1 sampai 5 soal.
+- Format utama adalah 1 bacaan untuk satu atau beberapa soal terkait. Jumlahnya mengikuti PDF, bisa 1 soal atau lebih.
+- Jika satu bacaan hanya dipakai untuk 1 soal, jangan buat field bacaan; tulis konteks yang diperlukan langsung di field soal seperti soal mandiri.
+- Field bacaan hanya dipakai untuk set bacaan yang memiliki 2 soal atau lebih.
+- Jika satu bacaan berisi lebih dari 6 soal, tetap keluarkan semua soal sesuai PDF.
 - Untuk setiap set bacaan, buat satu object soal terpisah per nomor dalam JSON array.
 - Object dalam set yang sama harus memiliki field bacaan.id yang sama, bacaan.teks yang sama, bacaan.total_soal sesuai jumlah soal pada set tersebut, dan bacaan.nomor_soal berurutan mulai dari 1.
 - Field soal berisi pertanyaan per nomor saja; jangan menyalin ulang seluruh bacaan ke field soal.
@@ -156,35 +160,27 @@ function promptsBySubtest() {
 
 let importQueue = Promise.resolve();
 
-function runImporter(payload, args) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(PYTHON, [path.join(ROOT, "scripts", "import_questions.py"), "-", ...args], {
+async function runImporter(payload, args) {
+  let completed;
+  try {
+    completed = await runSubprocess(PYTHON, [path.join(ROOT, "scripts", "import_questions.py"), "-", ...args], {
       cwd: ROOT,
-      env: process.env,
-      windowsHide: true,
-      stdio: ["pipe", "pipe", "pipe"],
+      input: JSON.stringify(payload),
+      timeoutMs: IMPORT_TIMEOUT_MS,
     });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => { stdout += chunk; });
-    child.stderr.on("data", (chunk) => { stderr += chunk; });
-    child.on("error", reject);
-    child.on("close", (code) => {
-      let result;
-      try {
-        result = JSON.parse(stdout.trim() || "{}");
-      } catch {
-        reject(requestError(500, stderr.trim() || "Output importer bukan JSON valid."));
-        return;
-      }
-      if (code !== 0 || !result.ok) {
-        reject(requestError(400, result.error || stderr.trim() || "Import gagal."));
-        return;
-      }
-      resolve(result);
-    });
-    child.stdin.end(JSON.stringify(payload));
-  });
+  } catch (error) {
+    throw requestError(504, error.message);
+  }
+  let result;
+  try {
+    result = JSON.parse(completed.stdout.trim() || "{}");
+  } catch {
+    throw requestError(500, completed.stderr.trim() || "Output importer bukan JSON valid.");
+  }
+  if (completed.exitCode !== 0 || !result.ok) {
+    throw requestError(400, result.error || completed.stderr.trim() || "Import gagal.");
+  }
+  return result;
 }
 
 function validatePayloadShape(payload) {

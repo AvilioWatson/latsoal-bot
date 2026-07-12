@@ -35,6 +35,10 @@ function statusOf(entry) {
   return STATUS_KEYS.includes(entry.status) ? entry.status : "saved";
 }
 
+function entryQuestionCount(entry) {
+  return Math.max(1, Number(entry?.question_count || 1));
+}
+
 function newestIso(values) {
   const latest = values
     .filter(Boolean)
@@ -46,7 +50,7 @@ function newestIso(values) {
 
 export function buildStats(entries, now = new Date()) {
   const list = Array.isArray(entries) ? entries : [];
-  const total = list.length;
+  const total = list.reduce((sum, entry) => sum + entryQuestionCount(entry), 0);
   const byStatus = {generated: 0, saved: 0, approved: 0, rejected: 0};
   const bySubtes = {};
   const bySource = {};
@@ -62,34 +66,35 @@ export function buildStats(entries, now = new Date()) {
   let pendingExport = 0;
 
   for (const entry of list) {
+    const questionCount = entryQuestionCount(entry);
     const status = statusOf(entry);
     const subtes = entry.subtes || "unknown";
     const topic = entry.topik || "unknown";
     const source = entry.source || "unknown";
     const level = entry.level || "unknown";
 
-    increment(byStatus, status);
-    increment(bySource, source);
-    increment(byLevel, level);
+    increment(byStatus, status, questionCount);
+    increment(bySource, source, questionCount);
+    increment(byLevel, level, questionCount);
     addProviderUsage(tokenUsage.question, entry.token_usage?.question);
     addProviderUsage(tokenUsage.explanation, entry.token_usage?.explanation);
 
     if (!bySubtes[subtes]) {
       bySubtes[subtes] = {total: 0, saved: 0, approved: 0, rejected: 0, uploaded: 0, topics: {}};
     }
-    bySubtes[subtes].total += 1;
-    bySubtes[subtes][status] += 1;
-    if (entry.uploaded_at) bySubtes[subtes].uploaded += 1;
+    bySubtes[subtes].total += questionCount;
+    increment(bySubtes[subtes], status, questionCount);
+    if (entry.uploaded_at) bySubtes[subtes].uploaded += questionCount;
     if (!bySubtes[subtes].topics[topic]) {
       bySubtes[subtes].topics[topic] = {total: 0, saved: 0, approved: 0, rejected: 0, uploaded: 0};
     }
-    bySubtes[subtes].topics[topic].total += 1;
-    bySubtes[subtes].topics[topic][status] += 1;
-    if (entry.uploaded_at) bySubtes[subtes].topics[topic].uploaded += 1;
+    bySubtes[subtes].topics[topic].total += questionCount;
+    increment(bySubtes[subtes].topics[topic], status, questionCount);
+    if (entry.uploaded_at) bySubtes[subtes].topics[topic].uploaded += questionCount;
 
-    if (entry.is_duplicate) duplicates += 1;
+    if (entry.is_duplicate) duplicates += questionCount;
     if (entry.export_batch_id) exportBatchIds.add(entry.export_batch_id);
-    if (status === "approved" && !entry.exported_at) pendingExport += 1;
+    if (status === "approved" && !entry.exported_at) pendingExport += questionCount;
 
     const savedAt = new Date(entry.saved_at || 0);
     if (!Number.isNaN(savedAt.getTime()) && savedAt.getTime() >= since) {
@@ -101,9 +106,10 @@ export function buildStats(entries, now = new Date()) {
     byLevel[key] = byLevel[key] || 0;
   }
 
-  const recentApproved = recent.filter((entry) => statusOf(entry) === "approved").length;
-  const recentFallback = recent.filter((entry) => entry.source === "fallback").length;
-  const fallbackRate = rate(recentFallback, recent.length);
+  const recentTotal = recent.reduce((total, entry) => total + entryQuestionCount(entry), 0);
+  const recentApproved = recent.reduce((total, entry) => total + (statusOf(entry) === "approved" ? entryQuestionCount(entry) : 0), 0);
+  const recentFallback = recent.reduce((total, entry) => total + (entry.source === "fallback" ? entryQuestionCount(entry) : 0), 0);
+  const fallbackRate = rate(recentFallback, recentTotal);
   const duplicateRate = rate(duplicates, total);
 
   const warnings = [];
@@ -148,7 +154,7 @@ export function buildStats(entries, now = new Date()) {
     by_level: byLevel,
     token_usage: tokenUsage,
     last_7_days: {
-      total_generated: recent.length,
+      total_generated: recentTotal,
       approved: recentApproved,
       fallback_rate: fallbackRate,
     },

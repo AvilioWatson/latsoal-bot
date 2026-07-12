@@ -10,6 +10,19 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const RUN_ID = "20990101-010101";
 const UNSAVED_RUN_ID = "20990101-010102";
 
+function isolatedServerEnv(overrides = {}) {
+  return {
+    ...process.env,
+    GEMINI_API_KEY: "",
+    KIMI_API_KEY: "",
+    NVIDIA_API_KEY: "",
+    OPENAI_API_KEY: "",
+    HTTPS_PROXY: "http://127.0.0.1:9",
+    HTTP_PROXY: "http://127.0.0.1:9",
+    ...overrides,
+  };
+}
+
 function metadata() {
   const question = {
     mapel: "Penalaran Umum",
@@ -112,7 +125,7 @@ test("bank review API can save, approve, export, and delete in an isolated data 
 
   const server = spawn("node", ["server.js"], {
     cwd: ROOT,
-    env: {...process.env, PORT: String(port), LATSOAL_DATA_ROOT: dataRoot, LATSOAL_TAXONOMY_PATH: taxonomyPath},
+    env: isolatedServerEnv({PORT: String(port), LATSOAL_DATA_ROOT: dataRoot, LATSOAL_TAXONOMY_PATH: taxonomyPath}),
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -313,45 +326,34 @@ test("bank review API can save, approve, export, and delete in an isolated data 
     body = await waitForReviewJob(baseUrl, RUN_ID);
     assert.equal(body.status, "done");
     assert.equal(body.result.explanation_review.question_revisi.soal, metadata().question.soal);
+    assert.equal(body.result.explanation_review.provider_reviewed, false);
+    const reviewJobId = body.id;
 
     response = await fetch(`${baseUrl}/saved/${RUN_ID}`, {headers: {Accept: "application/json"}});
     assert.equal(response.status, 200);
     body = await response.json();
-    const revisedExplanation = `${body.question.pembahasan} Revisi AI sudah dibuat lebih formal.`;
     response = await fetch(`${baseUrl}/saved/${RUN_ID}/explanation-review/apply`, {
       method: "POST",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({
-        question_revisi: {...body.question, pembahasan: revisedExplanation},
-        explanation_review: {
-          lolos: true,
-          skor: 95,
-          akurasi: "Akurat",
-          bahasa_formal: "Formal",
-          catatan: [],
-          saran_revisi: ["Pembahasan diformalkan."],
-          pembahasan_revisi: revisedExplanation,
-        },
-      }),
+      body: JSON.stringify({job_id: reviewJobId}),
     });
     assert.equal(response.status, 200);
     let reviewBody = await response.json();
-    assert.equal(reviewBody.question.pembahasan, revisedExplanation);
+    assert.equal(reviewBody.question.pembahasan, metadata().question.pembahasan);
     assert.equal(reviewBody.explanation_review.lolos, true);
-    assert.equal(reviewBody.review_status, "ready");
+    assert.equal(reviewBody.review_status, "needs_review");
 
     response = await fetch(`${baseUrl}/saved/${RUN_ID}/explanation-review/apply`, {
       method: "POST",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({question_revisi: {soal: "tidak lengkap"}, explanation_review: {lolos: false}}),
+      body: JSON.stringify({job_id: "job-lama"}),
     });
-    assert.equal(response.status, 400);
-    assert.match((await response.json()).error, /Draft revisi belum valid/);
+    assert.equal(response.status, 409);
 
     response = await fetch(`${baseUrl}/saved/${RUN_ID}`, {headers: {Accept: "application/json"}});
     assert.equal(response.status, 200);
     body = await response.json();
-    assert.equal(body.question.pembahasan, revisedExplanation);
+    assert.equal(body.question.pembahasan, metadata().question.pembahasan);
     const edited = {
       ...body,
       question: {
@@ -396,6 +398,17 @@ test("bank review API can save, approve, export, and delete in an isolated data 
     assert.equal(savedMetadata.question.topik, "Penalaran Induktif");
     assert.equal(savedQuestion.topik, "Penalaran Induktif");
     assert.match(savedCaption, /#SoalUTBK/);
+
+    response = await fetch(`${baseUrl}/saved/${RUN_ID}/status`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({status: "approved"}),
+    });
+    assert.equal(response.status, 409);
+
+    savedMetadata.explanation_review = {lolos: true, provider_reviewed: true};
+    savedMetadata.review_status = "ready";
+    await writeFile(path.join(dataRoot, savedIndex[0].path, "metadata.json"), JSON.stringify(savedMetadata, null, 2), "utf-8");
 
     response = await fetch(`${baseUrl}/saved/${RUN_ID}/status`, {
       method: "POST",
@@ -508,7 +521,7 @@ test("import page validates and imports a JSON batch", async () => {
   const baseUrl = `http://127.0.0.1:${port}`;
   const server = spawn("node", ["server.js"], {
     cwd: ROOT,
-    env: {...process.env, PORT: String(port), LATSOAL_DATA_ROOT: dataRoot, LATSOAL_RENDER_ENGINE: "pil"},
+    env: isolatedServerEnv({PORT: String(port), LATSOAL_DATA_ROOT: dataRoot, LATSOAL_RENDER_ENGINE: "pil"}),
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -525,7 +538,7 @@ test("import page validates and imports a JSON batch", async () => {
     let body = await response.json();
     assert.equal(body.threshold, 0.82);
     assert.ok(Array.isArray(body.template));
-    assert.ok(body.prompts["Penalaran Matematika"].includes("1 sampai 5 soal"));
+    assert.ok(body.prompts["Penalaran Matematika"].includes("1 soal atau lebih"));
     assert.ok(body.prompts["Penalaran Matematika"].includes("file .json yang bisa saya download"));
     assert.equal(body.templates["Penalaran Matematika"][0].bacaan.total_soal, 3);
     assert.equal(body.default_subtest, "Penalaran Matematika");

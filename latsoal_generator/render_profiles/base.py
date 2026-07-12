@@ -4,6 +4,8 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class RenderProfile:
     subtest: str = "default"
+    question_font_size: int = 29
+    choice_font_size: int = 29
     question_indent_px: int = 28
     indent_question_paragraphs: bool = True
     justify_question_text: bool = True
@@ -23,6 +25,3 @@ class RenderProfile:
     justify_passage_text: bool = True
     passage_intro_first_page_lines: int = 20
     passage_intro_next_page_lines: int = 20
-
-
-DEFAULT_PROFILE = RenderProfile()

@@ -12,6 +12,8 @@ def load_generator(data_root):
     os.environ["LATSOAL_DATA_ROOT"] = str(data_root)
     os.environ["LATSOAL_RENDER_ENGINE"] = "pil"
     os.environ.pop("GEMINI_API_KEY", None)
+    os.environ.pop("KIMI_API_KEY", None)
+    os.environ.pop("NVIDIA_API_KEY", None)
     import content_generator
     return importlib.reload(content_generator)
 
@@ -235,6 +237,69 @@ class ContentGeneratorTest(unittest.TestCase):
             self.assertEqual(result["similarity"], 0.0)
             self.assertIsNone(result["matched_run_id"])
 
+    def test_check_duplicate_passage_group_ignores_question_text(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_root = Path(tmp)
+            generator = load_generator(data_root)
+            run_id = "20990101-010101"
+            saved_question = passage_question(1, total=3, passage_id="PM-001")
+            current_question = json.loads(json.dumps(saved_question))
+            current_question["bacaan"]["id"] = "PM-002"
+            current_question["bacaan"]["judul"] = "Survei Transportasi"
+            current_question["bacaan"]["teks"] = (
+                "Komunitas sekolah mencatat perubahan pilihan transportasi siswa setelah "
+                "jadwal masuk pagi disesuaikan selama satu semester."
+            )
+            saved_dir = data_root / "saved" / run_id
+            bank_dir = data_root / "bank"
+            saved_dir.mkdir(parents=True)
+            bank_dir.mkdir(parents=True)
+            (saved_dir / "metadata.json").write_text(
+                json.dumps({"question": saved_question}, ensure_ascii=False), encoding="utf-8"
+            )
+            (bank_dir / "index.json").write_text(
+                json.dumps([{"run_id": run_id, "status": "saved"}]), encoding="utf-8"
+            )
+
+            result = generator.check_duplicate(current_question)
+
+            self.assertFalse(result["is_duplicate"])
+            self.assertLess(result["similarity"], result["threshold"])
+
+    def test_check_duplicate_passage_group_matches_passage_text(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_root = Path(tmp)
+            generator = load_generator(data_root)
+            run_id = "20990101-010101"
+            saved_question = passage_question(1, total=3, passage_id="PM-001")
+            current_question = passage_question(2, total=3, passage_id="PM-001")
+            current_question["bacaan"]["judul"] = saved_question["bacaan"]["judul"]
+            current_question["bacaan"]["teks"] = saved_question["bacaan"]["teks"]
+            current_question["soal"] = "Manakah pernyataan yang tidak dapat disimpulkan dari bacaan?"
+            current_question["pilihan"] = {
+                "A": "Data biaya tetap dapat dibandingkan.",
+                "B": "Pertumbuhan produksi dicatat beberapa bulan.",
+                "C": "Seluruh biaya berubah setiap hari.",
+                "D": "Titik impas dapat dikaji dari data.",
+                "E": "Produksi dibahas dalam konteks UMKM.",
+            }
+            saved_dir = data_root / "saved" / run_id
+            bank_dir = data_root / "bank"
+            saved_dir.mkdir(parents=True)
+            bank_dir.mkdir(parents=True)
+            (saved_dir / "metadata.json").write_text(
+                json.dumps({"question": saved_question}, ensure_ascii=False), encoding="utf-8"
+            )
+            (bank_dir / "index.json").write_text(
+                json.dumps([{"run_id": run_id, "status": "saved"}]), encoding="utf-8"
+            )
+
+            result = generator.check_duplicate(current_question)
+
+            self.assertTrue(result["is_duplicate"])
+            self.assertEqual(result["matched_run_id"], run_id)
+            self.assertEqual(result["similarity"], 1.0)
+
     def test_resolve_render_questions_reads_saved_passage_group(self):
         with tempfile.TemporaryDirectory() as tmp:
             data_root = Path(tmp)
@@ -262,6 +327,89 @@ class ContentGeneratorTest(unittest.TestCase):
                 [1, 2, 3],
             )
 
+    def test_reading_passages_normalizes_multiple_passages(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            generator = load_generator(Path(tmp))
+            question = passage_question(1, total=1)
+            question.pop("bacaan")
+            question["bacaan_list"] = [
+                {
+                    "id": "LBI-001-A",
+                    "judul": "Pasar Buku",
+                    "teks": "Teks pertama membahas kebiasaan membaca siswa.",
+                    "bahasa": "id",
+                },
+                {
+                    "id": "LBI-001-B",
+                    "judul": "Library Survey",
+                    "teks": "The second text compares library visits.",
+                    "bahasa": "en",
+                    "label": "Text 2",
+                },
+            ]
+
+            passages = generator._reading_passages(question, prefer_list=True)
+
+            self.assertEqual([item["label"] for item in passages], ["Teks 1", "Text 2"])
+            self.assertEqual(generator._passage_heading(passages[0]), "Teks 1: Pasar Buku")
+            self.assertEqual(generator._passage_heading(passages[1]), "Text 2: Library Survey")
+
+    def test_paginate_passage_intro_segments_keeps_heading_per_passage(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            generator = load_generator(Path(tmp))
+            from PIL import Image, ImageDraw
+
+            question = passage_question(1, total=1)
+            question.pop("bacaan")
+            question["bacaan_list"] = [
+                {
+                    "id": "LBI-001-A",
+                    "judul": "Pasar Buku",
+                    "teks": "Teks pertama membahas kebiasaan membaca siswa.",
+                    "bahasa": "id",
+                },
+                {
+                    "id": "LBI-001-B",
+                    "judul": "Perpustakaan Sekolah",
+                    "teks": "Teks kedua menjelaskan perubahan kunjungan perpustakaan.",
+                    "bahasa": "id",
+                },
+            ]
+            image = Image.new("RGB", (1000, 1000), "#f5f0e8")
+            fonts = {"body": generator._load_font(24, family="anthropic_sans")}
+
+            segments = generator._paginate_passage_intro_segments(ImageDraw.Draw(image), question, fonts)
+
+            self.assertEqual([item["heading"] for item in segments], ["Teks 1: Pasar Buku", "Teks 2: Perpustakaan Sekolah"])
+
+    def test_render_content_images_routes_bacaan_list_to_multi_passage_pil(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            generator = load_generator(Path(tmp))
+            question = passage_question(1, total=1)
+            question.pop("bacaan")
+            question["bacaan_list"] = [
+                {
+                    "id": "LBI-001-A",
+                    "judul": "Pasar Buku",
+                    "teks": "Teks pertama membahas kebiasaan membaca siswa.",
+                    "bahasa": "id",
+                },
+                {
+                    "id": "LBI-001-B",
+                    "judul": "Perpustakaan Sekolah",
+                    "teks": "Teks kedua menjelaskan perubahan kunjungan perpustakaan.",
+                    "bahasa": "id",
+                },
+            ]
+            question["soal"] = "Berdasarkan kedua teks, simpulan yang tepat adalah ..."
+
+            rendered, engine = generator.render_content_images(question, Path(tmp))
+
+            self.assertEqual(engine, "pil_multi_passage")
+            self.assertTrue((Path(tmp) / "thumbnail.png").exists())
+            self.assertTrue((Path(tmp) / "post-1.png").exists())
+            self.assertGreaterEqual(len(rendered), 4)
+
     def test_wrap_passage_paragraphs_keeps_tight_new_paragraphs_without_uppercase_marker(self):
         with tempfile.TemporaryDirectory() as tmp:
             generator = load_generator(Path(tmp))
@@ -275,6 +423,7 @@ class ContentGeneratorTest(unittest.TestCase):
                 "Paragraf pertama baris satu.\nParagraf pertama baris dua.\n\n(2) paragraf kedua.",
                 font,
                 700,
+                profile=generator._render_profile({"mapel": "Penalaran Umum"}),
             )
 
             self.assertEqual(len(paragraphs), 2)
@@ -296,6 +445,7 @@ class ContentGeneratorTest(unittest.TestCase):
                 "Paragraf kedua sangat panjang sehingga perlu turun ke beberapa baris saat dibungkus di area teks yang sempit.",
                 font,
                 220,
+                profile=generator._render_profile({"mapel": "Penalaran Umum"}),
             )
 
             self.assertFalse(paragraphs[0][0].startswith(generator.PASSAGE_INDENT_MARKER))
@@ -314,6 +464,7 @@ class ContentGeneratorTest(unittest.TestCase):
                 "Paragraf pertama berisi konteks soal.\n\nParagraf kedua berisi pertanyaan lanjutan.",
                 font,
                 790,
+                profile=generator._render_profile({"mapel": "Penalaran Umum"}),
             )
 
             self.assertFalse(paragraphs[0][0].startswith(generator.PASSAGE_INDENT_MARKER))
@@ -329,6 +480,15 @@ class ContentGeneratorTest(unittest.TestCase):
             self.assertEqual(pu_profile.subtest, "Penalaran Umum")
             self.assertEqual(lbi_profile.subtest, "Literasi Bahasa Indonesia")
             self.assertIsNot(pu_profile, lbi_profile)
+            self.assertEqual(pu_profile.question_font_size, 32)
+            self.assertEqual(pu_profile.choice_font_size, 32)
+
+    def test_render_profile_rejects_subtest_without_own_generator(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            generator = load_generator(Path(tmp))
+
+            with self.assertRaisesRegex(ValueError, "Generator gambar belum tersedia"):
+                generator._render_profile({"mapel": "Subtes Palsu"})
 
     def test_question_indent_can_be_changed_per_profile(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -356,6 +516,7 @@ class ContentGeneratorTest(unittest.TestCase):
             from PIL import Image, ImageDraw
 
             question = {
+                "mapel": "Penalaran Umum",
                 "soal": "Paragraf pertama berisi konteks soal.\n\nParagraf kedua berisi pertanyaan lanjutan.",
                 "pilihan": {
                     "A": "Pilihan A.",
@@ -413,6 +574,7 @@ class ContentGeneratorTest(unittest.TestCase):
             from PIL import Image, ImageDraw
 
             question = {
+                "mapel": "Penalaran Umum",
                 "soal": "Bentuk pe-an pada kata pengecekan dalam kalimat (3) mempunyai makna yang sama dengan bentuk pe-an pada kalimat ....",
                 "pilihan": {
                     "A": "Kami sudah mempunyai pekarangan untuk mendirikan rumah.",
@@ -489,12 +651,16 @@ class ContentGeneratorTest(unittest.TestCase):
             self.assertIn('"Kesimpulan:"', prompt)
             self.assertNotIn("Contoh database statistika yang tidak boleh masuk", prompt)
 
-    def test_generate_content_auto_blocks_when_same_topic_examples_are_insufficient(self):
+    def test_generate_content_auto_uses_local_fallback_when_no_provider_or_examples_exist(self):
         with tempfile.TemporaryDirectory() as tmp:
             generator = load_generator(Path(tmp))
 
-            with self.assertRaises(generator.InsufficientTopicExamplesError) as context:
-                generator.generate_content(
+            with mock.patch.dict(os.environ, {
+                "GEMINI_API_KEY": "",
+                "KIMI_API_KEY": "",
+                "NVIDIA_API_KEY": "",
+            }, clear=False):
+                result = generator.generate_content(
                     "Pengetahuan Kuantitatif",
                     "Aljabar Dan Fungsi",
                     "mudah",
@@ -502,9 +668,9 @@ class ContentGeneratorTest(unittest.TestCase):
                     account="@quality",
                 )
 
-            self.assertEqual(context.exception.required, 3)
-            self.assertEqual(context.exception.found, 0)
-            self.assertIn("Butuh minimal 3 contoh", str(context.exception))
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["source"], "draft")
+            self.assertFalse(result["fallback_used"])
 
     def test_generate_content_draft_writes_expected_files_to_data_root(self):
         with tempfile.TemporaryDirectory() as tmp:

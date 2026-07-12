@@ -92,13 +92,14 @@ function createDashboardRows() {
   }
 
   for (const item of savedItems) {
+    const questionCount = Math.max(1, Number(item.question_count || 1));
     const subtest = canonicalSubtestName(item.mapel);
     const topic = canonicalTopicName(subtest, item.canonical_topik || item.topik);
     const row = ensureRow(subtest, topic);
     const level = normalizeLevel(item.level);
-    if (level) row[level] += 1;
-    row.total += 1;
-    if (item.uploaded_at) row.uploaded += 1;
+    if (level) row[level] += questionCount;
+    row.total += questionCount;
+    if (item.uploaded_at) row.uploaded += questionCount;
   }
 
   return subtestOrder.flatMap((subtest) => (

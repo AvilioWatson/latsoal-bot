@@ -49,6 +49,8 @@
             <option value="uploaded">Uploaded</option>
             <option value="rejected">Rejected</option>
           </select>
+          <button id="sortSimilarityButton" class="secondary sort-toggle" type="button" aria-pressed="false" title="Urutkan similarity terbesar ke terkecil">Similarity tertinggi</button>
+          <button id="checkAllSimilarityButton" class="secondary" type="button" title="Hitung similarity semua card yang sedang tampil">Cek semua similarity</button>
           <button id="refreshSavedButton" class="secondary" type="button">Refresh</button>
           <button id="exportApprovedButton" class="primary" type="button">Export approved</button>
         </div>
@@ -61,6 +63,11 @@
             <div id="savedList" class="saved-list saved-list-large">
               <p class="empty-copy">Belum ada soal disimpan.</p>
             </div>
+            <nav id="savedPagination" class="saved-pagination" aria-label="Navigasi halaman Bank Review" hidden>
+              <button id="savedPreviousPage" class="secondary" type="button">Sebelumnya</button>
+              <span id="savedPageStatus" aria-live="polite"></span>
+              <button id="savedNextPage" class="secondary" type="button">Berikutnya</button>
+            </nav>
           </section>
 
           <section class="saved-preview">
@@ -121,6 +128,7 @@
                   <h3>Soal</h3>
                   <span id="validationScore">Skor belum tersedia</span>
                 </div>
+                <div id="passageList" class="passage-list" hidden></div>
                 <p id="questionText" class="body-copy">Pilih item saved untuk melihat soal.</p>
                 <ol id="choicesList" class="choices"></ol>
               </section>

@@ -146,6 +146,19 @@ test("createEntryFromMetadata summarizes AI token usage", () => {
   assert.equal(entry.token_usage.explanation.kimi.total_tokens, 10);
 });
 
+test("createEntryFromMetadata counts grouped passage questions", () => {
+  const payload = metadata();
+  payload.question.question_group = [
+    {nomor_soal: 1, soal: "Soal 1"},
+    {nomor_soal: 2, soal: "Soal 2"},
+    {nomor_soal: 3, soal: "Soal 3"},
+  ];
+
+  const entry = createEntryFromMetadata("20990101-070707", payload);
+
+  assert.equal(entry.question_count, 3);
+});
+
 test("schema validators report warnings without throwing", () => {
   assert.ok(validateQuestion({mapel: "Penalaran Umum"}, "soal.json").length > 0);
   assert.ok(validateMetadata({run_id: "bad"}, "metadata.json").length > 0);

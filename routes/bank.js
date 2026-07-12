@@ -1,5 +1,5 @@
-import {spawn} from "node:child_process";
 import {access, cp, mkdir, readdir, rm, writeFile} from "node:fs/promises";
+import {randomUUID} from "node:crypto";
 import path from "node:path";
 import {readJsonValidated, validateQuestion, writeJsonValidated} from "../lib/dbschema.js";
 import {normalizeCaptionForStorage, normalizeQuestionForStorage} from "../lib/content-normalize.js";
@@ -15,10 +15,14 @@ import {errorStatus, readJsonBody, sendError, sendJson} from "../lib/http.js";
 import {OUTPUTS, ROOT, SAVED, buildStoragePath, buildWebFiles, canonicalTopic, isValidRunId, pathFromIndexEntry, safeJoin} from "../lib/paths.js";
 import {requestError, wantsJson} from "../lib/route-utils.js";
 import {DEDUP_THRESHOLD, checkDuplicateAgainstSaved} from "../lib/similarity.js";
+import {runSubprocess} from "../lib/subprocess.js";
 import {TOPICS} from "../lib/taxonomy.js";
+import {metadataQuestionCount} from "../lib/question-count.js";
 import {tryoutQuestionWarnings} from "../lib/tryout-export.js";
 
 const DEFAULT_PYTHON = process.env.PYTHON || "python";
+const IMAGE_RENDER_TIMEOUT_MS = Number(process.env.IMAGE_RENDER_TIMEOUT_MS || 120000);
+const EXPLANATION_REVIEW_TIMEOUT_MS = Number(process.env.EXPLANATION_REVIEW_TIMEOUT_MS || 120000);
 const explanationReviewJobs = new Map();
 
 function retargetMetadataFiles(metadata, targetDir) {
@@ -102,6 +106,7 @@ async function loadSavedPassageGroup(runId, baseMetadata) {
 
   const index = await readIndex();
   const grouped = new Map();
+  const duplicateNumbers = new Set();
   for (const entry of index) {
     if (!isValidRunId(entry.run_id)) continue;
     const artifactPath = pathFromIndexEntry(entry, "saved");
@@ -115,12 +120,17 @@ async function loadSavedPassageGroup(runId, baseMetadata) {
     if (passageGroupKey(metadata.question || {}) !== key) continue;
     const number = passageQuestionNumber(metadata.question || {});
     if (number < 1 || number > expectedTotal) continue;
+    if (grouped.has(number)) duplicateNumbers.add(number);
     grouped.set(number, {entry, artifactPath, metadataPath, runDir: path.dirname(metadataPath), metadata});
   }
 
-  return Array.from(grouped.entries())
-    .sort(([left], [right]) => left - right)
-    .map(([, value]) => value);
+  return {
+    expectedTotal,
+    duplicateNumbers: [...duplicateNumbers],
+    items: Array.from(grouped.entries())
+      .sort(([left], [right]) => left - right)
+      .map(([, value]) => value),
+  };
 }
 
 async function resolveOutputRun(runId) {
@@ -232,6 +242,7 @@ async function listSavedRuns() {
       uploaded_at: item.uploaded_at || null,
       status,
       source: metadata?.source || null,
+      question_count: metadata ? metadataQuestionCount(metadata) : 1,
       review_status: metadata?.review_status || null,
       dedup: metadata?.dedup || null,
       mapel: metadata?.question?.mapel || null,
@@ -264,6 +275,13 @@ async function updateSavedStatus(runId, status) {
   const resolved = await resolveSavedRun(runId);
   if (!resolved) {
     throw requestError(404, "Saved run tidak ditemukan.");
+  }
+
+  if (status === "approved") {
+    const metadata = await readJsonValidated(path.join(resolved.dir, "metadata.json"), "metadata");
+    if (!metadata.explanation_review?.provider_reviewed || metadata.review_status !== "ready") {
+      throw requestError(409, "Soal hanya dapat di-approve setelah review provider berhasil dan diterapkan.");
+    }
   }
 
   const now = new Date().toISOString();
@@ -327,86 +345,44 @@ async function deleteSavedRun(runId) {
   };
 }
 
-function runImageRenderer(metadataPath) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(DEFAULT_PYTHON, [
-      "content_generator.py",
-      "--render-images",
-      metadataPath,
-    ], {
-      cwd: ROOT,
-      env: process.env,
-      windowsHide: true,
-    });
-
-    let stdout = "";
-    let stderr = "";
-    child.stdout.setEncoding("utf-8");
-    child.stderr.setEncoding("utf-8");
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk;
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk;
-    });
-    child.on("error", reject);
-    child.on("close", (code) => {
-      let parsed = null;
-      try {
-        parsed = JSON.parse(stdout);
-      } catch {
-        reject(new Error(stderr || "Renderer gambar tidak mengembalikan JSON valid."));
-        return;
-      }
-      if (code !== 0 || parsed.ok === false) {
-        reject(new Error(parsed.detail || stderr || "Render gambar gagal."));
-        return;
-      }
-      resolve(parsed);
-    });
+async function runImageRenderer(metadataPath) {
+  const completed = await runSubprocess(DEFAULT_PYTHON, ["content_generator.py", "--render-images", metadataPath], {
+    cwd: ROOT,
+    timeoutMs: IMAGE_RENDER_TIMEOUT_MS,
   });
+  let parsed;
+  try {
+    parsed = JSON.parse(completed.stdout);
+  } catch {
+    throw new Error(completed.stderr || "Renderer gambar tidak mengembalikan JSON valid.");
+  }
+  if (completed.exitCode !== 0 || parsed.ok === false) {
+    throw new Error(parsed.detail || completed.stderr || "Render gambar gagal.");
+  }
+  return parsed;
 }
 
-function runExplanationReview(metadataPath, provider = "gemini") {
-  return new Promise((resolve, reject) => {
-    const child = spawn(DEFAULT_PYTHON, [
-      "content_generator.py",
-      "--review-explanation",
-      metadataPath,
-      "--provider",
-      provider,
-    ], {
-      cwd: ROOT,
-      env: process.env,
-      windowsHide: true,
-    });
-
-    let stdout = "";
-    let stderr = "";
-    child.stdout.setEncoding("utf-8");
-    child.stderr.setEncoding("utf-8");
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk;
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk;
-    });
-    child.on("error", reject);
-    child.on("close", (code) => {
-      let parsed = null;
-      try {
-        parsed = JSON.parse(stdout);
-      } catch {
-        reject(new Error(stderr || "Review pembahasan tidak mengembalikan JSON valid."));
-        return;
-      }
-      if (code !== 0 || parsed.ok === false) {
-        reject(new Error(parsed.detail || stderr || "Review pembahasan gagal."));
-        return;
-      }
-      resolve(parsed);
-    });
+async function runExplanationReview(metadataPath, provider = "gemini") {
+  const completed = await runSubprocess(DEFAULT_PYTHON, [
+    "content_generator.py",
+    "--review-explanation",
+    metadataPath,
+    "--provider",
+    provider,
+  ], {
+    cwd: ROOT,
+    timeoutMs: EXPLANATION_REVIEW_TIMEOUT_MS,
   });
+  let parsed;
+  try {
+    parsed = JSON.parse(completed.stdout);
+  } catch {
+    throw new Error(completed.stderr || "Review pembahasan tidak mengembalikan JSON valid.");
+  }
+  if (completed.exitCode !== 0 || parsed.ok === false) {
+    throw new Error(parsed.detail || completed.stderr || "Review pembahasan gagal.");
+  }
+  return parsed;
 }
 
 async function generateSavedImages(runId) {
@@ -513,6 +489,7 @@ async function reviewSavedExplanation(runId, provider = "gemini") {
 function publicExplanationReviewJob(job) {
   if (!job) return null;
   return {
+    id: job.id,
     run_id: job.run_id,
     status: job.status,
     provider: job.provider,
@@ -538,6 +515,7 @@ async function startSavedExplanationReview(runId, provider = "gemini") {
   }
 
   const job = {
+    id: randomUUID(),
     run_id: runId,
     status: "running",
     provider: provider === "kimi" ? "kimi" : "gemini",
@@ -578,17 +556,16 @@ async function applySavedExplanationReview(runId, payload) {
   if (!isValidRunId(runId)) {
     throw requestError(400, "Run ID tidak valid.");
   }
-  const revisedQuestion = payload?.question_revisi;
-  const review = payload?.explanation_review;
+  const jobId = String(payload?.job_id || "");
+  const job = explanationReviewJobs.get(runId);
+  if (!jobId || !job || job.id !== jobId || job.status !== "done" || !job.result?.explanation_review) {
+    throw requestError(409, "Job review yang valid dan selesai diperlukan sebelum menerapkan revisi.");
+  }
+  const review = job.result.explanation_review;
+  const revisedQuestion = review.question_revisi;
   const revisedGroup = Array.isArray(review?.question_group_revisi) ? review.question_group_revisi : null;
   if ((!revisedGroup || !revisedGroup.length) && (!revisedQuestion || typeof revisedQuestion !== "object" || Array.isArray(revisedQuestion))) {
     throw requestError(400, "Draft revisi soal tidak valid.");
-  }
-  if (!review || typeof review !== "object" || Array.isArray(review)) {
-    throw requestError(400, "Hasil review tidak valid.");
-  }
-  if (typeof review.lolos !== "boolean") {
-    throw requestError(400, "Status lolos pada hasil review tidak valid.");
   }
   if (revisedGroup?.length) {
     for (const [index, question] of revisedGroup.entries()) {
@@ -615,10 +592,17 @@ async function applySavedExplanationReview(runId, payload) {
   const {question_revisi: _ignoredQuestion, question_group_revisi: _ignoredGroup, ...reviewSummary} = review;
   const now = new Date().toISOString();
   if (revisedGroup?.length) {
-    const groupItems = await loadSavedPassageGroup(runId, metadata);
+    const group = await loadSavedPassageGroup(runId, metadata);
+    const groupItems = group.items;
     const revisionsByNumber = new Map(revisedGroup.map((question) => [passageQuestionNumber(question), question]));
-    if (!groupItems.length) {
-      throw requestError(400, "Grup bacaan untuk revisi AI tidak ditemukan.");
+    const expectedNumbers = Array.from({length: group.expectedTotal}, (_, index) => index + 1);
+    const hasCompleteItems = groupItems.length === group.expectedTotal
+      && expectedNumbers.every((number) => groupItems.some((item) => passageQuestionNumber(item.metadata.question || {}) === number));
+    const hasCompleteRevisions = revisedGroup.length === group.expectedTotal
+      && revisionsByNumber.size === group.expectedTotal
+      && expectedNumbers.every((number) => revisionsByNumber.has(number));
+    if (!hasCompleteItems || !hasCompleteRevisions || group.duplicateNumbers.length) {
+      throw requestError(409, "Grup bacaan tidak lengkap atau memiliki nomor soal duplikat; revisi tidak diterapkan.");
     }
     const updatedRunIds = [];
     for (const [index, groupItem] of groupItems.entries()) {
@@ -636,7 +620,7 @@ async function applySavedExplanationReview(runId, payload) {
         group_question_count: revisedGroup.length,
         applied_at: now,
       };
-      groupItem.metadata.review_status = reviewSummary.lolos ? "ready" : "needs_review";
+      groupItem.metadata.review_status = reviewSummary.provider_reviewed && reviewSummary.lolos ? "ready" : "needs_review";
       groupItem.metadata.edited_at = now;
       await writeJsonValidated(groupItem.metadataPath, groupItem.metadata, "metadata");
       await writeJsonValidated(path.join(groupItem.runDir, "soal.json"), groupItem.metadata.question, "question");
@@ -664,7 +648,7 @@ async function applySavedExplanationReview(runId, payload) {
         group_question_count: revisedGroup.length,
         applied_at: now,
       },
-      review_status: reviewSummary.lolos ? "ready" : "needs_review",
+      review_status: reviewSummary.provider_reviewed && reviewSummary.lolos ? "ready" : "needs_review",
       web_files: buildWebFiles("/saved", artifactPath, metadata.files),
     };
   }
@@ -676,7 +660,7 @@ async function applySavedExplanationReview(runId, payload) {
     pembahasan_revisi: metadata.question.pembahasan,
     applied_at: now,
   };
-  metadata.review_status = reviewSummary.lolos ? "ready" : "needs_review";
+  metadata.review_status = reviewSummary.provider_reviewed && reviewSummary.lolos ? "ready" : "needs_review";
   metadata.edited_at = now;
   await writeJsonValidated(metadataPath, metadata, "metadata");
   await writeJsonValidated(path.join(runDir, "soal.json"), metadata.question, "question");

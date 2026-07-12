@@ -22,6 +22,7 @@ const elements = {
   renderProgress: document.querySelector("#renderProgress"),
   renderNote: document.querySelector("#renderNote"),
   retry: document.querySelector("#retryRenderButton"),
+  scrollTop: document.querySelector("#importScrollTopButton"),
 };
 
 const RENDER_QUEUE_KEY = "latsoal-import-render-queue";
@@ -74,6 +75,24 @@ function matchedLabel(item) {
   if (dedup.matched_run_id) return dedup.matched_run_id;
   if (Number.isInteger(dedup.matched_batch_index)) return `Batch #${dedup.matched_batch_index + 1}`;
   return "-";
+}
+
+function passageGroupText(item) {
+  const passage = item.question?.bacaan;
+  if (!passage?.id) return "";
+  const group = item.passage_group;
+  const number = group?.number || passage.nomor_soal || "-";
+  const total = group?.total || passage.total_soal || "-";
+  const size = Number(group?.size || 0);
+  const label = group?.label || passage.id;
+  const suffix = size > 1 ? ` \u00b7 ${size} item grup` : "";
+  return `Bacaan ${label} \u00b7 Soal ${number}/${total}${suffix}`;
+}
+
+function passageIdNote(item) {
+  const ids = item.passage_group?.ids || [];
+  if (ids.length <= 1) return "";
+  return `ID digabung: ${ids.join(", ")}`;
 }
 
 function syncQuestionTopic(index, topic) {
@@ -155,6 +174,14 @@ function renderValidation(result) {
       const total = item.question.bacaan.total_soal || "-";
       passage.textContent = `Bacaan ${item.question.bacaan.id} · Soal ${number}/${total}`;
       questionCell.append(passage);
+      passage.textContent = passageGroupText(item);
+      const idNote = passageIdNote(item);
+      if (idNote) {
+        const note = document.createElement("p");
+        note.className = "passage-id-note";
+        note.textContent = idNote;
+        questionCell.append(note);
+      }
     }
     const topicControl = renderTopicControl(item, title);
     if (topicControl) questionCell.append(topicControl);
@@ -294,6 +321,19 @@ function clearAll() {
   setStatus("Siap");
 }
 
+function syncScrollTopButton() {
+  if (!elements.scrollTop) return;
+  const visible = window.scrollY > 360;
+  elements.scrollTop.dataset.visible = visible ? "true" : "false";
+  elements.scrollTop.setAttribute("aria-hidden", visible ? "false" : "true");
+  elements.scrollTop.tabIndex = visible ? 0 : -1;
+}
+
+function scrollPageToTop() {
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  window.scrollTo({top: 0, behavior: reduceMotion ? "auto" : "smooth"});
+}
+
 elements.validate.addEventListener("click", validateInput);
 elements.clear.addEventListener("click", clearAll);
 elements.import.addEventListener("click", importSelected);
@@ -305,6 +345,9 @@ elements.promptSubtest?.addEventListener("change", syncPromptPreview);
 for (const eventName of ["dragenter", "dragover"]) elements.drop.addEventListener(eventName, (event) => { event.preventDefault(); elements.drop.dataset.dragging = "true"; });
 for (const eventName of ["dragleave", "drop"]) elements.drop.addEventListener(eventName, (event) => { event.preventDefault(); elements.drop.dataset.dragging = "false"; });
 elements.drop.addEventListener("drop", (event) => loadFile(event.dataTransfer.files[0]));
+elements.scrollTop?.addEventListener("click", scrollPageToTop);
+window.addEventListener("scroll", syncScrollTopButton, {passive: true});
+syncScrollTopButton();
 
 api("/api/import/config").then((config) => {
   importConfig = config;

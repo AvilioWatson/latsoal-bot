@@ -1,3 +1,16 @@
+BACAAN_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "id": {"type": "STRING"},
+        "judul": {"type": "STRING"},
+        "teks": {"type": "STRING"},
+        "bahasa": {"type": "STRING"},
+        "label": {"type": "STRING"},
+    },
+    "required": ["id", "judul", "teks", "bahasa"],
+}
+
+
 QUESTION_SCHEMA = {
     "type": "OBJECT",
     "properties": {
@@ -23,6 +36,11 @@ QUESTION_SCHEMA = {
         "tips_pengerjaan": {"type": "STRING"},
         "butuh_visual": {"type": "BOOLEAN"},
         "deskripsi_visual": {"type": "STRING"},
+        "bacaan": BACAAN_SCHEMA,
+        "bacaan_list": {
+            "type": "ARRAY",
+            "items": BACAAN_SCHEMA,
+        },
     },
     "required": [
         "mapel",

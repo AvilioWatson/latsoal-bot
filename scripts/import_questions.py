@@ -16,7 +16,7 @@ CHOICE_KEYS = ["A", "B", "C", "D", "E"]
 VALID_LEVELS = {"mudah", "sedang", "sulit"}
 MAX_BATCH = 1000
 MIN_PASSAGE_QUESTIONS = 1
-MAX_PASSAGE_QUESTIONS = 5
+PASSAGE_QUESTION_WARNING_THRESHOLD = 6
 PASSAGE_SUBTESTS = {
     "Penalaran Matematika",
     "Literasi Bahasa Indonesia",
@@ -52,9 +52,48 @@ def normalize_question_text(question):
     parts = [str(question.get("soal", ""))]
     passage = question.get("bacaan")
     if isinstance(passage, dict):
-        parts.append(str(passage.get("id", "")))
         parts.append(str(passage.get("nomor_soal", "")))
+        parts.append(str(passage.get("teks", "")))
     return " ".join(" ".join(parts).lower().split())
+
+
+def normalize_passage_text(value):
+    return " ".join(str(value or "").casefold().split())
+
+
+def passage_group_key(question):
+    passage = question.get("bacaan") if isinstance(question.get("bacaan"), dict) else None
+    if not passage:
+        return None
+    text_key = normalize_passage_text(passage.get("teks"))
+    if text_key:
+        return (question.get("mapel"), text_key)
+    passage_id = str(passage.get("id") or "").strip()
+    if passage_id:
+        return (question.get("mapel"), f"id:{passage_id}")
+    return None
+
+
+def passage_group_label(group_items):
+    ids = sorted({
+        str((item.get("question") or {}).get("bacaan", {}).get("id") or "").strip()
+        for item in group_items
+        if str((item.get("question") or {}).get("bacaan", {}).get("id") or "").strip()
+    })
+    return ids[0] if ids else "Tanpa ID"
+
+
+def inline_single_passage(question, title, passage_text):
+    current = str(question.get("soal") or "").strip()
+    current_folded = current.casefold()
+    prefix = []
+    if title and title.casefold() not in current_folded:
+        prefix.append(title)
+    if passage_text and passage_text.casefold() not in current_folded:
+        prefix.append(passage_text)
+    if prefix:
+        question["soal"] = "\n\n".join([*prefix, current]).strip()
+    question.pop("bacaan", None)
 
 
 def existing_question_records():
@@ -139,8 +178,10 @@ def validate_and_normalize_question(raw_question):
 
     passage = question.get("bacaan")
     if mapel in PASSAGE_SUBTESTS:
-        if not isinstance(passage, dict):
-            errors.append("Field bacaan wajib berupa object untuk subtes berbasis bacaan.")
+        if passage is None:
+            question.pop("bacaan", None)
+        elif not isinstance(passage, dict):
+            errors.append("bacaan harus berupa object atau dihilangkan.")
         else:
             passage = fix_text(dict(passage))
             passage_id = str(passage.get("id") or "").strip()
@@ -155,29 +196,34 @@ def validate_and_normalize_question(raw_question):
                 total = int(passage.get("total_soal"))
             except (TypeError, ValueError):
                 total = 0
-            if not passage_id:
-                errors.append("bacaan.id wajib diisi.")
-            if not passage_text:
-                errors.append("bacaan.teks wajib diisi.")
-            if total < MIN_PASSAGE_QUESTIONS or total > MAX_PASSAGE_QUESTIONS:
-                errors.append("bacaan.total_soal wajib bernilai 1 sampai 5.")
-            if number < 1 or number > MAX_PASSAGE_QUESTIONS:
-                errors.append("bacaan.nomor_soal wajib mulai dari 1 dan maksimal 5, sesuai total_soal.")
-            passage_source = passage.get("sumber_pdf")
-            if passage_source is not None and not isinstance(passage_source, dict):
-                errors.append("bacaan.sumber_pdf harus berupa object atau dihilangkan.")
-                passage_source = {}
-            passage["id"] = passage_id
-            passage["judul"] = title
-            passage["teks"] = passage_text
-            passage["bahasa"] = language
-            passage["nomor_soal"] = number
-            passage["total_soal"] = total
-            passage["sumber_pdf"] = {
-                "nama_file": str((passage_source or {}).get("nama_file") or "").strip(),
-                "halaman": str((passage_source or {}).get("halaman") or "").strip(),
-            }
-            question["bacaan"] = passage
+            if total == 1:
+                inline_single_passage(question, title, passage_text)
+            else:
+                if not passage_id:
+                    errors.append("bacaan.id wajib diisi.")
+                if not passage_text:
+                    errors.append("bacaan.teks wajib diisi.")
+                if total < MIN_PASSAGE_QUESTIONS:
+                    errors.append("bacaan.total_soal wajib bernilai minimal 1.")
+                elif total > PASSAGE_QUESTION_WARNING_THRESHOLD:
+                    warnings.append("bacaan.total_soal lebih dari 6; tetap dibolehkan, tetapi cek kembali kesesuaian grup soal.")
+                if number < 1 or (total >= MIN_PASSAGE_QUESTIONS and number > total):
+                    errors.append("bacaan.nomor_soal wajib mulai dari 1 dan tidak boleh melebihi total_soal.")
+                passage_source = passage.get("sumber_pdf")
+                if passage_source is not None and not isinstance(passage_source, dict):
+                    errors.append("bacaan.sumber_pdf harus berupa object atau dihilangkan.")
+                    passage_source = {}
+                passage["id"] = passage_id
+                passage["judul"] = title
+                passage["teks"] = passage_text
+                passage["bahasa"] = language
+                passage["nomor_soal"] = number
+                passage["total_soal"] = total
+                passage["sumber_pdf"] = {
+                    "nama_file": str((passage_source or {}).get("nama_file") or "").strip(),
+                    "halaman": str((passage_source or {}).get("halaman") or "").strip(),
+                }
+                question["bacaan"] = passage
     elif passage is not None:
         if not isinstance(passage, dict):
             errors.append("bacaan harus berupa object atau dihilangkan.")
@@ -211,29 +257,38 @@ def validate_passage_groups(items):
         question = item.get("question") or {}
         if question.get("mapel") not in PASSAGE_SUBTESTS:
             continue
-        passage = question.get("bacaan") if isinstance(question.get("bacaan"), dict) else {}
-        passage_id = passage.get("id")
-        if not passage_id:
+        key = passage_group_key(question)
+        if not key:
             continue
-        groups.setdefault((question.get("mapel"), passage_id), []).append(item)
+        groups.setdefault(key, []).append(item)
 
-    for (mapel, passage_id), group_items in groups.items():
+    for (mapel, _group_key), group_items in groups.items():
+        passage_label = passage_group_label(group_items)
+        ids = sorted({
+            str((item.get("question") or {}).get("bacaan", {}).get("id") or "").strip()
+            for item in group_items
+            if str((item.get("question") or {}).get("bacaan", {}).get("id") or "").strip()
+        })
         numbers = sorted((item.get("question") or {}).get("bacaan", {}).get("nomor_soal") for item in group_items)
         totals = {(item.get("question") or {}).get("bacaan", {}).get("total_soal") for item in group_items}
         texts = {str((item.get("question") or {}).get("bacaan", {}).get("teks") or "").strip() for item in group_items}
         message = None
         expected_total = next(iter(totals)) if len(totals) == 1 else 0
         if len(totals) != 1:
-            message = f"Bacaan '{passage_id}' memiliki total_soal yang tidak konsisten antar soal."
-        elif expected_total < MIN_PASSAGE_QUESTIONS or expected_total > MAX_PASSAGE_QUESTIONS:
-            message = f"Bacaan '{passage_id}' harus memiliki total_soal 1 sampai 5."
+            message = f"Bacaan '{passage_label}' memiliki total_soal yang tidak konsisten antar soal."
+        elif expected_total < MIN_PASSAGE_QUESTIONS:
+            message = f"Bacaan '{passage_label}' harus memiliki total_soal minimal 1."
         elif len(group_items) != expected_total:
-            message = f"Bacaan '{passage_id}' untuk {mapel} harus dipakai sesuai total_soal ({expected_total}); saat ini {len(group_items)} soal."
+            message = f"Bacaan '{passage_label}' untuk {mapel} harus dipakai sesuai total_soal ({expected_total}); saat ini {len(group_items)} soal."
         elif numbers != list(range(1, expected_total + 1)):
-            message = f"Bacaan '{passage_id}' harus memiliki nomor_soal 1 sampai {expected_total} tanpa duplikat."
+            message = f"Bacaan '{passage_label}' harus memiliki nomor_soal 1 sampai {expected_total} tanpa duplikat."
         elif len(texts) != 1:
-            message = f"Bacaan '{passage_id}' memiliki teks bacaan yang tidak konsisten antar soal."
+            message = f"Bacaan '{passage_label}' memiliki teks bacaan yang tidak konsisten antar soal."
         if not message:
+            if len(ids) > 1:
+                warning = f"Teks bacaan sama memakai beberapa ID ({', '.join(ids)}); akan digabung sebagai satu grup."
+                for item in group_items:
+                    item["warnings"] = list(dict.fromkeys([*item.get("warnings", []), warning]))
             continue
         for item in group_items:
             item["errors"] = list(dict.fromkeys([*item.get("errors", []), message]))
@@ -241,6 +296,32 @@ def validate_passage_groups(items):
             item["selectable"] = False
             item["selected_by_default"] = False
             item["dedup"] = None
+
+
+def attach_passage_group_summaries(items):
+    groups = {}
+    for item in items:
+        question = item.get("question") or {}
+        key = passage_group_key(question)
+        if not key:
+            continue
+        groups.setdefault(key, []).append(item)
+    for group_items in groups.values():
+        ids = sorted({
+            str((item.get("question") or {}).get("bacaan", {}).get("id") or "").strip()
+            for item in group_items
+            if str((item.get("question") or {}).get("bacaan", {}).get("id") or "").strip()
+        })
+        first_passage = (group_items[0].get("question") or {}).get("bacaan") or {}
+        for item in group_items:
+            passage = (item.get("question") or {}).get("bacaan") or {}
+            item["passage_group"] = {
+                "label": ids[0] if ids else "Tanpa ID",
+                "ids": ids,
+                "size": len(group_items),
+                "number": passage.get("nomor_soal"),
+                "total": first_passage.get("total_soal"),
+            }
 
 
 def evaluate_batch(raw_questions):
@@ -264,13 +345,16 @@ def evaluate_batch(raw_questions):
         status = "invalid" if errors else "exact_duplicate" if is_exact else "similar" if is_similar else "valid"
         if is_exact:
             dedup = dedup or content_generator.check_duplicate(question, additional_questions=earlier)
+            exact_reason = "Stem soal sama dengan soal yang sudah ada."
+            if isinstance(question.get("bacaan"), dict):
+                exact_reason = "Stem soal dan teks bacaan sama dengan soal yang sudah ada."
             dedup.update({
                 "is_duplicate": True,
                 "similarity": 1.0,
                 "matched_run_id": exact_match.get("run_id"),
                 "matched_batch_index": exact_match.get("batch_index"),
                 "matched_status": exact_match.get("status") or "saved",
-                "reason": "Stem soal sama dengan soal yang sudah ada.",
+                "reason": exact_reason,
             })
         items.append({
             "index": index,
@@ -288,6 +372,7 @@ def evaluate_batch(raw_questions):
             earlier_by_text[normalized_text] = candidate
 
     validate_passage_groups(items)
+    attach_passage_group_summaries(items)
     counts = {key: sum(1 for item in items if item["status"] == key) for key in ["valid", "similar", "exact_duplicate", "invalid"]}
     return {"ok": True, "total": len(items), "summary": counts, "items": items}
 
@@ -340,7 +425,7 @@ def grouped_accepted_items(items):
         question = item["question"]
         passage = question.get("bacaan") if isinstance(question.get("bacaan"), dict) else None
         if question.get("mapel") in PASSAGE_SUBTESTS and passage and passage.get("id"):
-            key = (question.get("mapel"), str(passage.get("id")))
+            key = passage_group_key(question) or (question.get("mapel"), str(passage.get("id")))
             bucket.setdefault(key, []).append(item)
         else:
             grouped.append({"items": [item], "question": question, "dedup": item.get("dedup")})
@@ -353,6 +438,42 @@ def grouped_accepted_items(items):
             "dedup": key_items[0].get("dedup"),
         })
     return grouped
+
+
+def reject_incomplete_passage_groups(accepted, rejected):
+    accepted_by_index = {item["index"]: item for item in accepted}
+    groups = {}
+    for item in accepted:
+        question = item.get("question") or {}
+        passage = question.get("bacaan") if isinstance(question.get("bacaan"), dict) else None
+        if question.get("mapel") not in PASSAGE_SUBTESTS or not passage or not passage.get("id"):
+            continue
+        key = passage_group_key(question) or (question.get("mapel"), str(passage.get("id")))
+        groups.setdefault(key, []).append(item)
+
+    rejected_indices = set()
+    for group_items in groups.values():
+        first_passage = (group_items[0].get("question") or {}).get("bacaan") or {}
+        try:
+            expected_total = int(first_passage.get("total_soal") or 0)
+        except (TypeError, ValueError):
+            expected_total = 0
+        numbers = {
+            int(((item.get("question") or {}).get("bacaan") or {}).get("nomor_soal") or 0)
+            for item in group_items
+        }
+        if expected_total < MIN_PASSAGE_QUESTIONS or numbers == set(range(1, expected_total + 1)):
+            continue
+        for item in group_items:
+            rejected_indices.add(item["index"])
+            rejected.append({
+                "index": item["index"],
+                "reason": "Grup bacaan tidak lengkap setelah filter duplikat/invalid.",
+            })
+
+    if not rejected_indices:
+        return accepted
+    return [item for index, item in accepted_by_index.items() if index not in rejected_indices]
 
 
 def write_imported_question(question, run_id, account, dedup, render_images=False):
@@ -439,6 +560,7 @@ def import_batch(payload, account, render_images=False):
         else:
             accepted.append(item)
 
+    accepted = reject_incomplete_passage_groups(accepted, rejected)
     accepted_groups = grouped_accepted_items(accepted)
     index_entries = [item for item in load_index() if item.get("run_id")]
     occupied = {item["run_id"] for item in index_entries}

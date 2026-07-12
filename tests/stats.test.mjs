@@ -88,6 +88,27 @@ test("buildStats treats unknown status as saved and handles empty input", () => 
   assert.equal(stats.by_subtes.unknown.saved, 1);
 });
 
+test("buildStats counts grouped question entries by question_count", () => {
+  const stats = buildStats([
+    {
+      status: "approved",
+      source: "import",
+      subtes: "pengetahuan-dan-pemahaman-umum",
+      topik: "kalimat-efektif",
+      level: "sedang",
+      saved_at: "2026-05-29T00:00:00.000Z",
+      question_count: 4,
+    },
+  ], NOW);
+
+  assert.equal(stats.total, 4);
+  assert.equal(stats.by_status.approved, 4);
+  assert.equal(stats.by_source.import, 4);
+  assert.equal(stats.by_level.sedang, 4);
+  assert.equal(stats.by_subtes["pengetahuan-dan-pemahaman-umum"].topics["kalimat-efektif"].total, 4);
+  assert.equal(stats.last_7_days.total_generated, 4);
+});
+
 test("buildStats includes generated output entries in token totals", () => {
   const stats = buildStats([
     {

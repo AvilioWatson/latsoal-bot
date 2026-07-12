@@ -4,6 +4,12 @@ const savedLayout = document.querySelector(".saved-layout");
 const savedPreview = document.querySelector(".saved-preview");
 const savedSearch = document.querySelector("#savedSearch");
 const savedStatusFilter = document.querySelector("#savedStatusFilter");
+const sortSimilarityButton = document.querySelector("#sortSimilarityButton");
+const checkAllSimilarityButton = document.querySelector("#checkAllSimilarityButton");
+const savedPagination = document.querySelector("#savedPagination");
+const savedPreviousPage = document.querySelector("#savedPreviousPage");
+const savedNextPage = document.querySelector("#savedNextPage");
+const savedPageStatus = document.querySelector("#savedPageStatus");
 const tryoutReadinessSummary = document.querySelector("#tryoutReadinessSummary");
 const refreshSavedButton = document.querySelector("#refreshSavedButton");
 const exportApprovedButton = document.querySelector("#exportApprovedButton");
@@ -26,6 +32,7 @@ const editJsonLink = document.querySelector("#editJsonLink");
 const copyCaptionButton = document.querySelector("#copyCaptionButton");
 const previewTitle = document.querySelector("#previewTitle");
 const runNote = document.querySelector("#runNote");
+const passageList = document.querySelector("#passageList");
 const questionText = document.querySelector("#questionText");
 const choicesList = document.querySelector("#choicesList");
 const captionText = document.querySelector("#captionText");
@@ -50,22 +57,17 @@ let activePreviewStatus = "";
 let activePreviewSource = "";
 let activePreviewData = null;
 let pendingExplanationReview = null;
+let sortBySimilarityDesc = false;
+let similarityBatchRunning = false;
+let currentSavedPage = 1;
+const SAVED_PAGE_SIZE = 50;
 let subtests = [];
 let topicsBySubtest = {};
 let previewOpenScrollY = 0;
 const REVIEW_JOBS_KEY = "latsoal-explanation-review-jobs";
 const reviewJobs = new Map();
 const reviewPollTimers = new Map();
-const SUBTEST_SHORT_LABELS = {
-  "Pengetahuan dan Pemahaman Umum": "PPU",
-  "Penalaran Umum": "PU",
-  "Pemahaman Bacaan dan Menulis": "PBM",
-  "Literasi Bahasa Inggris": "LBE",
-  "Literasi Bahasa Indonesia": "LBI",
-  "Pengetahuan Kuantitatif": "PK",
-  "Penalaran Kuantitatif": "PK",
-  "Penalaran Matematika": "PM",
-};
+let subtestShortLabels = {};
 const {
   copyCaption: sharedCopyCaption = async (elements, setStatusCallback) => {
     const {captionText, hashtagText, debugPanel, debugSource, debugText} = elements;
@@ -170,7 +172,7 @@ function slugifySubtest(name) {
 }
 
 function subtestDisplayName(name) {
-  return SUBTEST_SHORT_LABELS[name] || name || "Tanpa subtes";
+  return subtestShortLabels[name] || name || "Tanpa subtes";
 }
 
 function topicLabel(item) {
@@ -258,6 +260,24 @@ function updatePreviewSimilarityUi(dedup) {
   activePreviewData = activePreviewData ? {...activePreviewData, dedup} : activePreviewData;
   const validation = activePreviewData?.validation || {};
   validationScore.textContent = `Skor ${validation.skor ?? "-"} - ${similaritySummary(dedup)}`;
+}
+
+function renderSimilarityResultNote(dedup, match, threshold) {
+  const score = similarityPercent(dedup?.similarity);
+  runNote.textContent = "";
+  const matchRunId = match?.run_id || dedup?.matched_run_id;
+  if (matchRunId) {
+    runNote.append(`Similarity tertinggi ${score} dengan `);
+    const matchButton = document.createElement("button");
+    matchButton.type = "button";
+    matchButton.className = "similarity-match-link";
+    matchButton.textContent = matchRunId;
+    matchButton.title = "Buka preview soal mirip";
+    matchButton.addEventListener("click", () => loadSavedPreview(matchRunId));
+    runNote.append(matchButton, ".");
+    return;
+  }
+  runNote.textContent = `Similarity tertinggi ${score} masih di bawah threshold ${similarityPercent(threshold)}.`;
 }
 
 function openPreviewPanel(runId) {
@@ -400,7 +420,7 @@ function resumeRunningReviewJobs() {
 
 function setPreviewActionState(item = selectedPreviewItem()) {
   const hasPreview = Boolean(activePreviewRunId && item);
-  const reviewPassed = Boolean(item?.explanation_review?.lolos);
+  const reviewPassed = Boolean(item?.explanation_review?.lolos && item?.explanation_review?.provider_reviewed);
   const isApproved = item?.status === "approved";
   const isRejected = item?.status === "rejected";
   const isUploaded = Boolean(item?.uploaded_at);
@@ -408,7 +428,7 @@ function setPreviewActionState(item = selectedPreviewItem()) {
   approvePreviewButton.setAttribute("aria-pressed", String(isApproved));
   approvePreviewButton.title = isApproved
     ? "Batalkan approve dan kembalikan ke Saved"
-    : reviewPassed ? "Approve soal" : "Cek pembahasan AI sampai lolos sebelum approve.";
+    : reviewPassed ? "Approve soal" : "Cek pembahasan provider sampai lolos sebelum approve.";
   rejectPreviewButton.disabled = !hasPreview;
   rejectPreviewButton.setAttribute("aria-pressed", String(isRejected));
   rejectPreviewButton.title = isRejected
@@ -424,12 +444,57 @@ function setPreviewActionState(item = selectedPreviewItem()) {
 }
 
 function reviewNote(data) {
-  if (data.explanation_review?.lolos) return `Pembahasan sudah lolos cek AI dengan skor ${data.explanation_review.skor ?? "-"}.`;
+  if (data.explanation_review?.lolos && data.explanation_review?.provider_reviewed) return `Pembahasan sudah lolos cek AI dengan skor ${data.explanation_review.skor ?? "-"}.`;
+  if (data.explanation_review?.fallback_used) return "Review provider tidak tersedia. Hasil validasi lokal tersimpan, tetapi approval tetap memerlukan cek provider atau override manual.";
   if (data.explanation_review && !data.explanation_review.lolos) return `Pembahasan belum lolos cek AI: ${(data.explanation_review.catatan || [])[0] || "perlu revisi."}`;
-  if (data.dedup && data.dedup.is_duplicate) return `Kemungkinan duplikat: similarity ${data.dedup.similarity} dengan ${data.dedup.matched_run_id}.`;
+  if (data.dedup && data.dedup.is_duplicate) {
+    const matchText = data.dedup.matched_run_id ? ` dengan ${data.dedup.matched_run_id}` : "";
+    return `Kemungkinan duplikat: similarity ${data.dedup.similarity}${matchText}.`;
+  }
   if (data.review_status === "ready") return "Konten siap direview final sebelum posting.";
   if (data.errors && data.errors.question) return `Mode fallback aktif: ${data.errors.question}`;
   return "Cek pembahasan dengan AI sebelum approve.";
+}
+
+function renderPreviewReviewNote(data) {
+  if (data.dedup?.is_duplicate && data.dedup?.matched_run_id) {
+    renderSimilarityResultNote(data.dedup, null, data.dedup.threshold);
+    return;
+  }
+  runNote.textContent = reviewNote(data);
+}
+
+function questionPassages(question = {}) {
+  if (Array.isArray(question.bacaan_list)) {
+    return question.bacaan_list.filter((passage) => passage && typeof passage === "object" && String(passage.teks || "").trim());
+  }
+  if (question.bacaan && typeof question.bacaan === "object" && String(question.bacaan.teks || "").trim()) {
+    return [question.bacaan];
+  }
+  return [];
+}
+
+function passageHeading(passage, index, total) {
+  const label = String(passage.label || "").trim() || (total > 1 ? `Teks ${index + 1}` : "");
+  const title = String(passage.judul || "").trim();
+  return [label, title].filter(Boolean).join(": ") || `Bacaan ${index + 1}`;
+}
+
+function renderPassages(question) {
+  const passages = questionPassages(question);
+  passageList.innerHTML = "";
+  passageList.hidden = passages.length === 0;
+  passages.forEach((passage, index) => {
+    const item = document.createElement("section");
+    item.className = "passage-preview";
+    const title = document.createElement("h4");
+    title.textContent = passageHeading(passage, index, passages.length);
+    const text = document.createElement("p");
+    text.className = "body-copy";
+    text.textContent = sharedFormatQuestionText(passage.teks);
+    item.append(title, text);
+    passageList.append(item);
+  });
 }
 
 function renderDebug(data) {
@@ -458,11 +523,15 @@ function tryoutStateLabel(item) {
   return "Needs review";
 }
 
+function itemQuestionCount(item) {
+  return Math.max(1, Number(item?.question_count || 1));
+}
+
 function renderTryoutReadinessSummary() {
   const approved = savedItems.filter((item) => item.status === "approved");
-  const ready = approved.filter((item) => item.tryout_ready).length;
-  const warnings = approved.filter((item) => Number(item.tryout_warning_count || 0) > 0).length;
-  const reviewPending = savedItems.filter((item) => item.review_status !== "ready").length;
+  const ready = approved.reduce((total, item) => total + (item.tryout_ready ? itemQuestionCount(item) : 0), 0);
+  const warnings = approved.reduce((total, item) => total + (Number(item.tryout_warning_count || 0) > 0 ? itemQuestionCount(item) : 0), 0);
+  const reviewPending = savedItems.reduce((total, item) => total + (item.review_status !== "ready" ? itemQuestionCount(item) : 0), 0);
   tryoutReadinessSummary.innerHTML = `
     <span><strong>${ready}</strong> siap tryout</span>
     <span><strong>${warnings}</strong> approved perlu cek</span>
@@ -480,13 +549,57 @@ function filteredSavedItems() {
     const warningCodes = (item.tryout_warnings || []).map((warning) => warning.code).join(" ");
     const haystack = [item.run_id, item.mapel, item.topik, item.canonical_topik, item.level, item.source, item.status, item.review_status, warningCodes].join(" ").toLowerCase();
     return subtestOk && topicOk && statusOk && (!query || haystack.includes(query));
-  }).sort((left, right) => {
-    const leftQuestion = left.soal_excerpt || "";
-    const rightQuestion = right.soal_excerpt || "";
-    return leftQuestion.localeCompare(rightQuestion, "id", {sensitivity: "base"})
-      || String(left.topik || "").localeCompare(String(right.topik || ""), "id", {sensitivity: "base"})
-      || String(left.run_id || "").localeCompare(String(right.run_id || ""), "id", {sensitivity: "base"});
-  });
+  }).sort(compareSavedItems);
+}
+
+function similaritySortValue(item) {
+  const value = Number(item?.dedup?.similarity);
+  return Number.isFinite(value) ? value : -1;
+}
+
+function compareSavedItemsDefault(left, right) {
+  const titleComparison = String(left.topik || "").localeCompare(String(right.topik || ""), "id", {sensitivity: "base"});
+  const contentComparison = String(left.soal_excerpt || "").localeCompare(String(right.soal_excerpt || ""), "id", {sensitivity: "base"});
+  return titleComparison
+    || contentComparison
+    || String(left.run_id || "").localeCompare(String(right.run_id || ""), "id", {sensitivity: "base"});
+}
+
+function compareSavedItems(left, right) {
+  if (!sortBySimilarityDesc) return compareSavedItemsDefault(left, right);
+  const similarityDiff = similaritySortValue(right) - similaritySortValue(left);
+  return similarityDiff || compareSavedItemsDefault(left, right);
+}
+
+function syncSortSimilarityButton() {
+  sortSimilarityButton.setAttribute("aria-pressed", String(sortBySimilarityDesc));
+  sortSimilarityButton.textContent = sortBySimilarityDesc ? "Similarity tertinggi aktif" : "Similarity tertinggi";
+  sortSimilarityButton.title = sortBySimilarityDesc
+    ? "Kembali ke urutan default"
+    : "Urutkan similarity terbesar ke terkecil";
+}
+
+function resetSavedPage() {
+  currentSavedPage = 1;
+}
+
+function renderSavedPagination(totalItems) {
+  const pageCount = Math.max(1, Math.ceil(totalItems / SAVED_PAGE_SIZE));
+  currentSavedPage = Math.min(Math.max(1, currentSavedPage), pageCount);
+  const hasPagination = totalItems > SAVED_PAGE_SIZE;
+  savedPagination.hidden = !hasPagination;
+  savedPageStatus.textContent = hasPagination
+    ? `Halaman ${currentSavedPage} dari ${pageCount} · ${totalItems} card`
+    : "";
+  savedPreviousPage.disabled = currentSavedPage <= 1;
+  savedNextPage.disabled = currentSavedPage >= pageCount;
+}
+
+function visibleSavedItems(items = filteredSavedItems()) {
+  const pageCount = Math.max(1, Math.ceil(items.length / SAVED_PAGE_SIZE));
+  currentSavedPage = Math.min(Math.max(1, currentSavedPage), pageCount);
+  const start = (currentSavedPage - 1) * SAVED_PAGE_SIZE;
+  return items.slice(start, start + SAVED_PAGE_SIZE);
 }
 
 function renderSubtestTabs() {
@@ -506,6 +619,7 @@ function renderSubtestTabs() {
       event.preventDefault();
       activeSubtest = tab.value;
       activeSubtopic = "all";
+      resetSavedPage();
       window.history.pushState({}, "", tab.href);
       renderSubtestTabs();
       renderSubtopicTabs();
@@ -554,6 +668,7 @@ function renderSubtopicTabs() {
     button.dataset.active = tab.value === activeSubtopic ? "true" : "false";
     button.addEventListener("click", () => {
       activeSubtopic = tab.value;
+      resetSavedPage();
       renderSubtopicTabs();
       renderSavedList();
     });
@@ -568,6 +683,7 @@ async function loadConfig() {
   const config = await response.json();
   if (!response.ok) throw new Error(config.error || "Gagal memuat config.");
   topicsBySubtest = config.topics || {};
+  subtestShortLabels = config.subtest_codes || {};
   subtests = Object.keys(topicsBySubtest);
   activeSubtest = subtestFromPath();
   renderSubtestTabs();
@@ -649,9 +765,11 @@ function renderClassificationControls(item) {
   return wrapper;
 }
 
-function renderSavedList(items = filteredSavedItems()) {
+function renderSavedList(allItems = filteredSavedItems()) {
   savedList.innerHTML = "";
-  if (!items || items.length === 0) {
+  renderSavedPagination(allItems?.length || 0);
+  const items = visibleSavedItems(allItems || []);
+  if (items.length === 0) {
     const empty = document.createElement("p");
     empty.className = "empty-copy";
     empty.textContent = "Belum ada soal disimpan.";
@@ -678,6 +796,7 @@ function renderSavedList(items = filteredSavedItems()) {
       <div class="saved-card-meta">
         <span data-level></span>
         <span data-upload-state></span>
+        <span data-question-count></span>
         <span data-tryout-state></span>
         <span data-similarity hidden></span>
         <span data-run-id></span>
@@ -709,6 +828,7 @@ function renderSavedList(items = filteredSavedItems()) {
     row.querySelector(".saved-question-excerpt").textContent = item.soal_excerpt || "Soal belum memiliki ringkasan.";
     row.querySelector("[data-level]").textContent = item.level || "-";
     row.querySelector("[data-upload-state]").textContent = item.uploaded_at ? "Uploaded" : "Belum upload";
+    row.querySelector("[data-question-count]").textContent = `${itemQuestionCount(item)} soal`;
     row.querySelector("[data-tryout-state]").textContent = tryoutStateLabel(item);
     row.querySelector("[data-tryout-state]").dataset.tryoutState = item.tryout_ready
       ? "ready"
@@ -746,8 +866,11 @@ async function loadSavedList() {
   renderSavedList();
 }
 
-async function checkSimilarityForSavedRun(runId) {
+async function checkSimilarityForSavedRun(runId, {loadPreview = true} = {}) {
   if (!runId) return;
+  if (loadPreview && activePreviewRunId !== runId) {
+    await loadSavedPreview(runId);
+  }
   setSimilarityButtonState(runId, true);
   setStatus("Checking similarity");
   if (activePreviewRunId === runId) {
@@ -762,22 +885,49 @@ async function checkSimilarityForSavedRun(runId) {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Gagal menghitung ulang similarity.");
     syncSavedItemSimilarity(runId, data.dedup);
+    if (sortBySimilarityDesc) renderSavedList();
     if (activePreviewRunId === runId) {
       updatePreviewSimilarityUi(data.dedup);
-      if (data.match?.run_id) {
-        runNote.textContent = `Similarity tertinggi ${similarityPercent(data.dedup?.similarity)} dengan ${data.match.run_id}.`;
-      } else {
-        runNote.textContent = `Similarity tertinggi ${similarityPercent(data.dedup?.similarity)} masih di bawah threshold ${similarityPercent(data.threshold)}.`;
-      }
+      renderSimilarityResultNote(data.dedup, data.match, data.threshold);
     }
     setStatus(data.dedup?.is_duplicate ? "Similarity warning" : "Similarity checked");
+    return true;
   } catch (error) {
     setStatus("Error");
     debugPanel.hidden = false;
     debugSource.textContent = "saved/similarity";
     debugText.textContent = error.stack || error.message;
+    return false;
   } finally {
     setSimilarityButtonState(runId, false);
+  }
+}
+
+async function checkSimilarityForVisibleRuns() {
+  if (similarityBatchRunning) return;
+  const runs = visibleSavedItems();
+  if (!runs.length) {
+    setStatus("Tidak ada card");
+    return;
+  }
+
+  similarityBatchRunning = true;
+  checkAllSimilarityButton.disabled = true;
+  let completed = 0;
+  let failed = 0;
+  try {
+    for (const item of runs) {
+      checkAllSimilarityButton.textContent = `Mengecek ${completed + 1}/${runs.length}`;
+      const success = await checkSimilarityForSavedRun(item.run_id, {loadPreview: false});
+      if (success) completed += 1;
+      else failed += 1;
+    }
+    renderSavedList();
+    setStatus(failed ? `Selesai, ${failed} gagal` : `Similarity selesai ${completed} card`);
+  } finally {
+    similarityBatchRunning = false;
+    checkAllSimilarityButton.disabled = false;
+    checkAllSimilarityButton.textContent = "Cek semua similarity";
   }
 }
 
@@ -818,7 +968,7 @@ async function loadSavedPreview(runId) {
   setPreviewStatus(savedItems.find((item) => item.run_id === runId)?.status || "saved");
   setPreviewActionState(selectedItem);
   validationScore.textContent = `Skor ${validation.skor ?? "-"} - ${similaritySummary(data.dedup)}`;
-  runNote.textContent = reviewNote(data);
+  renderPreviewReviewNote(data);
   const job = reviewJobFor(runId);
   if (job?.status === "done" && job.result?.explanation_review?.question_revisi) {
     showAiReviewDraft(job.result.explanation_review);
@@ -830,6 +980,7 @@ async function loadSavedPreview(runId) {
   updateReviewControls(runId);
   generateImageButton.disabled = false;
   deleteImageButton.disabled = !(data.web_files?.images || []).length;
+  renderPassages(question);
   questionText.textContent = sharedFormatQuestionText(question.soal);
   choicesList.innerHTML = "";
   for (const [key, value] of Object.entries(question.pilihan)) {
@@ -860,6 +1011,8 @@ function clearPreviewIfDeleted(runId) {
   activePreviewSource = "";
   previewTitle.textContent = "Pilih item saved";
   runNote.textContent = "Preview saved akan muncul di sini.";
+  passageList.innerHTML = "";
+  passageList.hidden = true;
   questionText.textContent = "Pilih item saved untuk melihat soal.";
   choicesList.innerHTML = "";
   captionText.textContent = "Caption akan muncul di sini.";
@@ -930,10 +1083,7 @@ async function applyAiReviewDraft() {
     const response = await fetch(`/saved/${runId}/explanation-review/apply`, {
       method: "POST",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({
-        question_revisi: pendingExplanationReview.question_revisi,
-        explanation_review: pendingExplanationReview,
-      }),
+      body: JSON.stringify({job_id: reviewJobFor(runId)?.id}),
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Penerapan revisi gagal.");
@@ -1130,9 +1280,30 @@ deletePreviewButton.addEventListener("click", () => {
 });
 closePreviewButton.addEventListener("click", closePreviewPanel);
 
-savedSearch.addEventListener("input", () => renderSavedList());
+savedSearch.addEventListener("input", () => {
+  resetSavedPage();
+  renderSavedList();
+});
 savedStatusFilter.addEventListener("change", () => {
+  resetSavedPage();
   renderSubtopicTabs();
+  renderSavedList();
+});
+sortSimilarityButton.addEventListener("click", () => {
+  sortBySimilarityDesc = !sortBySimilarityDesc;
+  syncSortSimilarityButton();
+  renderSavedList();
+});
+checkAllSimilarityButton.addEventListener("click", checkSimilarityForVisibleRuns);
+savedPreviousPage.addEventListener("click", () => {
+  if (currentSavedPage <= 1) return;
+  currentSavedPage -= 1;
+  renderSavedList();
+});
+savedNextPage.addEventListener("click", () => {
+  const pageCount = Math.max(1, Math.ceil(filteredSavedItems().length / SAVED_PAGE_SIZE));
+  if (currentSavedPage >= pageCount) return;
+  currentSavedPage += 1;
   renderSavedList();
 });
 
@@ -1170,6 +1341,7 @@ copyCaptionButton.addEventListener("click", async () => {
 
 async function init() {
   loadReviewJobs();
+  syncSortSimilarityButton();
   await loadConfig();
   closePreviewPanel();
   await loadSavedList();
@@ -1178,6 +1350,7 @@ async function init() {
 window.addEventListener("popstate", () => {
   activeSubtest = subtestFromPath();
   activeSubtopic = "all";
+  resetSavedPage();
   renderSubtestTabs();
   renderSubtopicTabs();
   renderSavedList();

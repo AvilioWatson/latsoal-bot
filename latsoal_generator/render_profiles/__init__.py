@@ -1,4 +1,4 @@
-from .base import DEFAULT_PROFILE, RenderProfile
+from .base import RenderProfile
 from .literasi_bahasa_indonesia import PROFILE as LITERASI_BAHASA_INDONESIA
 from .literasi_bahasa_inggris import PROFILE as LITERASI_BAHASA_INGGRIS
 from .pemahaman_bacaan_menulis import PROFILE as PEMAHAMAN_BACAAN_MENULIS
@@ -23,4 +23,12 @@ PROFILES = {
 
 
 def get_render_profile(mapel):
-    return PROFILES.get(str(mapel or "").strip(), DEFAULT_PROFILE)
+    subtest = str(mapel or "").strip()
+    profile = PROFILES.get(subtest)
+    if profile is None:
+        supported = ", ".join(sorted(PROFILES))
+        raise ValueError(
+            f"Generator gambar belum tersedia untuk subtes '{subtest or 'kosong'}'. "
+            f"Subtes yang didukung: {supported}."
+        )
+    return profile

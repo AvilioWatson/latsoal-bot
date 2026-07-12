@@ -42,6 +42,38 @@ def _question_text(question):
     ])
 
 
+def _passage_text(question):
+    passage = question.get("bacaan")
+    if not isinstance(passage, dict):
+        return ""
+    return " ".join([
+        str(passage.get("judul", "")),
+        str(passage.get("teks", "")),
+    ]).strip()
+
+
+def _fold_text(text):
+    return " ".join(str(text or "").casefold().split())
+
+
+def _is_passage_group(question):
+    passage = question.get("bacaan")
+    if not isinstance(passage, dict):
+        return False
+    try:
+        total = int(passage.get("total_soal") or 0)
+    except (TypeError, ValueError):
+        total = 0
+    return total > 1 or bool(question.get("question_group"))
+
+
+def _similarity_text(question):
+    passage_text = _passage_text(question)
+    if _is_passage_group(question) and passage_text:
+        return passage_text
+    return _question_text(question)
+
+
 def _passage_id(question):
     passage = question.get("bacaan")
     if isinstance(passage, dict):
@@ -49,8 +81,16 @@ def _passage_id(question):
     return ""
 
 
+def _same_passage_group(left, right):
+    left_text = _passage_text(left)
+    right_text = _passage_text(right)
+    if left_text and right_text and _fold_text(left_text) == _fold_text(right_text):
+        return True
+    return bool(_passage_id(left) and _passage_id(left) == _passage_id(right))
+
+
 def check_duplicate(question, exclude_run_id=None, additional_questions=None):
-    current_text = _question_text(question)
+    current_text = _similarity_text(question)
     best = {
         "is_duplicate": False,
         "similarity": 0.0,
@@ -63,11 +103,11 @@ def check_duplicate(question, exclude_run_id=None, additional_questions=None):
         "algorithm": "jaccard-v1",
     }
 
-    def compare(candidate_question, run_id=None, status=None, batch_index=None):
+    def compare(candidate_question, run_id=None, status=None, batch_index=None, skip_same_passage_group=False):
         nonlocal best
-        if _passage_id(question) and _passage_id(question) == _passage_id(candidate_question or {}):
+        if skip_same_passage_group and _same_passage_group(question, candidate_question or {}):
             return
-        similarity = jaccard_similarity(current_text, _question_text(candidate_question or {}))
+        similarity = jaccard_similarity(current_text, _similarity_text(candidate_question or {}))
         if similarity > best["similarity"]:
             best.update({
                 "similarity": round(similarity, 4),
@@ -82,6 +122,7 @@ def check_duplicate(question, exclude_run_id=None, additional_questions=None):
             run_id=candidate.get("run_id"),
             status=candidate.get("status") or "batch",
             batch_index=candidate.get("batch_index"),
+            skip_same_passage_group=True,
         )
 
     bank_index_path = generator_config.BANK_INDEX_PATH

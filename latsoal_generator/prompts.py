@@ -122,9 +122,26 @@ tanpa trailing comma. Awali langsung dengan { dan akhiri langsung dengan }.
 Untuk field pembahasan, pisahkan langkah dengan escape \\n di dalam string, bukan enter mentah.
 """.strip()
 
+    reading_passage_rules = """
+
+PENTING untuk soal berbasis bacaan (kecuali Pengetahuan Kuantitatif):
+Soal dapat memiliki satu atau lebih bacaan. Jika soal membutuhkan lebih dari satu bacaan
+(misalnya Text 1 dan Text 2, atau Teks 1 dan Teks 2), gunakan field "bacaan_list" yang berisi
+array objek bacaan. Setiap bacaan harus memiliki:
+- "id": identifikasi unik bacaan
+- "judul": judul bacaan
+- "teks": konten bacaan lengkap
+- "bahasa": kode bahasa ("id" untuk Indonesia, "en" untuk Inggris)
+- "label": label untuk bacaan seperti "Text 1", "Text 2", "Teks 1", "Teks 2", dll.
+
+Jika soal hanya memiliki satu bacaan, gunakan field "bacaan" (singular) seperti biasa.
+Field "bacaan" dan "bacaan_list" bersifat opsional - hanya isi jika soal memang berbasis bacaan.
+""".strip()
+
     patterns = load_patterns(mapel, topic)
     if topic_examples is None:
         topic_examples = load_topic_examples(mapel, topic, limit=MIN_TOPIC_EXAMPLES)
+
     schema = {
         "mapel": mapel,
         "kelompok_tes": "TPS" if mapel in [
@@ -144,8 +161,30 @@ Untuk field pembahasan, pisahkan langkah dengan escape \\n di dalam string, buka
         "butuh_visual": False,
         "deskripsi_visual": "",
     }
+
+    schema_with_passages = {
+        **schema,
+        "bacaan": {
+            "id": "optional, hanya jika soal punya satu bacaan",
+            "judul": "",
+            "teks": "",
+            "bahasa": "id atau en",
+            "label": "opsional, contoh: Text 1"
+        },
+        "bacaan_list": [
+            {
+                "id": "wajib jika ada multiple bacaan",
+                "judul": "",
+                "teks": "",
+                "bahasa": "id atau en",
+                "label": "wajib, contoh: Text 1, Text 2, Teks 1, Teks 2"
+            }
+        ]
+    }
+
     return (
         f"{base_rules}\n\n"
+        f"{reading_passage_rules}\n\n"
         f"Buatkan 1 soal latihan UTBK/SNBT subtes {mapel}.\n"
         f"Topik: {topic}\n"
         f"Tingkat kesulitan: {level}\n\n"
@@ -156,7 +195,7 @@ Untuk field pembahasan, pisahkan langkah dengan escape \\n di dalam string, buka
         "tetapi jangan menyalin kalimat, angka, konteks, pilihan, atau pembahasannya:\n"
         f"{json.dumps(topic_examples, ensure_ascii=False, indent=2)}\n\n"
         "Kembalikan hanya JSON dengan struktur berikut. Jangan isi nilai selain JSON:\n"
-        f"{json.dumps(schema, ensure_ascii=False, indent=2)}"
+        f"{json.dumps(schema_with_passages, ensure_ascii=False, indent=2)}"
     )
 
 
