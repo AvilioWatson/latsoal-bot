@@ -16,6 +16,7 @@ const exportApprovedButton = document.querySelector("#exportApprovedButton");
 const subtestTabs = document.querySelector("#subtestTabs");
 const subtopicTabs = document.querySelector("#subtopicTabs");
 const closePreviewButton = document.querySelector("#closePreviewButton");
+let previewReturnTarget = null;
 const reviewExplanationButton = document.querySelector("#reviewExplanationButton");
 const checkSimilarityPreviewButton = document.querySelector("#checkSimilarityPreviewButton");
 const aiReviewDraft = document.querySelector("#aiReviewDraft");
@@ -48,6 +49,13 @@ const sourceLabel = document.querySelector("#sourceLabel");
 const debugPanel = document.querySelector("#debugPanel");
 const debugSource = document.querySelector("#debugSource");
 const debugText = document.querySelector("#debugText");
+const similarityCompareDialog = document.querySelector("#similarityCompareDialog");
+const similarityCompareSummary = document.querySelector("#similarityCompareSummary");
+const similarityCompareStatus = document.querySelector("#similarityCompareStatus");
+const similarityCompareCurrent = document.querySelector("#similarityCompareCurrent");
+const similarityCompareMatch = document.querySelector("#similarityCompareMatch");
+const closeSimilarityCompareButton = document.querySelector("#closeSimilarityCompareButton");
+const mergeSimilarityQuestionsButton = document.querySelector("#mergeSimilarityQuestionsButton");
 
 let savedItems = [];
 let activeSubtest = "all";
@@ -64,10 +72,14 @@ const SAVED_PAGE_SIZE = 50;
 let subtests = [];
 let topicsBySubtest = {};
 let previewOpenScrollY = 0;
+let similarityCompareReturnTarget = null;
+let activeComparisonRunIds = [];
+let activeComparisonData = [];
 const REVIEW_JOBS_KEY = "latsoal-explanation-review-jobs";
 const reviewJobs = new Map();
 const reviewPollTimers = new Map();
 let subtestShortLabels = {};
+let subtestCodes = {};
 const {
   copyCaption: sharedCopyCaption = async (elements, setStatusCallback) => {
     const {captionText, hashtagText, debugPanel, debugSource, debugText} = elements;
@@ -243,6 +255,16 @@ function syncSavedItemSimilarity(runId, dedup) {
   const card = Array.from(savedList.querySelectorAll(".saved-item"))
     .find((entry) => entry.dataset.runId === runId);
   applySimilarityBadge(card?.querySelector("[data-similarity]"), dedup);
+  syncCompareButton(card?.querySelector("[data-compare-similarity]"), runId, dedup);
+}
+
+function syncCompareButton(button, runId, dedup) {
+  if (!button) return;
+  const matchRunId = dedup?.matched_run_id;
+  const canCompare = Boolean(dedup?.is_duplicate && matchRunId && matchRunId !== runId);
+  button.hidden = !canCompare;
+  button.dataset.currentRunId = canCompare ? runId : "";
+  button.dataset.matchRunId = canCompare ? matchRunId : "";
 }
 
 function setSimilarityButtonState(runId, checking) {
@@ -274,23 +296,237 @@ function renderSimilarityResultNote(dedup, match, threshold) {
     matchButton.textContent = matchRunId;
     matchButton.title = "Buka preview soal mirip";
     matchButton.addEventListener("click", () => loadSavedPreview(matchRunId));
-    runNote.append(matchButton, ".");
+    runNote.append(matchButton, ". ");
+    if (dedup?.is_duplicate && activePreviewRunId !== matchRunId) {
+      const compareButton = document.createElement("button");
+      compareButton.type = "button";
+      compareButton.className = "similarity-match-link similarity-compare-inline";
+      compareButton.textContent = "Cek kedua soal";
+      compareButton.addEventListener("click", () => openSimilarityComparison(activePreviewRunId, matchRunId, compareButton));
+      runNote.append(compareButton);
+    }
     return;
   }
   runNote.textContent = `Similarity tertinggi ${score} masih di bawah threshold ${similarityPercent(threshold)}.`;
 }
 
+function comparisonElement(tag, className, text = "") {
+  const element = document.createElement(tag);
+  if (className) element.className = className;
+  if (text) element.textContent = text;
+  return element;
+}
+
+function renderComparisonPassages(container, question = {}) {
+  const passages = Array.isArray(question.bacaan_list)
+    ? question.bacaan_list
+    : question.bacaan ? [question.bacaan] : [];
+  const validPassages = passages.filter((passage) => String(passage?.teks || "").trim());
+  if (!validPassages.length) return;
+  const section = comparisonElement("section", "similarity-compare-section");
+  section.append(comparisonElement("h4", "similarity-compare-section-title", "Bacaan"));
+  for (const passage of validPassages) {
+    const block = comparisonElement("div", "similarity-compare-passage");
+    if (passage.judul) block.append(comparisonElement("strong", "", passage.judul));
+    block.append(comparisonElement("p", "", passage.teks));
+    section.append(block);
+  }
+  container.append(section);
+}
+
+function renderComparisonPane(container, data, sideLabel) {
+  container.innerHTML = "";
+  const question = data.question || {};
+  const heading = comparisonElement("header", "similarity-compare-pane-header");
+  const headingCopy = comparisonElement("div", "");
+  headingCopy.append(
+    comparisonElement("p", "eyebrow", sideLabel),
+    comparisonElement("h3", "", `${question.mapel || "Tanpa subtes"}: ${question.topik || "Tanpa topik"}`),
+    comparisonElement("p", "similarity-compare-meta", `${data.run_id || "-"} · Skor ${data.validation?.skor ?? "-"}`),
+  );
+  const generateButton = comparisonElement("button", "secondary similarity-compare-generate", "Generate gambar");
+  generateButton.type = "button";
+  generateButton.addEventListener("click", () => generateComparisonImages(data.run_id, generateButton));
+  heading.append(headingCopy, generateButton);
+  container.append(heading);
+
+  const imageSection = comparisonElement("section", "similarity-compare-section similarity-compare-images");
+  const images = data.web_files?.images || [];
+  imageSection.append(comparisonElement("h4", "similarity-compare-section-title", `Gambar · ${images.length} page`));
+  const imageList = comparisonElement("div", "similarity-compare-image-list");
+  if (!images.length) {
+    imageList.append(comparisonElement("p", "body-copy", "Belum ada gambar. Gunakan Generate gambar untuk membuat preview."));
+  } else {
+    images.forEach((src, index) => {
+      const image = document.createElement("img");
+      image.src = `${src}?t=${Date.now()}`;
+      image.alt = `${sideLabel}, gambar ${index + 1}`;
+      image.loading = "lazy";
+      imageList.append(image);
+    });
+  }
+  imageSection.append(imageList);
+  container.append(imageSection);
+
+  renderComparisonPassages(container, question);
+  const questionSection = comparisonElement("section", "similarity-compare-section");
+  questionSection.append(
+    comparisonElement("h4", "similarity-compare-section-title", "Soal"),
+    comparisonElement("p", "body-copy", sharedFormatQuestionText(question.soal)),
+  );
+  const choices = comparisonElement("ol", "choices similarity-compare-choices");
+  for (const [key, value] of Object.entries(question.pilihan || {})) {
+    const item = document.createElement("li");
+    item.append(comparisonElement("strong", "", key), comparisonElement("span", "", value));
+    choices.append(item);
+  }
+  questionSection.append(choices);
+  container.append(questionSection);
+
+  const captionSection = comparisonElement("section", "similarity-compare-section");
+  captionSection.append(
+    comparisonElement("h4", "similarity-compare-section-title", "Caption"),
+    comparisonElement("p", "body-copy", data.caption?.caption || "Caption belum tersedia."),
+    comparisonElement("p", "hashtags", (data.caption?.hashtag || []).join(" ")),
+  );
+  container.append(captionSection);
+}
+
+async function fetchComparisonData(runId) {
+  const response = await fetch(`/saved/${runId}`, {headers: {Accept: "application/json"}});
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || `Gagal membuka ${runId}.`);
+  return data;
+}
+
+async function refreshSimilarityComparison() {
+  const [currentRunId, matchRunId] = activeComparisonRunIds;
+  if (!currentRunId || !matchRunId) return;
+  similarityCompareStatus.textContent = "Memuat kedua preview...";
+  similarityCompareStatus.dataset.state = "loading";
+  try {
+    const [currentData, matchData] = await Promise.all([
+      fetchComparisonData(currentRunId),
+      fetchComparisonData(matchRunId),
+    ]);
+    activeComparisonData = [currentData, matchData];
+    renderComparisonPane(similarityCompareCurrent, currentData, "Soal aktif");
+    renderComparisonPane(similarityCompareMatch, matchData, "Soal pembanding");
+    similarityCompareSummary.textContent = `${currentRunId} dibandingkan dengan ${matchRunId}`;
+    syncMergeSimilarityButton(currentData, matchData);
+    similarityCompareStatus.textContent = "Kedua preview siap dibandingkan.";
+    similarityCompareStatus.dataset.state = "ready";
+  } catch (error) {
+    similarityCompareStatus.textContent = error.message;
+    similarityCompareStatus.dataset.state = "error";
+  }
+}
+
+function canMergeSimilarityQuestions(currentData, matchData) {
+  const mergeableSubtestCodes = new Set(["PPU", "PBM", "PM"]);
+  const currentQuestion = currentData?.question || {};
+  const matchQuestion = matchData?.question || {};
+  const currentPassage = currentQuestion.bacaan;
+  const matchPassage = matchQuestion.bacaan;
+  return mergeableSubtestCodes.has(subtestCodes[currentQuestion.mapel])
+    && currentQuestion.mapel === matchQuestion.mapel
+    && String(currentPassage?.teks || "").trim()
+    && Number(currentPassage?.total_soal || 1) <= 1
+    && Number(matchPassage?.total_soal || 1) <= 1;
+}
+
+function syncMergeSimilarityButton(currentData, matchData) {
+  const canMerge = canMergeSimilarityQuestions(currentData, matchData);
+  mergeSimilarityQuestionsButton.hidden = !canMerge;
+  mergeSimilarityQuestionsButton.disabled = !canMerge;
+  mergeSimilarityQuestionsButton.title = canMerge
+    ? "Bacaan soal aktif akan dipakai untuk kedua soal."
+    : "Gabungkan tersedia untuk PPU, PBM, atau PM dengan dua soal bacaan tunggal.";
+}
+
+async function mergeSimilarityQuestions() {
+  const [currentRunId, matchRunId] = activeComparisonRunIds;
+  const [currentData, matchData] = activeComparisonData;
+  if (!canMergeSimilarityQuestions(currentData, matchData)) return;
+  const initialLabel = mergeSimilarityQuestionsButton.textContent;
+  mergeSimilarityQuestionsButton.disabled = true;
+  mergeSimilarityQuestionsButton.textContent = "Menggabungkan...";
+  similarityCompareStatus.textContent = "Menggabungkan kedua pertanyaan ke satu bacaan...";
+  similarityCompareStatus.dataset.state = "loading";
+  try {
+    const response = await fetch(`/saved/${currentRunId}/merge-passage`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({other_run_id: matchRunId}),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Gabungkan soal gagal.");
+    await loadSavedList();
+    closeSimilarityComparison();
+    await loadSavedPreview(currentRunId);
+    setStatus("Soal digabungkan");
+  } catch (error) {
+    similarityCompareStatus.textContent = error.message;
+    similarityCompareStatus.dataset.state = "error";
+  } finally {
+    mergeSimilarityQuestionsButton.disabled = false;
+    mergeSimilarityQuestionsButton.textContent = initialLabel;
+  }
+}
+
+async function generateComparisonImages(runId, button) {
+  if (!runId) return;
+  const label = button.textContent;
+  button.disabled = true;
+  button.textContent = "Generating...";
+  similarityCompareStatus.textContent = `Membuat ulang gambar ${runId}...`;
+  similarityCompareStatus.dataset.state = "loading";
+  try {
+    const response = await fetch(`/saved/${runId}/images`, {method: "POST"});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Generate gambar gagal.");
+    await refreshSimilarityComparison();
+  } catch (error) {
+    similarityCompareStatus.textContent = error.message;
+    similarityCompareStatus.dataset.state = "error";
+  } finally {
+    button.disabled = false;
+    button.textContent = label;
+  }
+}
+
+async function openSimilarityComparison(currentRunId, matchRunId, trigger = document.activeElement) {
+  if (!currentRunId || !matchRunId || currentRunId === matchRunId) return;
+  similarityCompareReturnTarget = trigger instanceof HTMLElement ? trigger : null;
+  activeComparisonRunIds = [currentRunId, matchRunId];
+  activeComparisonData = [];
+  mergeSimilarityQuestionsButton.hidden = true;
+  similarityCompareCurrent.innerHTML = '<div class="similarity-compare-skeleton" aria-hidden="true"></div>';
+  similarityCompareMatch.innerHTML = '<div class="similarity-compare-skeleton" aria-hidden="true"></div>';
+  document.body.dataset.similarityCompareOpen = "true";
+  similarityCompareDialog.showModal();
+  closeSimilarityCompareButton.focus({preventScroll: true});
+  await refreshSimilarityComparison();
+}
+
+function closeSimilarityComparison() {
+  if (similarityCompareDialog.open) similarityCompareDialog.close();
+}
+
 function openPreviewPanel(runId) {
   if (!savedLayout?.classList.contains("has-preview")) {
     previewOpenScrollY = window.scrollY;
+    previewReturnTarget = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   }
   window.scrollTo(0, 0);
   savedLayout?.classList.add("has-preview");
   savedPreview?.setAttribute("aria-hidden", "false");
+  if (savedPreview) savedPreview.inert = false;
   document.body.dataset.savedPreviewOpen = "true";
   savedList.querySelectorAll(".saved-item").forEach((card) => {
     card.dataset.active = card.dataset.runId === runId ? "true" : "false";
   });
+  closePreviewButton?.focus({preventScroll: true});
 }
 
 function closePreviewPanel() {
@@ -300,8 +536,13 @@ function closePreviewPanel() {
   setPreviewActionState(null);
   savedLayout?.classList.remove("has-preview");
   savedPreview?.setAttribute("aria-hidden", "true");
+  if (savedPreview) savedPreview.inert = true;
   document.body.dataset.savedPreviewOpen = "false";
-  requestAnimationFrame(() => window.scrollTo(0, previewOpenScrollY));
+  requestAnimationFrame(() => {
+    window.scrollTo(0, previewOpenScrollY);
+    previewReturnTarget?.focus({preventScroll: true});
+    previewReturnTarget = null;
+  });
   savedList.querySelectorAll(".saved-item").forEach((card) => {
     card.dataset.active = "false";
   });
@@ -684,6 +925,7 @@ async function loadConfig() {
   if (!response.ok) throw new Error(config.error || "Gagal memuat config.");
   topicsBySubtest = config.topics || {};
   subtestShortLabels = config.subtest_codes || {};
+  subtestCodes = config.subtest_codes || {};
   subtests = Object.keys(topicsBySubtest);
   activeSubtest = subtestFromPath();
   renderSubtestTabs();
@@ -802,12 +1044,11 @@ function renderSavedList(allItems = filteredSavedItems()) {
         <span data-run-id></span>
       </div>
       <div class="saved-card-actions">
+        <button class="mini-button saved-card-preview" type="button" data-open-preview>Buka preview</button>
+        <button class="mini-button similarity-compare-trigger" type="button" data-compare-similarity hidden>Cek kedua soal</button>
         <button class="mini-button" type="button" data-check-similarity data-check-similarity-run-id="${item.run_id}">Cek Similarity</button>
       </div>
     `;
-    row.tabIndex = 0;
-    row.setAttribute("role", "button");
-    row.setAttribute("aria-label", `Preview ${item.mapel || item.run_id}`);
     row.querySelector("[data-subtest]").textContent = subtestDisplayName(item.mapel);
     row.querySelector("[data-subtest]").title = item.mapel || "";
     row.querySelector("[data-status-pill]").textContent = statusLabel(item.status);
@@ -834,17 +1075,17 @@ function renderSavedList(allItems = filteredSavedItems()) {
       ? "ready"
       : (item.status || "saved") === "approved" && Number(item.tryout_warning_count || 0) > 0 ? "warning" : "pending";
     applySimilarityBadge(row.querySelector("[data-similarity]"), item.dedup);
+    const compareButton = row.querySelector("[data-compare-similarity]");
+    syncCompareButton(compareButton, item.run_id, item.dedup);
     row.querySelector("[data-run-id]").textContent = item.run_id;
     row.querySelector("[data-check-similarity]").addEventListener("click", (event) => {
       event.stopPropagation();
       checkSimilarityForSavedRun(item.run_id);
     });
     row.append(renderClassificationControls(item));
-    row.addEventListener("click", () => loadSavedPreview(item.run_id));
-    row.addEventListener("keydown", (event) => {
-      if (event.key !== "Enter" && event.key !== " ") return;
-      event.preventDefault();
-      loadSavedPreview(item.run_id);
+    row.querySelector("[data-open-preview]").addEventListener("click", () => loadSavedPreview(item.run_id));
+    compareButton.addEventListener("click", () => {
+      openSimilarityComparison(compareButton.dataset.currentRunId, compareButton.dataset.matchRunId, compareButton);
     });
     savedList.append(row);
   });
@@ -1279,6 +1520,18 @@ deletePreviewButton.addEventListener("click", () => {
   if (activePreviewRunId) deleteSavedRun(activePreviewRunId);
 });
 closePreviewButton.addEventListener("click", closePreviewPanel);
+closeSimilarityCompareButton.addEventListener("click", closeSimilarityComparison);
+mergeSimilarityQuestionsButton.addEventListener("click", mergeSimilarityQuestions);
+similarityCompareDialog.addEventListener("click", (event) => {
+  if (event.target === similarityCompareDialog) closeSimilarityComparison();
+});
+similarityCompareDialog.addEventListener("close", () => {
+  document.body.dataset.similarityCompareOpen = "false";
+  activeComparisonRunIds = [];
+  activeComparisonData = [];
+  similarityCompareReturnTarget?.focus({preventScroll: true});
+  similarityCompareReturnTarget = null;
+});
 
 savedSearch.addEventListener("input", () => {
   resetSavedPage();

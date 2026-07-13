@@ -237,7 +237,7 @@ class ContentGeneratorTest(unittest.TestCase):
             self.assertEqual(result["similarity"], 0.0)
             self.assertIsNone(result["matched_run_id"])
 
-    def test_check_duplicate_passage_group_ignores_question_text(self):
+    def test_check_duplicate_same_question_remains_duplicate_when_passage_changes(self):
         with tempfile.TemporaryDirectory() as tmp:
             data_root = Path(tmp)
             generator = load_generator(data_root)
@@ -263,10 +263,11 @@ class ContentGeneratorTest(unittest.TestCase):
 
             result = generator.check_duplicate(current_question)
 
-            self.assertFalse(result["is_duplicate"])
-            self.assertLess(result["similarity"], result["threshold"])
+            self.assertTrue(result["is_duplicate"])
+            self.assertEqual(result["question_similarity"], 1.0)
+            self.assertLess(result["passage_similarity"], 1.0)
 
-    def test_check_duplicate_passage_group_matches_passage_text(self):
+    def test_check_duplicate_same_passage_with_different_question_is_not_duplicate(self):
         with tempfile.TemporaryDirectory() as tmp:
             data_root = Path(tmp)
             generator = load_generator(data_root)
@@ -296,9 +297,12 @@ class ContentGeneratorTest(unittest.TestCase):
 
             result = generator.check_duplicate(current_question)
 
-            self.assertTrue(result["is_duplicate"])
+            self.assertFalse(result["is_duplicate"])
             self.assertEqual(result["matched_run_id"], run_id)
-            self.assertEqual(result["similarity"], 1.0)
+            self.assertTrue(result["same_passage"])
+            self.assertEqual(result["passage_similarity"], 1.0)
+            self.assertLess(result["question_similarity"], result["threshold"])
+            self.assertEqual(result["algorithm"], "weighted-question-v2")
 
     def test_resolve_render_questions_reads_saved_passage_group(self):
         with tempfile.TemporaryDirectory() as tmp:

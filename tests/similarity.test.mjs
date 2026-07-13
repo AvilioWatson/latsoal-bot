@@ -55,7 +55,7 @@ async function saveQuestion(runId, question) {
   await writeIndex([{run_id: runId, status: "saved", path: `saved/${runId}`}]);
 }
 
-test("passage group similarity ignores question text", async () => {
+test("same question remains duplicate when attached passage changes", async () => {
   const runId = "20990101-020101";
   const savedQuestion = passageQuestion(1, "PM-001");
   const currentQuestion = structuredClone(savedQuestion);
@@ -66,11 +66,12 @@ test("passage group similarity ignores question text", async () => {
 
   const {dedup} = await checkDuplicateAgainstSaved(currentQuestion);
 
-  assert.equal(dedup.is_duplicate, false);
-  assert.ok(dedup.similarity < dedup.threshold);
+  assert.equal(dedup.is_duplicate, true);
+  assert.equal(dedup.question_similarity, 1);
+  assert.ok(dedup.passage_similarity < 1);
 });
 
-test("passage group similarity matches passage text", async () => {
+test("same passage with a different question is not a duplicate", async () => {
   const runId = "20990101-020102";
   const savedQuestion = passageQuestion(1, "PM-003");
   const currentQuestion = passageQuestion(2, "PM-003");
@@ -86,7 +87,25 @@ test("passage group similarity matches passage text", async () => {
 
   const {dedup} = await checkDuplicateAgainstSaved(currentQuestion);
 
-  assert.equal(dedup.is_duplicate, true);
+  assert.equal(dedup.is_duplicate, false);
   assert.equal(dedup.matched_run_id, runId);
-  assert.equal(dedup.similarity, 1);
+  assert.equal(dedup.same_passage, true);
+  assert.equal(dedup.passage_similarity, 1);
+  assert.ok(dedup.question_similarity < dedup.threshold);
+  assert.equal(dedup.algorithm, "weighted-question-v2");
+});
+
+test("same question remains a duplicate even when passage metadata differs", async () => {
+  const runId = "20990101-020103";
+  const savedQuestion = passageQuestion(1, "PM-004");
+  const currentQuestion = structuredClone(savedQuestion);
+  currentQuestion.bacaan.id = "PM-NEW";
+  currentQuestion.bacaan.judul = "Judul bacaan diperbarui";
+  await saveQuestion(runId, savedQuestion);
+
+  const {dedup} = await checkDuplicateAgainstSaved(currentQuestion);
+
+  assert.equal(dedup.is_duplicate, true);
+  assert.equal(dedup.question_similarity, 1);
+  assert.ok(dedup.passage_similarity < 1);
 });

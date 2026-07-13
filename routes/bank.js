@@ -24,6 +24,11 @@ const DEFAULT_PYTHON = process.env.PYTHON || "python";
 const IMAGE_RENDER_TIMEOUT_MS = Number(process.env.IMAGE_RENDER_TIMEOUT_MS || 120000);
 const EXPLANATION_REVIEW_TIMEOUT_MS = Number(process.env.EXPLANATION_REVIEW_TIMEOUT_MS || 120000);
 const explanationReviewJobs = new Map();
+const MERGEABLE_PASSAGE_SUBTESTS = new Set([
+  "Pengetahuan dan Pemahaman Umum",
+  "Pemahaman Bacaan dan Menulis",
+  "Penalaran Matematika",
+]);
 
 function retargetMetadataFiles(metadata, targetDir) {
   const artifactName = (file) => String(file || "").split(/[\\/]/).pop();
@@ -457,6 +462,100 @@ async function recalculateSavedSimilarity(runId) {
     dedup,
     threshold: DEDUP_THRESHOLD,
     match: publicSavedMatchPayload(match),
+  };
+}
+
+function mergePassageSource(question = {}) {
+  const passage = question?.bacaan && typeof question.bacaan === "object" ? question.bacaan : null;
+  if (!passage || !String(passage.teks || "").trim()) return null;
+  const total = Number(passage.total_soal || 1);
+  if (total > 1) return null;
+  return passage;
+}
+
+async function writeMergedPassageRun(resolved, metadata) {
+  const runId = metadata.run_id;
+  const now = new Date().toISOString();
+  metadata.question = normalizeQuestionForStorage(metadata.question);
+  metadata.caption = normalizeCaptionForStorage(metadata.question, metadata.caption || {});
+  metadata.review_status = "needs_review";
+  metadata.dedup = null;
+  delete metadata.explanation_review;
+  metadata.edited_at = now;
+  await writeJsonValidated(path.join(resolved.dir, "metadata.json"), metadata, "metadata");
+  await writeJsonValidated(path.join(resolved.dir, "soal.json"), metadata.question, "question");
+  const hashtags = Array.isArray(metadata.caption?.hashtag) ? metadata.caption.hashtag.join(" ") : "";
+  await writeFile(path.join(resolved.dir, "caption.txt"), `${metadata.caption?.caption || ""}\n\n${hashtags}\n`, "utf-8");
+  await deleteSavedImages(runId);
+  const stored = await readJsonValidated(path.join(resolved.dir, "metadata.json"), "metadata");
+  await updateEntry(runId, createEntryFromMetadata(runId, stored, {
+    ...(resolved.entry || {}),
+    path: `saved/${resolved.artifactPath}`,
+    status: "saved",
+    status_updated_at: now,
+    approved_at: null,
+    rejected_at: null,
+  }));
+  explanationReviewJobs.delete(runId);
+  return stored;
+}
+
+async function mergeSavedPassageQuestions(runId, payload) {
+  const otherRunId = String(payload?.other_run_id || "");
+  if (!isValidRunId(runId) || !isValidRunId(otherRunId) || runId === otherRunId) {
+    throw requestError(400, "Dua run ID yang berbeda dan valid diperlukan untuk menggabungkan soal.");
+  }
+  const [active, match] = await Promise.all([resolveSavedRun(runId), resolveSavedRun(otherRunId)]);
+  if (!active || !match) throw requestError(404, "Salah satu saved run tidak ditemukan.");
+
+  const [activeMetadata, matchMetadata] = await Promise.all([
+    readJsonValidated(path.join(active.dir, "metadata.json"), "metadata"),
+    readJsonValidated(path.join(match.dir, "metadata.json"), "metadata"),
+  ]);
+  const activeQuestion = activeMetadata.question || {};
+  const matchQuestion = matchMetadata.question || {};
+  if (!MERGEABLE_PASSAGE_SUBTESTS.has(activeQuestion.mapel) || activeQuestion.mapel !== matchQuestion.mapel) {
+    throw requestError(409, "Gabungkan soal hanya tersedia untuk pasangan PPU, PBM, atau PM pada subtes yang sama.");
+  }
+  const sourcePassage = mergePassageSource(activeQuestion);
+  if (!sourcePassage) {
+    throw requestError(409, "Soal aktif harus memiliki satu bacaan tunggal sebelum dapat digabungkan.");
+  }
+  const matchPassage = matchQuestion?.bacaan && typeof matchQuestion.bacaan === "object" ? matchQuestion.bacaan : null;
+  if (Number(matchPassage?.total_soal || 1) > 1) {
+    throw requestError(409, "Soal pembanding sudah menjadi bagian dari paket bacaan dan tidak dapat digabungkan ulang.");
+  }
+
+  const sharedPassage = structuredClone(sourcePassage);
+  sharedPassage.id = String(sharedPassage.id || `MERGED-${runId}`).trim();
+  sharedPassage.total_soal = 2;
+  activeMetadata.question = {
+    ...activeQuestion,
+    bacaan: {...sharedPassage, nomor_soal: 1},
+  };
+  matchMetadata.question = {
+    ...matchQuestion,
+    bacaan: {...sharedPassage, nomor_soal: 2},
+  };
+  const mergedAt = new Date().toISOString();
+  for (const metadata of [activeMetadata, matchMetadata]) {
+    metadata.passage_merge = {
+      merged_at: mergedAt,
+      source_run_id: runId,
+      run_ids: [runId, otherRunId],
+      total_soal: 2,
+    };
+  }
+
+  const [storedActive, storedMatch] = await Promise.all([
+    writeMergedPassageRun(active, activeMetadata),
+    writeMergedPassageRun(match, matchMetadata),
+  ]);
+  return {
+    ok: true,
+    merged_run_ids: [runId, otherRunId],
+    passage: sharedPassage,
+    questions: [storedActive.question, storedMatch.question],
   };
 }
 
@@ -981,6 +1080,16 @@ export async function handle(request, response, route) {
   if (request.method === "POST" && savedRoute?.length === 3 && savedRoute[2] === "similarity") {
     try {
       sendJson(response, await recalculateSavedSimilarity(savedRoute[1]));
+    } catch (error) {
+      sendError(response, errorStatus(error), error.message);
+    }
+    return true;
+  }
+
+  if (request.method === "POST" && savedRoute?.length === 3 && savedRoute[2] === "merge-passage") {
+    try {
+      const payload = await readJsonBody(request);
+      sendJson(response, await mergeSavedPassageQuestions(savedRoute[1], payload));
     } catch (error) {
       sendError(response, errorStatus(error), error.message);
     }

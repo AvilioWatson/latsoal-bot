@@ -218,6 +218,18 @@ Menghapus entry index dan folder `saved/<run-id>/`.
 
 Merender atau merender ulang gambar soal dan pembahasan untuk item saved.
 
+### `POST /saved/<run-id>/merge-passage`
+
+Menggabungkan soal aktif dengan `other_run_id` menjadi satu paket bacaan. Hanya tersedia untuk PPU, PBM, dan PM, dengan dua soal bacaan tunggal pada subtes yang sama. Bacaan dari `run-id` aktif dipakai sebagai bacaan bersama, nomor soal dinormalisasi menjadi 1 dan 2, status review kembali ke `needs_review`, dan gambar lama dihapus agar dibuat ulang.
+
+Request:
+
+```json
+{"other_run_id":"20260701-120000"}
+```
+
+Endpoint ini menolak paket bacaan yang sudah berisi lebih dari satu soal.
+
 ## Export
 
 ### `POST /export`

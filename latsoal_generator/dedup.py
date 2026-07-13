@@ -25,21 +25,41 @@ def jaccard_similarity(left, right):
     return len(left_terms & right_terms) / len(left_terms | right_terms)
 
 
-def _question_text(question):
-    passage = question.get("bacaan")
-    passage_key = ""
-    if isinstance(passage, dict):
-        passage_key = " ".join([
-            str(passage.get("id", "")),
-            str(passage.get("nomor_soal", "")),
-        ])
-    return " ".join([
-        question.get("mapel", ""),
-        question.get("topik", ""),
-        passage_key,
-        question.get("soal", ""),
-        " ".join(str(value) for value in question.get("pilihan", {}).values()),
-    ])
+def _normalize_comparable_text(text):
+    normalized = re.sub(r"[^a-z0-9]+", " ", str(text or "").casefold())
+    return " ".join(normalized.split())
+
+
+def _character_ngrams(text, size=3):
+    normalized = _normalize_comparable_text(text)
+    if not normalized:
+        return set()
+    if len(normalized) <= size:
+        return {normalized}
+    return {normalized[index:index + size] for index in range(len(normalized) - size + 1)}
+
+
+def _dice_similarity(left, right):
+    left_grams = _character_ngrams(left)
+    right_grams = _character_ngrams(right)
+    if not left_grams or not right_grams:
+        return 0.0
+    return (2 * len(left_grams & right_grams)) / (len(left_grams) + len(right_grams))
+
+
+def text_similarity(left, right):
+    normalized_left = _normalize_comparable_text(left)
+    normalized_right = _normalize_comparable_text(right)
+    if not normalized_left or not normalized_right:
+        return 0.0
+    if normalized_left == normalized_right:
+        return 1.0
+    return (jaccard_similarity(left, right) * 0.65) + (_dice_similarity(left, right) * 0.35)
+
+
+def _choices_text(question):
+    choices = question.get("pilihan") if isinstance(question.get("pilihan"), dict) else {}
+    return " ".join(f"{key} {choices[key]}" for key in sorted(choices))
 
 
 def _passage_text(question):
@@ -52,65 +72,61 @@ def _passage_text(question):
     ]).strip()
 
 
-def _fold_text(text):
-    return " ".join(str(text or "").casefold().split())
-
-
-def _is_passage_group(question):
-    passage = question.get("bacaan")
-    if not isinstance(passage, dict):
-        return False
-    try:
-        total = int(passage.get("total_soal") or 0)
-    except (TypeError, ValueError):
-        total = 0
-    return total > 1 or bool(question.get("question_group"))
-
-
-def _similarity_text(question):
-    passage_text = _passage_text(question)
-    if _is_passage_group(question) and passage_text:
-        return passage_text
-    return _question_text(question)
-
-
-def _passage_id(question):
-    passage = question.get("bacaan")
-    if isinstance(passage, dict):
-        return str(passage.get("id") or "").strip()
-    return ""
+def question_similarity(left, right):
+    stem = text_similarity(left.get("soal"), right.get("soal"))
+    left_choices = _choices_text(left)
+    right_choices = _choices_text(right)
+    choices = text_similarity(left_choices, right_choices) if left_choices and right_choices else 0.0
+    weighted = (stem * 0.78) + (choices * 0.22) if left_choices and right_choices else stem
+    similarity = max(weighted, stem) if stem >= 0.96 else weighted
+    passage = text_similarity(_passage_text(left), _passage_text(right))
+    return {
+        "similarity": similarity,
+        "stem": stem,
+        "choices": choices,
+        "passage": passage,
+        "same_passage": passage >= 0.98,
+    }
 
 
 def _same_passage_group(left, right):
-    left_text = _passage_text(left)
-    right_text = _passage_text(right)
-    if left_text and right_text and _fold_text(left_text) == _fold_text(right_text):
-        return True
-    return bool(_passage_id(left) and _passage_id(left) == _passage_id(right))
+    left_passage = _passage_text(left)
+    right_passage = _passage_text(right)
+    return bool(left_passage and right_passage and text_similarity(left_passage, right_passage) >= 0.98)
 
 
 def check_duplicate(question, exclude_run_id=None, additional_questions=None):
-    current_text = _similarity_text(question)
     best = {
         "is_duplicate": False,
         "similarity": 0.0,
         "matched_run_id": None,
         "matched_status": None,
         "matched_batch_index": None,
+        "question_similarity": 0.0,
+        "passage_similarity": 0.0,
+        "same_passage": False,
+        "similarity_breakdown": {"stem": 0.0, "choices": 0.0},
         "threshold": generator_config.DEDUP_THRESHOLD,
         "reason": "",
         "checked_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
-        "algorithm": "jaccard-v1",
+        "algorithm": "weighted-question-v2",
     }
 
     def compare(candidate_question, run_id=None, status=None, batch_index=None, skip_same_passage_group=False):
         nonlocal best
         if skip_same_passage_group and _same_passage_group(question, candidate_question or {}):
             return
-        similarity = jaccard_similarity(current_text, _similarity_text(candidate_question or {}))
-        if similarity > best["similarity"]:
+        scores = question_similarity(question, candidate_question or {})
+        if scores["similarity"] > best["similarity"]:
             best.update({
-                "similarity": round(similarity, 4),
+                "similarity": round(scores["similarity"], 4),
+                "question_similarity": round(scores["similarity"], 4),
+                "passage_similarity": round(scores["passage"], 4),
+                "same_passage": scores["same_passage"],
+                "similarity_breakdown": {
+                    "stem": round(scores["stem"], 4),
+                    "choices": round(scores["choices"], 4),
+                },
                 "matched_run_id": run_id,
                 "matched_status": status,
                 "matched_batch_index": batch_index,
@@ -153,5 +169,5 @@ def check_duplicate(question, exclude_run_id=None, additional_questions=None):
 
     if best["similarity"] >= generator_config.DEDUP_THRESHOLD:
         best["is_duplicate"] = True
-        best["reason"] = "Teks soal terlalu mirip dengan soal yang sudah disimpan."
+        best["reason"] = "Pertanyaan dan pilihan jawaban terlalu mirip dengan soal yang sudah disimpan."
     return best

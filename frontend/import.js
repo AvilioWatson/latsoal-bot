@@ -282,7 +282,7 @@ async function renderQueue(runIds) {
   for (let index = 0; index < queue.length; index += 1) {
     const runId = queue[index];
     elements.renderCount.textContent = `${index}/${queue.length}`;
-    elements.renderProgress.style.width = `${Math.round((index / queue.length) * 100)}%`;
+    elements.renderProgress.style.transform = `scaleX(${index / queue.length})`;
     elements.renderNote.textContent = `Merender ${runId}...`;
     try {
       await api(`/saved/${encodeURIComponent(runId)}/images`, {method: "POST"});
@@ -292,7 +292,7 @@ async function renderQueue(runIds) {
     localStorage.setItem(RENDER_QUEUE_KEY, JSON.stringify(queue.slice(index + 1)));
   }
   elements.renderCount.textContent = `${queue.length}/${queue.length}`;
-  elements.renderProgress.style.width = "100%";
+  elements.renderProgress.style.transform = "scaleX(1)";
   localStorage.removeItem(RENDER_QUEUE_KEY);
   if (failedRenderIds.length) {
     elements.renderNote.textContent = `${failedRenderIds.length} render gagal. Data soal tetap tersimpan.`;

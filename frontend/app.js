@@ -860,6 +860,11 @@ copyCaptionButton.addEventListener("click", async () => {
   await sharedCopyCaption({captionText, hashtagText, debugPanel, debugSource, debugText}, setStatus);
 });
 
+const topicManagement = document.querySelector("#topicManagement");
+if (topicManagement && window.matchMedia("(max-width: 640px)").matches) {
+  topicManagement.removeAttribute("open");
+}
+
 loadConfig().catch((error) => {
   setStatus("Error");
   captionText.textContent = error.message;

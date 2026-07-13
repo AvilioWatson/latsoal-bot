@@ -41,8 +41,11 @@
     <main class="saved-page">
       <section class="saved-browser">
         <div class="saved-toolbar">
-          <input id="savedSearch" type="search" placeholder="Cari subtes, topik, run id">
-          <select id="savedStatusFilter">
+          <label class="visually-hidden" for="savedSearch">Cari soal tersimpan</label>
+          <input id="savedSearch" type="search" placeholder="Cari subtes, topik, run id" aria-describedby="savedSearchHint">
+          <span class="visually-hidden" id="savedSearchHint">Cari berdasarkan subtes, topik, atau run ID.</span>
+          <label class="visually-hidden" for="savedStatusFilter">Filter status soal</label>
+          <select id="savedStatusFilter" aria-label="Filter status soal">
             <option value="all">Semua status</option>
             <option value="saved">Saved</option>
             <option value="approved">Approved, belum upload</option>
@@ -70,7 +73,7 @@
             </nav>
           </section>
 
-          <section class="saved-preview">
+          <section class="saved-preview" aria-hidden="true" inert>
             <div class="review-header">
               <div>
                 <p class="eyebrow">Preview</p>
@@ -154,6 +157,27 @@
         </div>
       </section>
     </main>
+
+    <dialog id="similarityCompareDialog" class="similarity-compare-dialog" aria-labelledby="similarityCompareTitle">
+      <div class="similarity-compare-shell">
+        <header class="similarity-compare-header">
+          <div>
+            <p class="eyebrow">Similarity Check</p>
+            <h2 id="similarityCompareTitle">Bandingkan kedua soal</h2>
+            <p id="similarityCompareSummary" class="run-note">Membuka dua preview dalam satu workspace.</p>
+          </div>
+          <div class="similarity-compare-header-actions">
+            <button id="mergeSimilarityQuestionsButton" class="primary" type="button" hidden>Gabungkan soal</button>
+            <button id="closeSimilarityCompareButton" class="preview-close-button" type="button" aria-label="Tutup perbandingan">&times;</button>
+          </div>
+        </header>
+        <div id="similarityCompareStatus" class="similarity-compare-status" role="status" aria-live="polite"></div>
+        <div class="similarity-compare-grid">
+          <article id="similarityCompareCurrent" class="similarity-compare-pane" aria-label="Soal yang sedang dicek"></article>
+          <article id="similarityCompareMatch" class="similarity-compare-pane" aria-label="Soal pembanding"></article>
+        </div>
+      </div>
+    </dialog>
 
     <footer class="site-footer">
       <span>UTBK Content Desk</span> &bull; &copy; 2026

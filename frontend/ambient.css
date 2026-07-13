@@ -1,8 +1,8 @@
 :root {
-  --ambient-page: var(--bg, var(--paper, oklch(96.5% 0.018 86)));
-  --ambient-stroke: var(--ambient-line, var(--line, oklch(65% 0.065 75 / 0.2)));
-  --ambient-accent: var(--gold, var(--accent, oklch(63% 0.11 72)));
-  --ambient-symbol: oklch(39% 0.045 70 / 0.5);
+  --ambient-page: var(--bg, #fff9f1);
+  --ambient-stroke: var(--ambient-line, color-mix(in srgb, #6947d8 20%, transparent));
+  --ambient-accent: var(--gold, #6947d8);
+  --ambient-symbol: oklch(29% 0.05 291 / 0.5);
 }
 
 body {
@@ -20,8 +20,8 @@ body::after {
 
 body::before {
   background:
-    radial-gradient(circle at 24% 30%, oklch(82% 0.08 75 / 0.28), transparent 27%),
-    radial-gradient(circle at 78% 64%, oklch(86% 0.055 105 / 0.3), transparent 30%),
+    radial-gradient(circle at 24% 30%, color-mix(in srgb, #6947d8 15%, transparent), transparent 27%),
+    radial-gradient(circle at 78% 64%, color-mix(in srgb, #c84c5c 10%, transparent), transparent 30%),
     var(--ambient-page);
   animation: ambient-shift 16s cubic-bezier(.16, 1, .3, 1) infinite alternate;
 }
@@ -29,10 +29,10 @@ body::before {
 body::after {
   opacity: 0.5;
   background-image:
-    radial-gradient(circle at 14% 24%, oklch(63% 0.08 78 / 0.24) 0 1px, transparent 2px),
-    radial-gradient(circle at 72% 18%, oklch(56% 0.06 96 / 0.2) 0 1px, transparent 2px),
-    radial-gradient(circle at 84% 72%, oklch(63% 0.08 78 / 0.18) 0 1px, transparent 2px),
-    radial-gradient(circle at 28% 78%, oklch(48% 0.04 72 / 0.16) 0 1px, transparent 2px);
+    radial-gradient(circle at 14% 24%, color-mix(in srgb, #6947d8 22%, transparent) 0 1px, transparent 2px),
+    radial-gradient(circle at 72% 18%, color-mix(in srgb, #c84c5c 18%, transparent) 0 1px, transparent 2px),
+    radial-gradient(circle at 84% 72%, color-mix(in srgb, #216c60 16%, transparent) 0 1px, transparent 2px),
+    radial-gradient(circle at 28% 78%, color-mix(in srgb, #1e1833 14%, transparent) 0 1px, transparent 2px);
   background-size: 210px 190px, 260px 230px, 310px 280px, 370px 340px;
   -webkit-mask-image: radial-gradient(circle at center, black, transparent 76%);
   mask-image: radial-gradient(circle at center, black, transparent 76%);
@@ -127,7 +127,7 @@ body > :not(.ambient-motion-field) {
 .ambient-glyph {
   z-index: 3;
   color: var(--ambient-symbol);
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: var(--font-mono, Consolas, monospace);
   font-size: clamp(26px, 3vw, 48px);
   line-height: 1;
   opacity: 0.52;
